@@ -4,12 +4,15 @@
     <div class="ide-header d-flex align-center px-4 py-2">
       <v-btn icon="mdi-arrow-left" variant="text" size="small" @click="$router.back()" />
       <div class="text-h6 font-weight-bold ml-2">{{ isEdit ? (skill?.display_name || 'Edit Skill') : 'New Skill' }}</div>
-      <v-chip v-if="skill?.is_system" color="primary" size="x-small" class="ml-2">System</v-chip>
+      <v-chip v-if="isReadOnly" color="info" size="x-small" class="ml-2" variant="flat">
+        <v-icon start size="x-small">mdi-eye</v-icon> Preview
+      </v-chip>
+      <v-chip v-else-if="skill?.is_system" color="primary" size="x-small" class="ml-2">System</v-chip>
       <v-spacer />
       <v-btn v-if="!isEdit" color="primary" size="small" variant="flat" :loading="saving" @click="handleCreate" class="mr-2">
         <v-icon start>mdi-content-save</v-icon> Create
       </v-btn>
-      <v-btn v-if="isEdit" color="success" size="small" variant="flat" :loading="fileSaving" @click="saveCurrentFile" :disabled="!currentFile">
+      <v-btn v-if="isEdit && !isReadOnly" color="success" size="small" variant="flat" :loading="fileSaving" @click="saveCurrentFile" :disabled="!currentFile">
         <v-icon start>mdi-content-save-outline</v-icon> Save File
         <span v-if="fileModified" class="ml-1">*</span>
       </v-btn>
@@ -34,8 +37,8 @@
           <div class="d-flex align-center px-2 py-1 tree-header">
             <span class="text-caption text-uppercase font-weight-bold text-grey">Files</span>
             <v-spacer />
-            <v-btn icon="mdi-file-plus-outline" size="x-small" variant="text" @click="showNewFileDialog" title="New File" :disabled="skill?.is_system" />
-            <v-btn icon="mdi-folder-plus-outline" size="x-small" variant="text" @click="showNewFolderDialog" title="New Folder" :disabled="skill?.is_system" />
+            <v-btn v-if="!isReadOnly" icon="mdi-file-plus-outline" size="x-small" variant="text" @click="showNewFileDialog" title="New File" />
+            <v-btn v-if="!isReadOnly" icon="mdi-folder-plus-outline" size="x-small" variant="text" @click="showNewFolderDialog" title="New Folder" />
             <v-btn icon="mdi-refresh" size="x-small" variant="text" @click="loadFiles" title="Refresh" />
           </div>
           <div class="tree-content" style="overflow-y: auto; height: calc(100% - 36px)">
@@ -45,6 +48,7 @@
               :node="node"
               :selected-path="currentFile?.path || ''"
               :depth="0"
+              :read-only="isReadOnly"
               @select="openFile"
               @delete-file="confirmDeleteFile"
             />
@@ -76,7 +80,7 @@
         <div v-else class="d-flex align-center justify-center" style="height: 100%">
           <div class="text-center text-grey">
             <v-icon size="64" class="mb-4">mdi-code-braces</v-icon>
-            <div class="text-h6">{{ isEdit ? 'Select a file to edit' : 'Fill in skill details and click Create' }}</div>
+            <div class="text-h6">{{ isEdit ? (isReadOnly ? 'Select a file to preview' : 'Select a file to edit') : 'Fill in skill details and click Create' }}</div>
             <div class="text-body-2 mt-1" v-if="isEdit">Choose a file from the tree on the left</div>
           </div>
         </div>
@@ -146,6 +150,7 @@ const TreeNode = defineComponent({
     node: { type: Object, required: true },
     selectedPath: { type: String, default: '' },
     depth: { type: Number, default: 0 },
+    readOnly: { type: Boolean, default: false },
   },
   emits: ['select', 'delete-file'],
   setup(props, { emit }) {
@@ -180,7 +185,7 @@ const TreeNode = defineComponent({
           style: { fontSize: '16px', marginRight: '6px' },
         }),
         h('span', { class: 'tree-name' }, props.node.name),
-        props.node.name !== 'manifest.json'
+        (!props.readOnly && props.node.name !== 'manifest.json')
           ? h('i', {
               class: 'mdi mdi-close tree-delete',
               onClick: (e) => { e.stopPropagation(); emit('delete-file', props.node.path) },
@@ -195,6 +200,7 @@ const TreeNode = defineComponent({
             node: child,
             selectedPath: props.selectedPath,
             depth: props.depth + 1,
+            readOnly: props.readOnly,
             onSelect: (n) => emit('select', n),
             'onDelete-file': (p) => emit('delete-file', p),
           }))
@@ -214,6 +220,7 @@ export default defineComponent({
     const router = useRouter()
 
     const isEdit = computed(() => !!route.params.id)
+    const isReadOnly = computed(() => !!skill.value?.is_system)
     const skill = ref(null)
     const saving = ref(false)
     const fileSaving = ref(false)
@@ -245,6 +252,19 @@ export default defineComponent({
       if (isEdit.value) {
         await loadSkill()
         await loadFiles()
+        // Restore last opened file
+        const savedPath = localStorage.getItem(`skill_open_file_${route.params.id}`)
+        if (savedPath) {
+          const findNode = (nodes, path) => {
+            for (const n of nodes) {
+              if (n.path === path && !n.is_dir) return n
+              if (n.children) { const found = findNode(n.children, path); if (found) return found }
+            }
+            return null
+          }
+          const node = findNode(fileTree.value, savedPath)
+          if (node) await openFile(node)
+        }
       }
     })
 
@@ -272,6 +292,7 @@ export default defineComponent({
         currentFile.value = data
         fileContent.value = data.content
         fileModified.value = false
+        localStorage.setItem(`skill_open_file_${route.params.id}`, node.path)
         await nextTick()
         initEditor(data.content, data.language)
       } catch (e) { console.error('Failed to open file:', e) }
@@ -345,34 +366,36 @@ export default defineComponent({
       destroyEditor()
       if (!editorContainer.value) return
 
+      const readOnly = isReadOnly.value
+
       const extensions = [
         lineNumbers(),
         highlightActiveLineGutter(),
         highlightSpecialChars(),
-        history(),
+        ...(readOnly ? [] : [history()]),
         foldGutter(),
         drawSelection(),
-        dropCursor(),
+        ...(readOnly ? [] : [dropCursor()]),
         EditorState.allowMultipleSelections.of(true),
-        indentOnInput(),
+        ...(readOnly ? [] : [indentOnInput()]),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         bracketMatching(),
-        closeBrackets(),
-        autocompletion(),
+        ...(readOnly ? [] : [closeBrackets(), autocompletion()]),
         rectangularSelection(),
         crosshairCursor(),
         highlightActiveLine(),
         highlightSelectionMatches(),
         keymap.of([
-          ...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap,
-          ...historyKeymap, ...foldKeymap, ...completionKeymap,
-          indentWithTab,
-          { key: 'Mod-s', run: () => { saveCurrentFile(); return true } },
+          ...(readOnly ? [] : closeBracketsKeymap), ...defaultKeymap, ...searchKeymap,
+          ...(readOnly ? [] : historyKeymap), ...foldKeymap, ...(readOnly ? [] : completionKeymap),
+          ...(readOnly ? [] : [indentWithTab]),
+          ...(readOnly ? [] : [{ key: 'Mod-s', run: () => { saveCurrentFile(); return true } }]),
         ]),
         oneDark,
-        EditorView.updateListener.of((update) => { if (update.docChanged) fileModified.value = true }),
+        ...(readOnly ? [] : [EditorView.updateListener.of((update) => { if (update.docChanged) fileModified.value = true })]),
         EditorView.theme({ '&': { height: '100%' }, '.cm-scroller': { overflow: 'auto' } }),
         getLanguageExtension(language),
+        ...(readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
       ].flat()
 
       editorView = new EditorView({
@@ -408,7 +431,7 @@ export default defineComponent({
     }
 
     return {
-      isEdit, skill, saving, fileSaving, fileTree, currentFile, fileContent, fileModified,
+      isEdit, isReadOnly, skill, saving, fileSaving, fileTree, currentFile, fileContent, fileModified,
       sidebarWidth, editorContainer, categories, createForm,
       newFileDialog, newFileIsDir, newFilePath, deleteFileDialog, deleteFilePath,
       loadFiles, openFile, saveCurrentFile, showNewFileDialog, showNewFolderDialog,

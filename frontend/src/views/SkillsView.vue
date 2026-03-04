@@ -25,6 +25,7 @@
             <v-chip size="x-small" variant="tonal">{{ item.category }}</v-chip>
           </template>
           <template #item.actions="{ item }">
+            <v-btn v-if="item.is_system" icon="mdi-eye" size="small" variant="text" @click="$router.push(`/skills/${item.id}`)" title="Preview" />
             <v-btn v-if="!item.is_system" icon="mdi-pencil" size="small" variant="text" @click="$router.push(`/skills/${item.id}`)" />
             <v-btn v-if="!item.is_shared && !item.is_system" icon="mdi-share" size="small" variant="text" color="success" @click="share(item)" title="Share" />
             <v-btn v-if="item.is_shared && !item.is_system" icon="mdi-share-off" size="small" variant="text" color="grey" @click="unshare(item)" title="Unshare" />
