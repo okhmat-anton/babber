@@ -246,7 +246,10 @@
 import { ref, computed, watch, nextTick, onMounted, reactive } from 'vue'
 import { useChatStore } from '../stores/chat'
 import { marked } from 'marked'
+import { markedHighlight } from 'marked-highlight'
 import DOMPurify from 'dompurify'
+import hljs from 'highlight.js'
+import 'highlight.js/styles/github-dark.css'
 
 const chatStore = useChatStore()
 
@@ -297,7 +300,17 @@ const resolvedModelIds = computed(() => {
   return []
 })
 
-// Configure marked
+// Configure marked with syntax highlighting
+marked.use(markedHighlight({
+  langPrefix: 'hljs language-',
+  highlight(code, lang) {
+    if (lang && hljs.getLanguage(lang)) {
+      try { return hljs.highlight(code, { language: lang }).value } catch {}
+    }
+    try { return hljs.highlightAuto(code).value } catch {}
+    return code
+  },
+}))
 marked.setOptions({ breaks: true, gfm: true })
 
 function renderMarkdown(content) {
@@ -507,22 +520,28 @@ watch(() => chatStore.panelOpen, (open) => {
   word-break: break-word;
 }
 .message-content :deep(pre) {
-  background: rgba(0, 0, 0, 0.1);
+  background: #0d1117;
   border-radius: 8px;
-  padding: 10px;
+  padding: 12px;
   overflow-x: auto;
   margin: 8px 0;
   font-size: 0.85em;
+  border: 1px solid #30363d;
 }
 .message-content :deep(code) {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
   font-size: 0.9em;
-  background: rgba(0, 0, 0, 0.06);
-  padding: 1px 4px;
-  border-radius: 3px;
+  background: rgba(110, 118, 129, 0.2);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #e6edf3;
 }
 .message-content :deep(pre code) {
   background: none;
   padding: 0;
+  border-radius: 0;
+  color: #e6edf3;
+  font-size: 1em;
 }
 .message-content :deep(p) {
   margin-bottom: 4px;
