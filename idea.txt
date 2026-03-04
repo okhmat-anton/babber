@@ -1,0 +1,3 @@
+AI Agents System that allows to build agents by using other agents
+To start you have to install it in Docker and connect to VsCode by using AGENTS.md
+So you can use VsCode to build other AGENTS
