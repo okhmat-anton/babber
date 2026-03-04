@@ -510,7 +510,7 @@ watch(() => chatStore.panelOpen, (open) => {
   border-bottom-right-radius: 4px;
 }
 .message-bubble.assistant {
-  background: rgba(var(--v-theme-surface-variant), 0.6);
+  background: rgba(var(--v-theme-secondary), 0.2);
   margin-right: auto;
   border-bottom-left-radius: 4px;
 }
