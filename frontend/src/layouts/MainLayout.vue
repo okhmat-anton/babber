@@ -139,7 +139,7 @@ const navItems = [
   { path: '/', icon: 'mdi-view-dashboard', title: 'Dashboard' },
   { path: '/agents', icon: 'mdi-robot', title: 'Agents' },
   { path: '/tasks', icon: 'mdi-clipboard-list', title: 'Tasks' },
-  { path: '/skills', icon: 'mdi-puzzle', title: 'Skills (Python or JS Code)' },
+  { path: '/skills', icon: 'mdi-puzzle', title: 'Skills (Codes)' },
   { path: '/settings', icon: 'mdi-cog', title: 'Settings' },
   { path: '/ollama', icon: 'mdi-creation', title: 'Ollama' },
   { path: '/files', icon: 'mdi-folder-open', title: 'Files' },

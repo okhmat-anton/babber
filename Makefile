@@ -20,34 +20,48 @@ install:
 	@echo "3. Checking Ollama..."
 	@if which ollama > /dev/null 2>&1; then \
 		echo "   Ollama OK"; \
-		echo ""; \
-		echo "4. Checking if Ollama is running..."; \
-		if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then \
-			echo "   Ollama already running"; \
+	else \
+		echo "   Ollama not found. Installing..."; \
+		if [ "$$(uname)" = "Darwin" ]; then \
+			echo "   Downloading Ollama for macOS..."; \
+			curl -fsSL https://ollama.com/install.sh | sh; \
+		elif [ "$$(uname)" = "Linux" ]; then \
+			echo "   Downloading Ollama for Linux..."; \
+			curl -fsSL https://ollama.com/install.sh | sh; \
 		else \
-			echo "   Starting Ollama..."; \
-			ollama serve > /dev/null 2>&1 & sleep 3 || true; \
+			echo "   Auto-install not supported on this OS."; \
+			echo "   Please install manually: https://ollama.com/download"; \
+			exit 1; \
 		fi; \
-		echo ""; \
-		echo "5. Checking models..."; \
-		if ollama list 2>/dev/null | grep -q "qwen2.5-coder:14b"; then \
-			echo "   qwen2.5-coder:14b already installed"; \
+		if ! which ollama > /dev/null 2>&1; then \
+			echo "   Ollama installation failed. Install manually: https://ollama.com/download"; \
+			exit 1; \
+		fi; \
+		echo "   Ollama installed successfully"; \
+	fi
+	@echo ""
+	@echo "4. Checking if Ollama is running..."
+	@if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then \
+		echo "   Ollama already running"; \
+	else \
+		echo "   Starting Ollama..."; \
+		ollama serve > /dev/null 2>&1 & sleep 3 || true; \
+	fi
+	@echo ""
+	@echo "5. Checking models..."
+	@if ollama list 2>/dev/null | grep -q "qwen2.5-coder:14b"; then \
+		echo "   qwen2.5-coder:14b already installed"; \
+	else \
+		read -p "   Download default model qwen2.5-coder:14b (~9GB RAM needed)? [Y/n] " ans; \
+		if [ "$$ans" != "n" ] && [ "$$ans" != "N" ]; then \
+			echo "   Downloading qwen2.5-coder:14b..."; \
+			ollama pull qwen2.5-coder:14b; \
 		else \
-			read -p "   Download default model qwen2.5-coder:14b (~9GB RAM needed)? [Y/n] " ans; \
-			if [ "$$ans" != "n" ] && [ "$$ans" != "N" ]; then \
-				echo "   Downloading qwen2.5-coder:14b..."; \
-				ollama pull qwen2.5-coder:14b; \
-			else \
-				read -p "   Enter model name to download (or 'skip'): " model; \
-				if [ "$$model" != "skip" ]; then \
-					ollama pull $$model; \
-				fi; \
+			read -p "   Enter model name to download (or 'skip'): " model; \
+			if [ "$$model" != "skip" ]; then \
+				ollama pull $$model; \
 			fi; \
 		fi; \
-	else \
-		echo "   Ollama not found."; \
-		echo "   Install later: https://ollama.com/download"; \
-		echo "   Skipping model setup."; \
 	fi
 	@echo ""
 	@echo "6. Building and starting services..."

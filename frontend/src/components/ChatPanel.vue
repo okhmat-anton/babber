@@ -2,9 +2,20 @@
   <div class="chat-panel">
     <!-- ═══ Header ═══ -->
     <div class="chat-header d-flex align-center px-3">
-      <v-icon size="small" color="primary" class="mr-2">mdi-chat</v-icon>
+      <v-btn
+        v-if="!sessionsExpanded && chatStore.currentSession"
+        icon
+        size="x-small"
+        variant="text"
+        @click="sessionsExpanded = true"
+        class="mr-1"
+      >
+        <v-icon size="18">mdi-arrow-left</v-icon>
+        <v-tooltip activator="parent" location="bottom">Back to chats</v-tooltip>
+      </v-btn>
+      <v-icon v-else size="small" color="primary" class="mr-2">mdi-chat</v-icon>
       <span class="text-subtitle-2 font-weight-medium flex-grow-1 text-truncate">
-        {{ chatStore.currentSession ? chatStore.currentSession.title : 'Chat' }}
+        {{ sessionsExpanded ? 'Chats' : (chatStore.currentSession ? chatStore.currentSession.title : 'New Chat') }}
       </span>
       <v-btn icon size="x-small" variant="text" @click="newChat">
         <v-icon size="18">mdi-plus</v-icon>
@@ -15,21 +26,15 @@
       </v-btn>
     </div>
 
-    <!-- ═══ Sessions List (top, collapsible like VS Code sections) ═══ -->
-    <div class="sessions-section" :class="{ collapsed: !sessionsExpanded }">
-      <div class="section-header d-flex align-center px-3" @click="sessionsExpanded = !sessionsExpanded">
-        <v-icon size="14" class="mr-1">{{ sessionsExpanded ? 'mdi-chevron-down' : 'mdi-chevron-right' }}</v-icon>
-        <span class="text-caption font-weight-bold text-uppercase flex-grow-1">Chats</span>
-        <span class="text-caption text-medium-emphasis">{{ chatStore.sessions.length }}</span>
-      </div>
-
-      <div v-if="sessionsExpanded" class="sessions-body">
+    <!-- ═══ Sessions List (full view, shown when sessionsExpanded) ═══ -->
+    <template v-if="sessionsExpanded">
+      <div class="sessions-view">
         <div class="px-2 py-1">
           <v-text-field
             v-model="sessionSearch"
-            placeholder="Filter..."
+            placeholder="Filter chats..."
             density="compact"
-            variant="plain"
+            variant="outlined"
             prepend-inner-icon="mdi-magnify"
             hide-details
             single-line
@@ -66,10 +71,10 @@
           </div>
         </div>
       </div>
-    </div>
-    <v-divider />
+    </template>
 
-    <!-- ═══ Conversation Area (middle, scrollable) ═══ -->
+    <!-- ═══ Chat View (shown when NOT sessionsExpanded) ═══ -->
+    <template v-else>
     <div ref="messagesContainer" class="messages-container">
       <!-- Empty state -->
       <div v-if="!chatStore.currentSession && chatStore.messages.length === 0" class="empty-state">
@@ -127,6 +132,7 @@
         </div>
       </div>
     </div>
+    </template>
 
     <!-- ═══ Input Area (bottom, always visible) ═══ -->
     <div class="input-area">
@@ -338,6 +344,9 @@ async function handleSend() {
     })
   }
 
+  // Switch to chat view
+  sessionsExpanded.value = false
+
   await chatStore.sendMessage(msg)
   scrollToBottom()
 }
@@ -417,42 +426,19 @@ watch(() => chatStore.panelOpen, (open) => {
   user-select: none;
 }
 
-/* ── Sessions Section ── */
-.sessions-section {
-  flex-shrink: 0;
-  max-height: 40vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.sessions-section.collapsed {
-  max-height: none;
-}
-
-.section-header {
-  height: 28px;
-  min-height: 28px;
-  cursor: pointer;
-  user-select: none;
-  background: rgba(var(--v-theme-on-surface), 0.03);
-}
-.section-header:hover {
-  background: rgba(var(--v-theme-on-surface), 0.06);
-}
-
-.sessions-body {
+/* ── Sessions View (full panel) ── */
+.sessions-view {
   flex: 1;
-  overflow: hidden;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .session-filter {
   font-size: 12px;
 }
 .session-filter :deep(.v-field__input) {
-  min-height: 24px !important;
-  padding: 0 !important;
+  min-height: 28px !important;
   font-size: 12px;
 }
 
