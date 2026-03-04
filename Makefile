@@ -126,6 +126,10 @@ restart:
 update:
 	git pull
 	docker compose up -d --build
+	@echo "Installing frontend dependencies..."
+	docker compose exec frontend npm install
+	@echo "Installing backend dependencies..."
+	docker compose exec backend pip install -r requirements.txt
 	@echo "Running migrations..."
 	docker compose exec backend alembic upgrade head
 
