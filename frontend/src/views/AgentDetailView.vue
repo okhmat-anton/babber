@@ -149,6 +149,90 @@
             <div class="text-subtitle-2 mb-1">System Prompt</div>
             <v-sheet rounded class="pa-3 bg-grey-darken-4" style="white-space: pre-wrap; font-family: monospace; font-size: 13px;">{{ agent.system_prompt }}</v-sheet>
           </div>
+
+          <!-- Agent Permissions -->
+          <div class="mt-5">
+            <div class="text-subtitle-2 mb-2">
+              <v-icon size="18" class="mr-1">mdi-shield-lock</v-icon>
+              Agent Permissions
+            </div>
+            <v-alert
+              v-if="!globalFsEnabled && !globalSysEnabled"
+              type="warning"
+              variant="tonal"
+              density="compact"
+              class="mb-3"
+              icon="mdi-shield-off"
+            >
+              All access is disabled globally. Enable in <strong>Settings → System Access Controls</strong> first.
+            </v-alert>
+            <v-row dense>
+              <v-col cols="12" md="6">
+                <v-card variant="outlined" class="pa-3" :class="{ 'border-opacity-25': !globalFsEnabled }">
+                  <div class="d-flex align-center">
+                    <v-switch
+                      :model-value="agent.filesystem_access"
+                      color="error"
+                      hide-details
+                      density="compact"
+                      :loading="permSaving"
+                      :disabled="!globalFsEnabled"
+                      @update:model-value="(v) => toggleAgentPermission('filesystem_access', v)"
+                    >
+                      <template #label>
+                        <div>
+                          <span class="font-weight-medium">File System Access</span>
+                          <div class="text-caption text-medium-emphasis">Read, write, delete external files</div>
+                        </div>
+                      </template>
+                    </v-switch>
+                    <v-spacer />
+                    <v-chip v-if="!globalFsEnabled && agent.filesystem_access" color="warning" size="x-small" variant="flat">
+                      BLOCKED
+                    </v-chip>
+                    <v-chip v-else :color="agent.filesystem_access && globalFsEnabled ? 'error' : 'grey'" size="x-small" variant="flat">
+                      {{ agent.filesystem_access && globalFsEnabled ? 'ON' : 'OFF' }}
+                    </v-chip>
+                  </div>
+                  <div v-if="!globalFsEnabled && agent.filesystem_access" class="text-caption text-warning mt-1">
+                    <v-icon size="12" class="mr-1">mdi-alert</v-icon>Globally disabled — agent setting overridden
+                  </div>
+                </v-card>
+              </v-col>
+              <v-col cols="12" md="6">
+                <v-card variant="outlined" class="pa-3" :class="{ 'border-opacity-25': !globalSysEnabled }">
+                  <div class="d-flex align-center">
+                    <v-switch
+                      :model-value="agent.system_access"
+                      color="error"
+                      hide-details
+                      density="compact"
+                      :loading="permSaving"
+                      :disabled="!globalSysEnabled"
+                      @update:model-value="(v) => toggleAgentPermission('system_access', v)"
+                    >
+                      <template #label>
+                        <div>
+                          <span class="font-weight-medium">System Access</span>
+                          <div class="text-caption text-medium-emphasis">Terminal commands, processes, system info</div>
+                        </div>
+                      </template>
+                    </v-switch>
+                    <v-spacer />
+                    <v-chip v-if="!globalSysEnabled && agent.system_access" color="warning" size="x-small" variant="flat">
+                      BLOCKED
+                    </v-chip>
+                    <v-chip v-else :color="agent.system_access && globalSysEnabled ? 'error' : 'grey'" size="x-small" variant="flat">
+                      {{ agent.system_access && globalSysEnabled ? 'ON' : 'OFF' }}
+                    </v-chip>
+                  </div>
+                  <div v-if="!globalSysEnabled && agent.system_access" class="text-caption text-warning mt-1">
+                    <v-icon size="12" class="mr-1">mdi-alert</v-icon>Globally disabled — agent setting overridden
+                  </div>
+                </v-card>
+              </v-col>
+            </v-row>
+          </div>
         </div>
 
         <!-- Beliefs Tab -->
@@ -302,16 +386,124 @@
 
         <!-- Skills Tab -->
         <div v-if="tab === 'skills'">
-          <v-list v-if="agentSkills.length">
-            <v-list-item v-for="s in agentSkills" :key="s.skill_id">
-              <v-list-item-title>{{ s.skill?.display_name || s.skill_id }}</v-list-item-title>
-              <v-list-item-subtitle>{{ s.skill?.description }}</v-list-item-subtitle>
-              <template #append>
-                <v-chip :color="s.is_enabled ? 'success' : 'grey'" size="small">{{ s.is_enabled ? 'ON' : 'OFF' }}</v-chip>
-              </template>
-            </v-list-item>
-          </v-list>
-          <div v-else class="text-center text-grey pa-6">No skills attached</div>
+          <div class="d-flex align-center mb-4">
+            <v-text-field
+              v-model="skillSearch"
+              density="compact"
+              variant="outlined"
+              prepend-inner-icon="mdi-magnify"
+              placeholder="Search skills..."
+              hide-details
+              style="max-width: 300px"
+              clearable
+            />
+            <v-spacer />
+            <v-btn color="primary" size="small" variant="tonal" prepend-icon="mdi-plus" @click="openNewSkillDialog">New Personal Skill</v-btn>
+          </div>
+
+          <!-- Personal skills -->
+          <div v-if="personalSkills.length" class="mb-5">
+            <div class="d-flex align-center mb-2">
+              <v-icon color="cyan" size="18" class="mr-2">mdi-account-lock</v-icon>
+              <span class="text-subtitle-2 font-weight-bold">Personal Skills</span>
+              <v-chip size="x-small" class="ml-2" variant="tonal" color="cyan">owned by this agent</v-chip>
+            </div>
+            <v-card v-for="s in personalSkills" :key="s.id" variant="outlined" class="mb-2 pa-3">
+              <div class="d-flex align-center">
+                <v-switch
+                  :model-value="s.enabled"
+                  color="success"
+                  density="compact"
+                  hide-details
+                  class="mr-3 flex-grow-0"
+                  @update:model-value="toggleSkill(s)"
+                />
+                <div class="flex-grow-1">
+                  <div class="d-flex align-center">
+                    <span class="text-body-1 font-weight-medium">{{ s.display_name }}</span>
+                    <v-chip size="x-small" variant="tonal" class="ml-2">{{ s.category }}</v-chip>
+                    <v-chip v-if="s.is_shared" size="x-small" variant="flat" color="success" class="ml-1">
+                      <v-icon start size="10">mdi-share-variant</v-icon>shared
+                    </v-chip>
+                  </div>
+                  <div v-if="s.description" class="text-caption text-grey">{{ s.description }}</div>
+                </div>
+                <v-btn v-if="!s.is_shared" icon size="x-small" variant="text" color="success" @click="shareSkill(s)" title="Share publicly">
+                  <v-icon size="16">mdi-share</v-icon>
+                </v-btn>
+                <v-btn v-else icon size="x-small" variant="text" color="grey" @click="unshareSkill(s)" title="Make private">
+                  <v-icon size="16">mdi-share-off</v-icon>
+                </v-btn>
+                <v-btn icon size="x-small" variant="text" @click="$router.push(`/skills/${s.id}`)" title="Edit">
+                  <v-icon size="16">mdi-pencil</v-icon>
+                </v-btn>
+              </div>
+            </v-card>
+          </div>
+
+          <!-- System skills -->
+          <div v-if="systemSkills.length" class="mb-5">
+            <div class="d-flex align-center mb-2">
+              <v-icon color="primary" size="18" class="mr-2">mdi-cog</v-icon>
+              <span class="text-subtitle-2 font-weight-bold">System Skills</span>
+              <v-chip size="x-small" class="ml-2" variant="tonal" color="primary">built-in</v-chip>
+            </div>
+            <v-card v-for="s in systemSkills" :key="s.id" variant="outlined" class="mb-2 pa-3">
+              <div class="d-flex align-center">
+                <v-switch
+                  :model-value="s.enabled"
+                  color="success"
+                  density="compact"
+                  hide-details
+                  class="mr-3 flex-grow-0"
+                  @update:model-value="toggleSkill(s)"
+                />
+                <div class="flex-grow-1">
+                  <div class="d-flex align-center">
+                    <span class="text-body-1 font-weight-medium">{{ s.display_name }}</span>
+                    <v-chip size="x-small" variant="tonal" class="ml-2">{{ s.category }}</v-chip>
+                  </div>
+                  <div v-if="s.description" class="text-caption text-grey">{{ s.description }}</div>
+                </div>
+                <v-btn icon size="x-small" variant="text" @click="$router.push(`/skills/${s.id}`)" title="View">
+                  <v-icon size="16">mdi-eye</v-icon>
+                </v-btn>
+              </div>
+            </v-card>
+          </div>
+
+          <!-- Public skills (shared by other agents or users) -->
+          <div v-if="publicSkills.length" class="mb-5">
+            <div class="d-flex align-center mb-2">
+              <v-icon color="green" size="18" class="mr-2">mdi-earth</v-icon>
+              <span class="text-subtitle-2 font-weight-bold">Public Skills</span>
+              <v-chip size="x-small" class="ml-2" variant="tonal" color="green">shared by others</v-chip>
+            </div>
+            <v-card v-for="s in publicSkills" :key="s.id" variant="outlined" class="mb-2 pa-3">
+              <div class="d-flex align-center">
+                <v-switch
+                  :model-value="s.enabled"
+                  color="success"
+                  density="compact"
+                  hide-details
+                  class="mr-3 flex-grow-0"
+                  @update:model-value="toggleSkill(s)"
+                />
+                <div class="flex-grow-1">
+                  <div class="d-flex align-center">
+                    <span class="text-body-1 font-weight-medium">{{ s.display_name }}</span>
+                    <v-chip size="x-small" variant="tonal" class="ml-2">{{ s.category }}</v-chip>
+                  </div>
+                  <div v-if="s.description" class="text-caption text-grey">{{ s.description }}</div>
+                </div>
+                <v-btn icon size="x-small" variant="text" @click="$router.push(`/skills/${s.id}`)" title="View">
+                  <v-icon size="16">mdi-eye</v-icon>
+                </v-btn>
+              </div>
+            </v-card>
+          </div>
+
+          <div v-if="!allAvailableSkills.length" class="text-center text-grey pa-6">No skills available</div>
         </div>
 
         <!-- Files Tab -->
@@ -496,6 +688,32 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- New Personal Skill Dialog -->
+    <v-dialog v-model="newSkillDialog" max-width="600">
+      <v-card>
+        <v-card-title>New Personal Skill</v-card-title>
+        <v-card-text>
+          <v-text-field v-model="newSkillName" label="Name (unique identifier, e.g. my_calculator)" density="compact" class="mb-2" autofocus />
+          <v-text-field v-model="newSkillDisplayName" label="Display Name" density="compact" class="mb-2" />
+          <v-textarea v-model="newSkillDescription" label="Description" rows="2" density="compact" class="mb-2" />
+          <v-textarea v-model="newSkillDescForAgent" label="Description for Agent (how the agent should use it)" rows="2" density="compact" class="mb-2" />
+          <v-row>
+            <v-col cols="6">
+              <v-select v-model="newSkillCategory" :items="['general','web','files','code','data','custom']" label="Category" density="compact" />
+            </v-col>
+            <v-col cols="6">
+              <v-checkbox v-model="newSkillShared" label="Share publicly" density="compact" hide-details />
+            </v-col>
+          </v-row>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn @click="newSkillDialog = false">Cancel</v-btn>
+          <v-btn color="primary" @click="createPersonalSkill" :loading="newSkillSaving">Create</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -504,11 +722,13 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '../api'
 import { useAgentsStore } from '../stores/agents'
+import { useSettingsStore } from '../stores/settings'
 import ProtocolFlow from '../components/ProtocolFlow.vue'
 
 const route = useRoute()
 const router = useRouter()
 const agentsStore = useAgentsStore()
+const settingsStore = useSettingsStore()
 const tab = ref('info')
 const agent = ref(null)
 const stats = ref({})
@@ -516,9 +736,23 @@ const tasks = ref([])
 const showProtocolPreview = ref(false)
 const previewProtocol = ref(null)
 const logs = ref([])
-const agentSkills = ref([])
+const allAvailableSkills = ref([])
 const memories = ref([])
 const logLevel = ref('all')
+const skillSearch = ref('')
+const permSaving = ref(false)
+const globalFsEnabled = ref(false)
+const globalSysEnabled = ref(false)
+
+// New Skill dialog state
+const newSkillDialog = ref(false)
+const newSkillName = ref('')
+const newSkillDisplayName = ref('')
+const newSkillDescription = ref('')
+const newSkillDescForAgent = ref('')
+const newSkillCategory = ref('custom')
+const newSkillShared = ref(false)
+const newSkillSaving = ref(false)
 
 // Files tab state
 const fileTree = ref([])
@@ -602,6 +836,20 @@ const memHeaders = [
 const loadData = async () => {
   agent.value = await agentsStore.fetchAgent(id.value)
   stats.value = await agentsStore.fetchStats(id.value)
+  try {
+    await settingsStore.fetchSystemSettings()
+    globalFsEnabled.value = settingsStore.systemSettings.filesystem_access_enabled?.value === 'true'
+    globalSysEnabled.value = settingsStore.systemSettings.system_access_enabled?.value === 'true'
+  } catch {}
+}
+
+const toggleAgentPermission = async (field, value) => {
+  permSaving.value = true
+  try {
+    await api.put(`/agents/${id.value}`, { [field]: value })
+    agent.value = await agentsStore.fetchAgent(id.value)
+  } catch (e) { console.error('Toggle permission failed', e) }
+  permSaving.value = false
 }
 
 const loadTasks = async () => {
@@ -616,8 +864,67 @@ const loadLogs = async () => {
 }
 
 const loadSkills = async () => {
-  const { data } = await api.get(`/agents/${id.value}/skills`)
-  agentSkills.value = data
+  try {
+    const { data } = await api.get(`/agents/${id.value}/skills/available`)
+    allAvailableSkills.value = data
+  } catch { allAvailableSkills.value = [] }
+}
+
+const filterBySearch = (list) => {
+  if (!skillSearch.value) return list
+  const q = skillSearch.value.toLowerCase()
+  return list.filter(s => (s.display_name || s.name || '').toLowerCase().includes(q) || (s.description || '').toLowerCase().includes(q))
+}
+const personalSkills = computed(() => filterBySearch(allAvailableSkills.value.filter(s => s.ownership === 'personal')))
+const systemSkills = computed(() => filterBySearch(allAvailableSkills.value.filter(s => s.ownership === 'system')))
+const publicSkills = computed(() => filterBySearch(allAvailableSkills.value.filter(s => s.ownership === 'public')))
+
+const toggleSkill = async (s) => {
+  try {
+    await api.post(`/agents/${id.value}/skills/toggle/${s.id}`)
+    await loadSkills()
+  } catch (e) { console.error('Toggle skill failed', e) }
+}
+
+const shareSkill = async (s) => {
+  try {
+    await api.post(`/agents/${id.value}/skills/${s.id}/share`)
+    await loadSkills()
+  } catch (e) { console.error('Share skill failed', e) }
+}
+
+const unshareSkill = async (s) => {
+  try {
+    await api.post(`/agents/${id.value}/skills/${s.id}/unshare`)
+    await loadSkills()
+  } catch (e) { console.error('Unshare skill failed', e) }
+}
+
+const openNewSkillDialog = () => {
+  newSkillName.value = ''
+  newSkillDisplayName.value = ''
+  newSkillDescription.value = ''
+  newSkillDescForAgent.value = ''
+  newSkillCategory.value = 'custom'
+  newSkillShared.value = false
+  newSkillDialog.value = true
+}
+
+const createPersonalSkill = async () => {
+  newSkillSaving.value = true
+  try {
+    await api.post(`/agents/${id.value}/skills/personal`, {
+      name: newSkillName.value,
+      display_name: newSkillDisplayName.value || undefined,
+      description: newSkillDescription.value || undefined,
+      description_for_agent: newSkillDescForAgent.value || undefined,
+      category: newSkillCategory.value || 'custom',
+      is_shared: newSkillShared.value
+    })
+    newSkillDialog.value = false
+    await loadSkills()
+  } catch (e) { console.error('Create personal skill failed', e) }
+  newSkillSaving.value = false
 }
 
 const loadMemories = async () => {

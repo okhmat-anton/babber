@@ -29,6 +29,10 @@ class Agent(Base):
     num_thread: Mapped[int] = mapped_column(Integer, default=8)
     num_gpu: Mapped[int] = mapped_column(Integer, default=1)
 
+    # Permissions (per-agent access controls)
+    filesystem_access: Mapped[bool] = mapped_column(Boolean, default=False)
+    system_access: Mapped[bool] = mapped_column(Boolean, default=False)
+
     # Thinking protocol
     thinking_protocol_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("thinking_protocols.id", ondelete="SET NULL"), nullable=True)
 

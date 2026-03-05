@@ -35,6 +35,7 @@
 
     <!-- Main + Chat split -->
     <v-main class="main-with-chat">
+      <TopBar />
       <div class="layout-split">
         <!-- Main Content -->
         <div class="main-content" :style="{ marginRight: chatStore.panelOpen ? panelWidth + 'px' : '0' }">
@@ -85,6 +86,7 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useChatStore } from '../stores/chat'
 import ChatPanel from '../components/ChatPanel.vue'
+import TopBar from '../components/TopBar.vue'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -175,7 +177,7 @@ const handleLogout = async () => {
 /* ── Chat Side Panel ── */
 .chat-side-panel {
   position: fixed;
-  top: 0;
+  top: 36px;
   right: 0;
   bottom: 0;
   z-index: 100;

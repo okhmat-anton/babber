@@ -236,9 +236,13 @@ async def update_agent(
     update_data = body.model_dump(exclude_unset=True, exclude={"models", "protocol_ids"})
     old_name = agent.name
 
-    # Update DB identity fields (name, status only)
+    # Update DB identity fields
     if "name" in update_data:
         agent.name = update_data["name"]
+    if "filesystem_access" in update_data:
+        agent.filesystem_access = update_data["filesystem_access"]
+    if "system_access" in update_data:
+        agent.system_access = update_data["system_access"]
     if "thinking_protocol_id" in update_data:
         val = update_data["thinking_protocol_id"]
         agent.thinking_protocol_id = val if val else None

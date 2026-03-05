@@ -42,6 +42,9 @@ class AgentCreate(BaseModel):
     stop: list[str] = []
     num_thread: int = 8
     num_gpu: int = 1
+    # Permissions
+    filesystem_access: bool = False
+    system_access: bool = False
     # Multi-model support
     models: list[AgentModelEntry] = []
     # Thinking protocols (multi-protocol)
@@ -63,6 +66,9 @@ class AgentUpdate(BaseModel):
     stop: list[str] | None = None
     num_thread: int | None = None
     num_gpu: int | None = None
+    # Permissions
+    filesystem_access: bool | None = None
+    system_access: bool | None = None
     # Multi-model support (if provided, replaces all)
     models: list[AgentModelEntry] | None = None
     # Thinking protocols (multi-protocol)
@@ -88,6 +94,8 @@ class AgentResponse(BaseModel):
     stop: list[str] | None
     num_thread: int
     num_gpu: int
+    filesystem_access: bool = False
+    system_access: bool = False
     beliefs: dict = {}                 # from beliefs.json (filesystem)
     aspirations: dict = {}             # from aspirations.json (filesystem)
     thinking_protocol_id: str | None = None

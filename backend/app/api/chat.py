@@ -385,27 +385,73 @@ async def _load_agent_protocols(agent: Agent, db: AsyncSession) -> list[dict]:
     return protocols
 
 
-async def _load_agent_skills(agent_id: uuid.UUID, db: AsyncSession) -> list[dict]:
-    """Load all enabled skills for an agent."""
+async def _load_agent_skills(agent_id: uuid.UUID, db: AsyncSession, agent: "Agent" = None) -> list[dict]:
+    """Load all enabled skills for an agent.
+
+    An agent has access to:
+    - All system skills (is_system=true)
+    - All shared/public skills (is_shared=true)
+    - Agent's personal skills (author_agent_id=agent_id)
+
+    Skills explicitly disabled via AgentSkill(is_enabled=false) are excluded.
+    Skills requiring filesystem/system access are excluded if not permitted
+    (both globally and at agent level).
+    """
+    from sqlalchemy import or_
+    from app.api.settings import get_setting_value
+
+    # Determine effective permissions (global AND agent-level)
+    global_fs = (await get_setting_value(db, "filesystem_access_enabled")) == "true"
+    global_sys = (await get_setting_value(db, "system_access_enabled")) == "true"
+    agent_fs = agent.filesystem_access if agent else False
+    agent_sys = agent.system_access if agent else False
+    effective_fs = global_fs and agent_fs
+    effective_sys = global_sys and agent_sys
+
+    # Skills that require specific permissions
+    FS_SKILLS = {"file_read", "file_write"}
+    SYS_SKILLS = {"shell_exec", "code_execute"}
+
+    # Get all potentially available skills
     result = await db.execute(
-        select(AgentSkill)
-        .where(AgentSkill.agent_id == agent_id, AgentSkill.is_enabled == True)
-        .options(selectinload(AgentSkill.skill))
+        select(Skill).where(
+            or_(
+                Skill.is_system == True,
+                Skill.is_shared == True,
+                Skill.author_agent_id == agent_id,
+            )
+        )
     )
+    all_skills = result.scalars().all()
+
+    # Check disabled state from agent_skills table
+    result = await db.execute(
+        select(AgentSkill).where(
+            AgentSkill.agent_id == agent_id,
+            AgentSkill.is_enabled == False,
+        )
+    )
+    disabled_ids = {str(ask.skill_id) for ask in result.scalars().all()}
+
     skills = []
-    for ask in result.scalars().all():
-        s = ask.skill
-        if s:
-            skills.append({
-                "id": str(s.id),
-                "name": s.name,
-                "display_name": s.display_name,
-                "description": s.description or "",
-                "description_for_agent": s.description_for_agent or "",
-                "category": s.category,
-                "code": s.code,
-                "input_schema": s.input_schema or {},
-            })
+    for s in all_skills:
+        if str(s.id) in disabled_ids:
+            continue
+        # Permission gating: skip fs/sys skills if access not granted
+        if s.name in FS_SKILLS and not effective_fs:
+            continue
+        if s.name in SYS_SKILLS and not effective_sys:
+            continue
+        skills.append({
+            "id": str(s.id),
+            "name": s.name,
+            "display_name": s.display_name,
+            "description": s.description or "",
+            "description_for_agent": s.description_for_agent or "",
+            "category": s.category,
+            "code": s.code,
+            "input_schema": s.input_schema or {},
+        })
     return skills
 
 
@@ -508,7 +554,7 @@ async def send_message(
 
         # Load protocols, skills, beliefs, aspirations
         agent_protocols = await _load_agent_protocols(agent, db)
-        agent_skills = await _load_agent_skills(agent.id, db)
+        agent_skills = await _load_agent_skills(agent.id, db, agent=agent)
         agent_beliefs = read_beliefs(agent_name)
         from app.api.agent_aspirations import read_aspirations
         agent_aspirations = read_aspirations(agent_name)
