@@ -20,6 +20,36 @@
             </v-col>
           </v-row>
 
+          <!-- ─── Thinking Protocol ─────────────────── -->
+          <div class="text-h6 mt-6 mb-3">Thinking Protocol</div>
+          <v-row>
+            <v-col cols="12" md="6">
+              <v-select
+                v-model="form.thinking_protocol_id"
+                :items="protocolItems"
+                item-title="name"
+                item-value="id"
+                label="Select Protocol"
+                clearable
+                density="compact"
+                hint="Defines how the agent reasons step by step"
+                persistent-hint
+              >
+                <template #item="{ item, props }">
+                  <v-list-item v-bind="props">
+                    <v-list-item-subtitle>{{ item.raw.description || 'No description' }}</v-list-item-subtitle>
+                  </v-list-item>
+                </template>
+              </v-select>
+            </v-col>
+            <v-col cols="12" md="6">
+              <v-sheet v-if="selectedProtocolPreview" class="pa-3 rounded bg-grey-darken-4">
+                <div class="text-caption text-grey mb-1">{{ selectedProtocolPreview.name }}</div>
+                <div class="text-caption">{{ selectedProtocolPreview.steps?.length || 0 }} steps · {{ selectedProtocolPreview.steps?.filter(s => s.type === 'loop').length || 0 }} loops</div>
+              </v-sheet>
+            </v-col>
+          </v-row>
+
           <!-- ─── Models ─────────────────────────────────── -->
           <div class="text-h6 mt-6 mb-3">Models</div>
 
@@ -147,15 +177,21 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAgentsStore } from '../stores/agents'
 import { useSettingsStore } from '../stores/settings'
+import api from '../api'
 
 const route = useRoute()
 const router = useRouter()
 const agentsStore = useAgentsStore()
 const settingsStore = useSettingsStore()
 const saving = ref(false)
+const protocolsList = ref([])
 
 const isEdit = computed(() => !!route.params.id)
 const models = computed(() => settingsStore.models)
+const protocolItems = computed(() => protocolsList.value)
+const selectedProtocolPreview = computed(() =>
+  protocolsList.value.find(p => p.id === form.value.thinking_protocol_id) || null
+)
 
 const form = ref({
   name: '',
@@ -170,6 +206,7 @@ const form = ref({
   num_thread: 8,
   num_gpu: 1,
   models: [],  // array of { model_config_id, task_type, tags, priority }
+  thinking_protocol_id: null,
 })
 
 const addModel = () => {
@@ -187,6 +224,12 @@ const removeModel = (idx) => {
 
 onMounted(async () => {
   await settingsStore.fetchModels()
+  // Load protocols
+  try {
+    const { data } = await api.get('/protocols')
+    protocolsList.value = data
+  } catch { protocolsList.value = [] }
+
   if (isEdit.value) {
     const agent = await agentsStore.fetchAgent(route.params.id)
     // Copy scalar fields
@@ -197,6 +240,8 @@ onMounted(async () => {
     scalarKeys.forEach((key) => {
       if (agent[key] !== undefined && agent[key] !== null) form.value[key] = agent[key]
     })
+    // Load thinking_protocol_id
+    form.value.thinking_protocol_id = agent.thinking_protocol_id || null
     // Load agent_models
     if (agent.agent_models && agent.agent_models.length) {
       form.value.models = agent.agent_models.map((am) => ({

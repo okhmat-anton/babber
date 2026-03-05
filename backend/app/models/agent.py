@@ -29,6 +29,9 @@ class Agent(Base):
     num_thread: Mapped[int] = mapped_column(Integer, default=8)
     num_gpu: Mapped[int] = mapped_column(Integer, default=1)
 
+    # Thinking protocol
+    thinking_protocol_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("thinking_protocols.id", ondelete="SET NULL"), nullable=True)
+
     # Meta
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -36,6 +39,7 @@ class Agent(Base):
 
     # Relationships
     model_config_rel = relationship("ModelConfig", lazy="selectin")
+    thinking_protocol = relationship("ThinkingProtocol", lazy="selectin")
     agent_models = relationship("AgentModel", back_populates="agent", cascade="all, delete-orphan", lazy="selectin", order_by="AgentModel.priority")
     tasks = relationship("Task", back_populates="agent", cascade="all, delete-orphan")
     logs = relationship("AgentLog", back_populates="agent", cascade="all, delete-orphan")

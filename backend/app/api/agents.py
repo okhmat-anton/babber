@@ -21,6 +21,8 @@ from app.api.agent_files import (
 )
 from app.api.agent_beliefs import read_beliefs
 
+from app.models.thinking_protocol import ThinkingProtocol
+
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 
 
@@ -30,7 +32,8 @@ async def _load_agent(db: AsyncSession, agent_id) -> Agent | None:
         select(Agent)
         .where(Agent.id == agent_id)
         .options(
-            selectinload(Agent.agent_models).selectinload(AgentModel.model_config_rel)
+            selectinload(Agent.agent_models).selectinload(AgentModel.model_config_rel),
+            selectinload(Agent.thinking_protocol),
         )
     )
     return result.scalar_one_or_none()
@@ -56,6 +59,19 @@ def _build_agent_response(agent: Agent) -> dict:
     # Beliefs from beliefs.json
     beliefs = read_beliefs(agent.name)
     data["beliefs"] = beliefs
+
+    # Thinking protocol
+    if agent.thinking_protocol:
+        tp = agent.thinking_protocol
+        data["thinking_protocol"] = {
+            "id": str(tp.id),
+            "name": tp.name,
+            "description": tp.description or "",
+            "steps": tp.steps or [],
+        }
+    else:
+        data["thinking_protocol"] = None
+    data["thinking_protocol_id"] = str(agent.thinking_protocol_id) if agent.thinking_protocol_id else None
 
     agent_models_out = []
     for am in (agent.agent_models or []):
@@ -83,7 +99,8 @@ async def list_agents(
     db: AsyncSession = Depends(get_db),
 ):
     q = select(Agent).options(
-        selectinload(Agent.agent_models).selectinload(AgentModel.model_config_rel)
+        selectinload(Agent.agent_models).selectinload(AgentModel.model_config_rel),
+        selectinload(Agent.thinking_protocol),
     )
     if status:
         q = q.where(Agent.status == status)
@@ -99,7 +116,10 @@ async def create_agent(
     _user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    agent_data = body.model_dump(exclude={"models"})
+    agent_data = body.model_dump(exclude={"models", "thinking_protocol_id"})
+    # Handle thinking_protocol_id separately
+    if body.thinking_protocol_id:
+        agent_data["thinking_protocol_id"] = body.thinking_protocol_id
     agent = Agent(**agent_data)
     db.add(agent)
     await db.flush()
@@ -173,6 +193,9 @@ async def update_agent(
     # Update DB identity fields (name, status only)
     if "name" in update_data:
         agent.name = update_data["name"]
+    if "thinking_protocol_id" in update_data:
+        val = update_data["thinking_protocol_id"]
+        agent.thinking_protocol_id = val if val else None
 
     # If models list is provided, replace all agent_model entries
     if body.models is not None:

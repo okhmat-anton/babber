@@ -18,6 +18,7 @@ const routes = [
       { path: 'agents/new', name: 'AgentCreate', component: () => import('../views/AgentFormView.vue') },
       { path: 'agents/:id', name: 'AgentEdit', component: () => import('../views/AgentFormView.vue') },
       { path: 'agents/:id/detail', name: 'AgentDetail', component: () => import('../views/AgentDetailView.vue') },
+      { path: 'protocols', name: 'Protocols', component: () => import('../views/ProtocolsView.vue') },
       { path: 'tasks', name: 'Tasks', component: () => import('../views/TasksView.vue') },
       { path: 'tasks/new', name: 'TaskCreate', component: () => import('../views/TaskFormView.vue') },
       { path: 'tasks/:id', name: 'TaskEdit', component: () => import('../views/TaskFormView.vue') },

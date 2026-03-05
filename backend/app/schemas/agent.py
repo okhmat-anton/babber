@@ -44,6 +44,8 @@ class AgentCreate(BaseModel):
     num_gpu: int = 1
     # Multi-model support
     models: list[AgentModelEntry] = []
+    # Thinking protocol
+    thinking_protocol_id: str | None = None
 
 
 class AgentUpdate(BaseModel):
@@ -62,6 +64,8 @@ class AgentUpdate(BaseModel):
     num_gpu: int | None = None
     # Multi-model support (if provided, replaces all)
     models: list[AgentModelEntry] | None = None
+    # Thinking protocol
+    thinking_protocol_id: str | None = None
 
 
 class AgentResponse(BaseModel):
@@ -83,6 +87,8 @@ class AgentResponse(BaseModel):
     num_thread: int
     num_gpu: int
     beliefs: dict = {}                 # from beliefs.json (filesystem)
+    thinking_protocol_id: str | None = None
+    thinking_protocol: dict | None = None  # expanded protocol data
     created_at: datetime
     updated_at: datetime
     last_run_at: datetime | None

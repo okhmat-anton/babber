@@ -63,7 +63,22 @@
             <v-list-item><strong>Repeat Penalty:</strong>&nbsp;{{ agent.repeat_penalty }}&nbsp;&nbsp;<strong>Num Predict:</strong>&nbsp;{{ agent.num_predict }}</v-list-item>
             <v-list-item><strong>Threads:</strong>&nbsp;{{ agent.num_thread }}&nbsp;&nbsp;<strong>GPU Layers:</strong>&nbsp;{{ agent.num_gpu }}</v-list-item>
             <v-list-item v-if="agent.description"><strong>Description:</strong>&nbsp;{{ agent.description }}</v-list-item>
+            <v-list-item v-if="agent.thinking_protocol">
+              <strong>Thinking Protocol:</strong>&nbsp;
+              <v-chip size="small" color="deep-purple" variant="tonal" class="ml-1" @click="showProtocolPreview = !showProtocolPreview" style="cursor:pointer">
+                <v-icon start size="14">mdi-head-cog</v-icon>
+                {{ agent.thinking_protocol.name }}
+                <v-icon end size="14">{{ showProtocolPreview ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
+              </v-chip>
+            </v-list-item>
           </v-list>
+
+          <!-- Protocol preview -->
+          <div v-if="showProtocolPreview && agent.thinking_protocol" class="mt-3 mb-3">
+            <v-sheet class="pa-4 rounded" color="grey-darken-4">
+              <ProtocolFlow :steps="agent.thinking_protocol.steps || []" />
+            </v-sheet>
+          </div>
 
           <!-- Principles -->
           <div v-if="agent.beliefs && (agent.beliefs.core?.length || agent.beliefs.additional?.length)" class="mt-4">
@@ -320,6 +335,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '../api'
 import { useAgentsStore } from '../stores/agents'
+import ProtocolFlow from '../components/ProtocolFlow.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -328,6 +344,7 @@ const tab = ref('info')
 const agent = ref(null)
 const stats = ref({})
 const tasks = ref([])
+const showProtocolPreview = ref(false)
 const logs = ref([])
 const agentSkills = ref([])
 const memories = ref([])

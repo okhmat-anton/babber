@@ -8,6 +8,7 @@ from app.services.auth_service import create_default_admin
 from app.services.skill_service import create_system_skills
 from app.services.model_service import sync_ollama_models
 from app.services.log_service import syslog_bg
+from app.services.protocol_service import create_default_protocols
 
 from app.api.auth import router as auth_router
 from app.api.settings import router as settings_router
@@ -26,6 +27,7 @@ from app.api.chat import router as chat_router
 from app.api.skill_files import router as skill_files_router
 from app.api.agent_files import router as agent_files_router
 from app.api.agent_beliefs import router as agent_beliefs_router
+from app.api.protocols import router as protocols_router
 
 settings = get_settings()
 
@@ -41,6 +43,7 @@ async def lifespan(app: FastAPI):
         await create_default_admin(db)
         await create_system_skills(db)
         await sync_ollama_models(db)
+        await create_default_protocols(db)
 
     await syslog_bg("info", "Server started", source="system", metadata={"version": settings.APP_VERSION})
 
@@ -111,6 +114,7 @@ app.include_router(fs_router)
 app.include_router(terminal_router)
 app.include_router(processes_router)
 app.include_router(chat_router)
+app.include_router(protocols_router)
 
 
 @app.get("/")
