@@ -181,17 +181,18 @@
                     <template v-if="m.sizes && m.sizes.length">
                       <v-chip
                         v-for="s in m.sizes"
-                        :key="s"
+                        :key="s.tag"
                         size="small"
-                        :variant="m.installed_sizes?.includes(s) ? 'flat' : 'outlined'"
-                        :color="m.installed_sizes?.includes(s) ? 'success' : 'primary'"
+                        :variant="m.installed_sizes?.includes(s.tag) ? 'flat' : 'outlined'"
+                        :color="m.installed_sizes?.includes(s.tag) ? 'success' : 'primary'"
                         class="mr-1 mb-1 catalog-size-chip"
                         :disabled="pulling"
-                        @click="!m.installed_sizes?.includes(s) && pullFromCatalog(m, s)"
+                        @click="!m.installed_sizes?.includes(s.tag) && pullFromCatalog(m, s.tag)"
                       >
-                        <v-icon v-if="m.installed_sizes?.includes(s)" start size="12">mdi-check</v-icon>
+                        <v-icon v-if="m.installed_sizes?.includes(s.tag)" start size="12">mdi-check</v-icon>
                         <v-icon v-else start size="12">mdi-download</v-icon>
-                        {{ s }}
+                        {{ s.tag }}
+                        <span v-if="s.size_gb" class="text-caption ml-1" style="opacity: 0.7">{{ s.size_gb }}G</span>
                       </v-chip>
                     </template>
                     <v-btn

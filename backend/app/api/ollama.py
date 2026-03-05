@@ -113,11 +113,15 @@ async def _fetch_ollama_catalog() -> list[dict]:
             for c in re.findall(r'x-test-capability[^>]*>([^<]+)<', block)
         ]
 
-        # Available sizes / tags (e.g. 1b, 7b, 14b, 70b)
-        sizes = [
+        # Available sizes / tags (e.g. 1b, 7b, 14b, 70b) with estimated GB
+        raw_sizes = [
             s.strip()
             for s in re.findall(r'x-test-size[^>]*>([^<]+)<', block)
         ]
+        sizes = []
+        for s in raw_sizes:
+            est = _estimate_size_gb(s)
+            sizes.append({"tag": s, "size_gb": est})
 
         # Pulls count
         pulls_m = re.search(r'([\d.,]+[KMB]?)\s+Pulls', block)
@@ -136,6 +140,26 @@ async def _fetch_ollama_catalog() -> list[dict]:
         _catalog_cache_time = time.time()
 
     return _catalog_cache
+
+
+def _estimate_size_gb(tag: str) -> float | None:
+    """Estimate download size in GB from a parameter-count tag like '8b', '270m'.
+
+    Uses Q4_K_M quantization ratio (~0.6 bytes/param) which is Ollama's default.
+    """
+    tag = tag.lower().strip()
+    m = re.match(r'^([\d.]+)(b|m|t)$', tag)
+    if not m:
+        return None
+    num = float(m.group(1))
+    unit = m.group(2)
+    if unit == 'm':  # millions
+        params_b = num / 1000
+    elif unit == 't':  # trillions
+        params_b = num * 1000
+    else:  # billions
+        params_b = num
+    return round(params_b * 0.6 + 0.1, 1)
 
 
 # ── Helpers ──────────────────────────────────────────────
@@ -342,9 +366,10 @@ async def models_catalog(_user: User = Depends(get_current_user)):
         # Determine which size tags are installed
         installed_sizes = []
         for s in m["sizes"]:
-            full = f"{m['name']}:{s}"
+            tag = s["tag"]
+            full = f"{m['name']}:{tag}"
             if full in local_names:
-                installed_sizes.append(s)
+                installed_sizes.append(tag)
         # Also check if base name without tag is installed (default tag)
         any_installed = bool(installed_sizes) or m["name"] in local_names
         result.append({
