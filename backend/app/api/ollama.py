@@ -1,10 +1,12 @@
-"""
-Ollama management API — status, start, list/pull/delete models.
-"""
+"""Ollama management API — status, start, list/pull/delete models."""
 import asyncio
+import json
+import re
 import signal
+import time
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from app.config import get_settings
 from app.core.dependencies import get_current_user
@@ -57,6 +59,83 @@ class PullProgress(BaseModel):
     status: str
     completed: bool = False
     progress: float = 0.0  # 0-100
+
+
+# ── Ollama library catalog (fetched from ollama.com) ─────
+
+_catalog_cache: list[dict] = []
+_catalog_cache_time: float = 0
+_CATALOG_TTL = 3600  # 1 hour
+
+
+async def _fetch_ollama_catalog() -> list[dict]:
+    """Fetch available models from ollama.com/library and parse HTML."""
+    global _catalog_cache, _catalog_cache_time
+
+    # Return cached if fresh
+    if _catalog_cache and (time.time() - _catalog_cache_time) < _CATALOG_TTL:
+        return _catalog_cache
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                "https://ollama.com/library",
+                headers={"User-Agent": "Mozilla/5.0"},
+                follow_redirects=True,
+            )
+            r.raise_for_status()
+            html = r.text
+    except Exception:
+        return _catalog_cache  # return stale cache on error
+
+    models = []
+    for match in re.finditer(
+        r'<a[^>]*href="/library/([^"]+)"[^>]*class="group[^"]*"[^>]*>',
+        html,
+    ):
+        name = match.group(1)
+        start = match.start()
+        end_tag = html.find("</a>", start)
+        if end_tag < 0:
+            continue
+        block = html[start:end_tag]
+
+        # Description
+        desc_m = re.search(
+            r'<p[^>]*break-words[^>]*>(.*?)</p>', block, re.DOTALL
+        )
+        desc = desc_m.group(1).strip() if desc_m else ""
+        desc = desc.replace("&#39;", "'").replace("&amp;", "&").replace("&quot;", '"')
+
+        # Capabilities (tools, vision, thinking, embedding, cloud)
+        caps = [
+            c.strip()
+            for c in re.findall(r'x-test-capability[^>]*>([^<]+)<', block)
+        ]
+
+        # Available sizes / tags (e.g. 1b, 7b, 14b, 70b)
+        sizes = [
+            s.strip()
+            for s in re.findall(r'x-test-size[^>]*>([^<]+)<', block)
+        ]
+
+        # Pulls count
+        pulls_m = re.search(r'([\d.,]+[KMB]?)\s+Pulls', block)
+        pulls = pulls_m.group(1) if pulls_m else ""
+
+        models.append({
+            "name": name,
+            "description": desc,
+            "capabilities": caps,
+            "sizes": sizes,
+            "pulls": pulls,
+        })
+
+    if models:
+        _catalog_cache = models
+        _catalog_cache_time = time.time()
+
+    return _catalog_cache
 
 
 # ── Helpers ──────────────────────────────────────────────
@@ -234,6 +313,48 @@ async def list_models(_user: User = Depends(get_current_user)):
     return models
 
 
+@router.get("/models/catalog")
+async def models_catalog(_user: User = Depends(get_current_user)):
+    """Return catalog of models from ollama.com library."""
+    settings = _settings()
+
+    # Get locally installed model names to mark them
+    local_names: set[str] = set()
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"{settings.OLLAMA_BASE_URL}/api/tags")
+            if r.status_code == 200:
+                for m in r.json().get("models", []):
+                    name = m.get("name", "")
+                    local_names.add(name)
+                    # Also add the base name (without tag) for matching
+                    if ":" in name:
+                        base = name.split(":")[0]
+                        local_names.add(base)
+    except Exception:
+        pass
+
+    # Fetch catalog from ollama.com
+    catalog = await _fetch_ollama_catalog()
+
+    result = []
+    for m in catalog:
+        # Determine which size tags are installed
+        installed_sizes = []
+        for s in m["sizes"]:
+            full = f"{m['name']}:{s}"
+            if full in local_names:
+                installed_sizes.append(s)
+        # Also check if base name without tag is installed (default tag)
+        any_installed = bool(installed_sizes) or m["name"] in local_names
+        result.append({
+            **m,
+            "installed_sizes": installed_sizes,
+            "any_installed": any_installed,
+        })
+    return result
+
+
 @router.get("/models/{model_name:path}/detail", response_model=OllamaModelDetail)
 async def model_detail(model_name: str, _user: User = Depends(get_current_user)):
     """Get detailed info about a specific model."""
@@ -294,13 +415,82 @@ async def pull_model(body: PullRequest, _user: User = Depends(get_current_user))
     return {"message": f"Model '{model_name}' pulled successfully", "status": "success"}
 
 
+@router.post("/models/pull/stream")
+async def pull_model_stream(body: PullRequest, _user: User = Depends(get_current_user)):
+    """Pull a model with SSE streaming progress updates."""
+    settings = _settings()
+    model_name = body.model
+
+    # Check Ollama is running
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            r = await client.get(f"{settings.OLLAMA_BASE_URL}/api/tags")
+            r.raise_for_status()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Ollama is not running")
+
+    await syslog_bg("info", f"Pulling model (streamed): {model_name}", source="system")
+
+    async def event_generator():
+        try:
+            async with httpx.AsyncClient(timeout=1800) as client:
+                async with client.stream(
+                    "POST",
+                    f"{settings.OLLAMA_BASE_URL}/api/pull",
+                    json={"name": model_name, "stream": True},
+                    timeout=1800,
+                ) as response:
+                    async for line in response.aiter_lines():
+                        if not line.strip():
+                            continue
+                        try:
+                            chunk = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+
+                        status_text = chunk.get("status", "")
+                        total = chunk.get("total", 0)
+                        completed = chunk.get("completed", 0)
+
+                        progress = 0.0
+                        if total and total > 0:
+                            progress = round((completed / total) * 100, 1)
+
+                        event_data = {
+                            "status": status_text,
+                            "total": total,
+                            "completed": completed,
+                            "progress": progress,
+                            "digest": chunk.get("digest", ""),
+                        }
+                        yield f"data: {json.dumps(event_data)}\n\n"
+
+            # Final success event
+            await syslog_bg("info", f"Model '{model_name}' pulled successfully", source="system")
+            yield f"data: {json.dumps({'status': 'success', 'progress': 100, 'completed': True})}\n\n"
+        except Exception as e:
+            await syslog_bg("error", f"Failed to pull model {model_name}: {e}", source="system")
+            yield f"data: {json.dumps({'status': f'error: {str(e)}', 'progress': 0, 'error': True})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.delete("/models/{model_name:path}")
 async def delete_model(model_name: str, _user: User = Depends(get_current_user)):
     """Delete a locally cached model."""
     settings = _settings()
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.delete(
+            r = await client.request(
+                "DELETE",
                 f"{settings.OLLAMA_BASE_URL}/api/delete",
                 json={"name": model_name},
             )

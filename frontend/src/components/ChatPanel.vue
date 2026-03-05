@@ -476,7 +476,7 @@ watch(() => chatStore.panelOpen, (open) => {
 .chat-panel {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: calc(100vh - 36px);
   overflow: hidden;
   flex: 1;
   min-width: 0;

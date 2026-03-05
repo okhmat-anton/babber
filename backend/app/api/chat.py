@@ -268,16 +268,52 @@ async def create_session(
 ):
     """Create a new chat session."""
     agent_id = None
+    model_ids = list(body.model_ids)
+
+    # Extract agent_id from explicit field
     if body.agent_id and body.agent_id.startswith("agent:"):
         try:
             agent_id = uuid.UUID(body.agent_id[6:])
         except ValueError:
             pass
+    elif body.agent_id:
+        try:
+            agent_id = uuid.UUID(body.agent_id)
+        except ValueError:
+            pass
+
+    # Also detect agent: prefix inside model_ids
+    if not agent_id:
+        for mid in model_ids:
+            if mid.startswith("agent:"):
+                try:
+                    agent_id = uuid.UUID(mid[6:])
+                except ValueError:
+                    pass
+                break
+
+    # If agent selected, resolve the agent's actual model(s) for LLM calls
+    if agent_id:
+        # Remove agent: entries from model_ids
+        model_ids = [m for m in model_ids if not m.startswith("agent:")]
+
+        # If no real models left, resolve from agent's configuration
+        if not model_ids:
+            agent = await db.get(Agent, agent_id)
+            if agent:
+                # Use agent_models (multi-model support) or fallback to agent.model_id
+                if agent.agent_models:
+                    model_ids = [str(am.model_config_id) for am in sorted(agent.agent_models, key=lambda x: x.priority)]
+                elif agent.model_id:
+                    model_ids = [str(agent.model_id)]
+
+        if not model_ids:
+            raise HTTPException(status_code=400, detail="Agent has no models configured")
 
     session = ChatSession(
         user_id=user.id,
         title=body.title,
-        model_ids=body.model_ids,
+        model_ids=model_ids,
         agent_id=agent_id,
         multi_model=body.multi_model,
         system_prompt=body.system_prompt,
@@ -509,6 +545,16 @@ async def send_message(
         raise HTTPException(status_code=404, detail="Session not found")
 
     model_ids = body.model_ids or session.model_ids or []
+    # Filter out agent: prefixed entries from model_ids (they're not real models)
+    model_ids = [m for m in model_ids if not m.startswith("agent:")]
+    if not model_ids:
+        # Try to resolve from agent's configuration
+        if session.agent_id and session.agent:
+            agent = session.agent
+            if agent.agent_models:
+                model_ids = [str(am.model_config_id) for am in sorted(agent.agent_models, key=lambda x: x.priority)]
+            elif agent.model_id:
+                model_ids = [str(agent.model_id)]
     if not model_ids:
         raise HTTPException(status_code=400, detail="No models selected for this chat")
 

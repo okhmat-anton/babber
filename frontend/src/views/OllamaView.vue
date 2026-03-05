@@ -45,11 +45,21 @@
 
     <!-- Pull New Model -->
     <v-card class="mb-6">
-      <v-card-title>
+      <v-card-title class="d-flex align-center">
         <v-icon class="mr-2">mdi-download</v-icon>
         Pull Model
+        <v-spacer />
+        <v-btn
+          size="small"
+          variant="tonal"
+          :prepend-icon="showCatalog ? 'mdi-chevron-up' : 'mdi-chevron-down'"
+          @click="showCatalog = !showCatalog"
+        >
+          {{ showCatalog ? 'Hide Catalog' : 'Browse Models' }}
+        </v-btn>
       </v-card-title>
       <v-card-text>
+        <!-- Manual input row -->
         <v-row align="center">
           <v-col cols="12" md="6">
             <v-text-field
@@ -66,8 +76,8 @@
           <v-col cols="auto">
             <v-btn
               color="primary"
-              :loading="pulling"
-              :disabled="!pullModelName || !status.running"
+              :loading="pulling && !pullProgress"
+              :disabled="!pullModelName || !status.running || pulling"
               @click="pullModel"
               prepend-icon="mdi-download"
             >
@@ -75,6 +85,35 @@
             </v-btn>
           </v-col>
         </v-row>
+
+        <!-- Pull Progress -->
+        <div v-if="pulling && pullProgress" class="mt-4">
+          <div class="d-flex align-center mb-1">
+            <v-icon size="16" color="primary" class="mr-2 pull-spin">mdi-loading</v-icon>
+            <span class="text-body-2 font-weight-medium">Pulling {{ pullModelName }}...</span>
+            <v-spacer />
+            <span class="text-caption text-grey">{{ pullProgress.status }}</span>
+          </div>
+          <v-progress-linear
+            :model-value="pullProgress.progress"
+            color="primary"
+            height="22"
+            rounded
+            class="mb-1"
+          >
+            <template #default>
+              <span class="text-caption font-weight-bold" style="color: white; text-shadow: 0 0 3px rgba(0,0,0,0.5)">
+                {{ pullProgress.progress.toFixed(1) }}%
+              </span>
+            </template>
+          </v-progress-linear>
+          <div class="d-flex justify-space-between text-caption text-grey">
+            <span v-if="pullProgress.completed && pullProgress.total">{{ formatBytes(pullProgress.completed) }} / {{ formatBytes(pullProgress.total) }}</span>
+            <span v-else>{{ pullProgress.status }}</span>
+            <span v-if="pullSpeed">{{ pullSpeed }}/s</span>
+          </div>
+        </div>
+
         <v-alert
           v-if="pullResult"
           :type="pullResult.type"
@@ -84,6 +123,98 @@
         >
           {{ pullResult.message }}
         </v-alert>
+
+        <!-- Model Catalog -->
+        <v-expand-transition>
+          <div v-if="showCatalog" class="mt-4">
+            <v-divider class="mb-3" />
+            <div class="d-flex align-center mb-3">
+              <div class="text-subtitle-2 font-weight-bold">
+                Available Models
+                <span v-if="catalogModels.length" class="text-caption text-grey ml-1">({{ catalogModels.length }})</span>
+              </div>
+              <v-spacer />
+              <v-text-field
+                v-model="catalogSearch"
+                density="compact"
+                variant="outlined"
+                placeholder="Search models..."
+                prepend-inner-icon="mdi-magnify"
+                hide-details
+                style="max-width: 300px"
+                clearable
+              />
+            </div>
+            <div v-if="catalogLoading" class="text-center pa-6">
+              <v-progress-circular indeterminate color="primary" size="32" />
+              <div class="text-caption text-grey mt-2">Loading catalog from ollama.com...</div>
+            </div>
+            <v-table v-else density="compact" class="catalog-table">
+              <thead>
+                <tr>
+                  <th>Model</th>
+                  <th>Capabilities</th>
+                  <th>Available Sizes</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="m in filteredCatalog" :key="m.name" :class="{ 'installed-row': m.any_installed }">
+                  <td style="min-width: 160px">
+                    <div class="d-flex align-center">
+                      <span class="font-weight-medium">{{ m.name }}</span>
+                      <v-icon v-if="m.any_installed" size="14" color="success" class="ml-1" title="Has installed variants">mdi-check-circle</v-icon>
+                    </div>
+                    <div v-if="m.pulls" class="text-caption text-grey">{{ m.pulls }} pulls</div>
+                  </td>
+                  <td>
+                    <v-chip
+                      v-for="cap in m.capabilities"
+                      :key="cap"
+                      size="x-small"
+                      variant="tonal"
+                      :color="capColor(cap)"
+                      class="mr-1 mb-1"
+                    >{{ cap }}</v-chip>
+                  </td>
+                  <td style="min-width: 200px">
+                    <template v-if="m.sizes && m.sizes.length">
+                      <v-chip
+                        v-for="s in m.sizes"
+                        :key="s"
+                        size="small"
+                        :variant="m.installed_sizes?.includes(s) ? 'flat' : 'outlined'"
+                        :color="m.installed_sizes?.includes(s) ? 'success' : 'primary'"
+                        class="mr-1 mb-1 catalog-size-chip"
+                        :disabled="pulling"
+                        @click="!m.installed_sizes?.includes(s) && pullFromCatalog(m, s)"
+                      >
+                        <v-icon v-if="m.installed_sizes?.includes(s)" start size="12">mdi-check</v-icon>
+                        <v-icon v-else start size="12">mdi-download</v-icon>
+                        {{ s }}
+                      </v-chip>
+                    </template>
+                    <v-btn
+                      v-else
+                      size="small"
+                      color="primary"
+                      variant="tonal"
+                      :disabled="pulling"
+                      @click="pullFromCatalog(m, null)"
+                      prepend-icon="mdi-download"
+                    >
+                      Pull
+                    </v-btn>
+                  </td>
+                  <td class="text-caption text-grey-lighten-1" style="max-width: 400px">{{ m.description }}</td>
+                </tr>
+              </tbody>
+            </v-table>
+            <div v-if="!catalogLoading && !filteredCatalog.length" class="text-center text-grey pa-4">
+              No models match your search.
+            </div>
+          </div>
+        </v-expand-transition>
       </v-card-text>
     </v-card>
 
@@ -346,7 +477,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import api from '../api'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog.vue'
 
@@ -363,6 +494,24 @@ const stopping = ref(false)
 const pullModelName = ref('')
 const pulling = ref(false)
 const pullResult = ref(null)
+const pullProgress = ref(null)
+const pullSpeed = ref('')
+
+// Catalog
+const showCatalog = ref(false)
+const catalogModels = ref([])
+const catalogSearch = ref('')
+const catalogLoading = ref(false)
+
+const filteredCatalog = computed(() => {
+  const q = (catalogSearch.value || '').toLowerCase()
+  if (!q) return catalogModels.value
+  return catalogModels.value.filter(m =>
+    m.name.toLowerCase().includes(q) ||
+    m.description.toLowerCase().includes(q) ||
+    (m.capabilities || []).some(c => c.toLowerCase().includes(q))
+  )
+})
 
 // Detail dialog
 const detailDialog = ref(false)
@@ -393,6 +542,14 @@ const formatDate = (iso) => {
   try {
     return new Date(iso).toLocaleString()
   } catch { return iso }
+}
+
+const formatBytes = (bytes) => {
+  if (!bytes) return '0 B'
+  if (bytes >= 1e9) return (bytes / 1e9).toFixed(1) + ' GB'
+  if (bytes >= 1e6) return (bytes / 1e6).toFixed(1) + ' MB'
+  if (bytes >= 1e3) return (bytes / 1e3).toFixed(1) + ' KB'
+  return bytes + ' B'
 }
 
 const isModelRunning = (name) => {
@@ -435,7 +592,7 @@ const fetchRunning = async () => {
 const refresh = async () => {
   refreshing.value = true
   await fetchStatus()
-  await Promise.all([fetchModels(), fetchRunning()])
+  await Promise.all([fetchModels(), fetchRunning(), fetchCatalog()])
   refreshing.value = false
 }
 
@@ -444,7 +601,7 @@ const startOllama = async () => {
   try {
     await api.post('/ollama/start')
     await fetchStatus()
-    await Promise.all([fetchModels(), fetchRunning()])
+    await Promise.all([fetchModels(), fetchRunning(), fetchCatalog()])
   } catch (e) {
     console.error('Failed to start Ollama:', e)
   } finally {
@@ -470,15 +627,118 @@ const pullModel = async () => {
   if (!pullModelName.value) return
   pulling.value = true
   pullResult.value = null
+  pullProgress.value = { status: 'Starting...', progress: 0, total: 0, completed: 0 }
+  pullSpeed.value = ''
+
+  let lastCompleted = 0
+  let lastTime = Date.now()
+
   try {
-    const { data } = await api.post('/ollama/models/pull', { model: pullModelName.value })
-    pullResult.value = { type: 'success', message: data.message }
-    pullModelName.value = ''
-    await fetchModels()
+    const token = localStorage.getItem('access_token')
+    const response = await fetch('/api/ollama/models/pull/stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({ model: pullModelName.value }),
+    })
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}))
+      throw new Error(errData.detail || `HTTP ${response.status}`)
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        try {
+          const data = JSON.parse(line.slice(6))
+
+          if (data.error) {
+            pullResult.value = { type: 'error', message: data.status }
+            pulling.value = false
+            pullProgress.value = null
+            return
+          }
+
+          if (data.completed === true && data.status === 'success') {
+            pullResult.value = { type: 'success', message: `Model "${pullModelName.value}" pulled successfully!` }
+            pullModelName.value = ''
+            pulling.value = false
+            pullProgress.value = null
+            await Promise.all([fetchModels(), fetchCatalog()])
+            return
+          }
+
+          // Update progress
+          pullProgress.value = {
+            status: data.status || '',
+            progress: data.progress || 0,
+            total: data.total || 0,
+            completed: data.completed || 0,
+          }
+
+          // Calc speed
+          const now = Date.now()
+          const elapsed = (now - lastTime) / 1000
+          if (elapsed >= 0.5 && data.completed > 0) {
+            const bytesDelta = (data.completed || 0) - lastCompleted
+            if (bytesDelta > 0 && elapsed > 0) {
+              pullSpeed.value = formatBytes(bytesDelta / elapsed)
+            }
+            lastCompleted = data.completed || 0
+            lastTime = now
+          }
+        } catch { /* skip bad JSON */ }
+      }
+    }
+
+    // Stream ended without explicit success
+    if (pulling.value) {
+      pullResult.value = { type: 'success', message: `Model "${pullModelName.value}" pulled successfully!` }
+      pullModelName.value = ''
+      await Promise.all([fetchModels(), fetchCatalog()])
+    }
   } catch (e) {
-    pullResult.value = { type: 'error', message: e.response?.data?.detail || 'Pull failed' }
+    pullResult.value = { type: 'error', message: e.message || 'Pull failed' }
   } finally {
     pulling.value = false
+    pullProgress.value = null
+    pullSpeed.value = ''
+  }
+}
+
+const pullFromCatalog = (m, size) => {
+  pullModelName.value = size ? `${m.name}:${size}` : m.name
+  pullModel()
+}
+
+const capColor = (cap) => {
+  const colors = { tools: 'indigo', vision: 'teal', thinking: 'deep-purple', embedding: 'orange', cloud: 'blue-grey' }
+  return colors[cap] || 'grey'
+}
+
+const fetchCatalog = async () => {
+  catalogLoading.value = true
+  try {
+    const { data } = await api.get('/ollama/models/catalog')
+    catalogModels.value = data
+  } catch {
+    catalogModels.value = []
+  } finally {
+    catalogLoading.value = false
   }
 }
 
@@ -589,3 +849,28 @@ const sendChat = async () => {
 
 onMounted(() => refresh())
 </script>
+
+<style scoped>
+.pull-spin {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.catalog-table :deep(tr) {
+  transition: background 0.15s;
+}
+.installed-row {
+  opacity: 0.65;
+}
+.catalog-size-chip {
+  cursor: pointer;
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+.catalog-size-chip:not(.v-chip--disabled):hover {
+  transform: scale(1.08);
+  box-shadow: 0 2px 8px rgba(var(--v-theme-primary), 0.3);
+}
+</style>
