@@ -33,6 +33,9 @@ class Agent(Base):
     filesystem_access: Mapped[bool] = mapped_column(Boolean, default=False)
     system_access: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Self-thinking mode: auto-generate tasks when idle
+    self_thinking: Mapped[bool] = mapped_column(Boolean, default=False)
+
     # Thinking protocol
     thinking_protocol_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("thinking_protocols.id", ondelete="SET NULL"), nullable=True)
 

@@ -11,7 +11,7 @@
           <v-chip size="x-small" :color="statusColor(project.status)" variant="flat" class="mr-2">
             {{ project.status }}
           </v-chip>
-          <span v-if="project.tech_stack">{{ project.tech_stack }}</span>
+          <v-chip v-for="tech in (project.tech_stack || [])" :key="tech" size="x-small" variant="tonal" color="cyan" class="mr-1">{{ tech }}</v-chip>
         </div>
       </div>
       <v-spacer />
@@ -196,19 +196,27 @@
               <span class="text-body-2">{{ selectedFile.path }}</span>
               <v-chip v-if="fileModified" size="x-small" color="warning" variant="tonal" class="ml-2">Modified</v-chip>
               <v-spacer />
-              <v-btn size="small" variant="tonal" color="primary" @click="saveFile" :disabled="!fileModified" :loading="fileSaving">
+              <v-btn size="small" variant="tonal" color="primary" @click="saveFile" :disabled="!fileModified" :loading="fileSaving" class="mr-2">
                 <v-icon size="16" class="mr-1">mdi-content-save</v-icon> Save
               </v-btn>
+              <v-btn size="small" variant="tonal" color="success" @click="runCurrentFile" :loading="codeRunning" :disabled="!selectedFile">
+                <v-icon size="16" class="mr-1">mdi-play</v-icon> Run
+              </v-btn>
             </div>
-            <div v-if="selectedFile" class="flex-grow-1" style="overflow: auto">
-              <textarea
-                ref="editorRef"
-                v-model="fileContent"
-                class="code-editor"
-                spellcheck="false"
-                @keydown.ctrl.s.prevent="saveFile"
-                @keydown.meta.s.prevent="saveFile"
-              />
+            <div v-if="selectedFile" ref="editorContainer" class="code-editor-container" :style="{ flexGrow: 1, flexShrink: 1, minHeight: '100px', height: codeOutput ? 'auto' : '100%' }" />
+            <!-- Inline run output -->
+            <div v-if="codeOutput !== null && selectedFile" class="code-run-output">
+              <div class="d-flex align-center px-2 py-1" style="background: #2d2d2d; border-top: 1px solid rgba(255,255,255,0.1)">
+                <v-icon size="14" class="mr-1" :color="codeOutput.exit_code === 0 ? 'success' : 'error'">{{ codeOutput.exit_code === 0 ? 'mdi-check-circle' : 'mdi-alert-circle' }}</v-icon>
+                <span class="text-caption" :class="codeOutput.exit_code === 0 ? 'text-success' : 'text-error'">Exit {{ codeOutput.exit_code }}</span>
+                <span class="text-caption text-medium-emphasis ml-2">{{ codeOutput.duration_ms }}ms</span>
+                <v-chip v-if="codeOutput.timed_out" size="x-small" color="warning" variant="flat" class="ml-2">timeout</v-chip>
+                <v-spacer />
+                <v-btn icon size="x-small" variant="text" @click="codeOutput = null">
+                  <v-icon size="14">mdi-close</v-icon>
+                </v-btn>
+              </div>
+              <pre class="code-run-output-text"><template v-if="codeOutput.stdout">{{ codeOutput.stdout }}</template><template v-if="codeOutput.stderr"><span class="text-error">{{ codeOutput.stderr }}</span></template><template v-if="!codeOutput.stdout && !codeOutput.stderr"><span class="text-medium-emphasis">(no output)</span></template></pre>
             </div>
             <div v-else class="d-flex align-center justify-center flex-grow-1 text-medium-emphasis">
               <div class="text-center">
@@ -342,12 +350,17 @@
               rows="3"
               class="mb-2"
             />
-            <v-text-field
+            <v-combobox
               v-model="settingsForm.tech_stack"
+              :items="techStackOptions"
               label="Tech Stack"
+              multiple
+              chips
+              closable-chips
               variant="outlined"
               density="compact"
               class="mb-2"
+              hint="Select or type custom technologies"
             />
             <v-row>
               <v-col cols="4">
@@ -378,6 +391,33 @@
                 />
               </v-col>
             </v-row>
+
+            <!-- Agent Assignment -->
+            <v-select
+              v-model="settingsForm.allowed_agent_ids"
+              :items="agentOptions"
+              label="Assigned Agents"
+              variant="outlined"
+              density="compact"
+              multiple
+              chips
+              closable-chips
+              class="mb-2"
+              hint="Select agents that can work on this project"
+              persistent-hint
+            />
+            <v-select
+              v-model="settingsForm.lead_agent_id"
+              :items="leadAgentOptions"
+              label="Lead Agent"
+              variant="outlined"
+              density="compact"
+              clearable
+              class="mb-2"
+              hint="Agent responsible for coordinating work on this project"
+              persistent-hint
+            />
+
             <v-combobox
               v-model="settingsForm.tags"
               label="Tags"
@@ -578,14 +618,33 @@ export default { components: { FileTreeNode } }
 </script>
 
 <script setup>
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectsStore } from '../stores/projects'
+import { useAgentsStore } from '../stores/agents'
 import api from '../api'
+
+// ── CodeMirror ──
+import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightActiveLine } from '@codemirror/view'
+import { EditorState } from '@codemirror/state'
+import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
+import { syntaxHighlighting, defaultHighlightStyle, indentOnInput, bracketMatching, foldGutter, foldKeymap } from '@codemirror/language'
+import { oneDark } from '@codemirror/theme-one-dark'
+import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
+import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete'
+import { python } from '@codemirror/lang-python'
+import { javascript } from '@codemirror/lang-javascript'
+import { json as jsonLang } from '@codemirror/lang-json'
+import { markdown } from '@codemirror/lang-markdown'
+import { html } from '@codemirror/lang-html'
+import { css } from '@codemirror/lang-css'
+import { yaml } from '@codemirror/lang-yaml'
+import { sql } from '@codemirror/lang-sql'
 
 const route = useRoute()
 const router = useRouter()
 const store = useProjectsStore()
+const agentsStore = useAgentsStore()
 
 const slug = computed(() => route.params.slug)
 const project = ref(null)
@@ -720,7 +779,98 @@ const treePanelWidth = ref(250)
 const showNewFileDialog = ref(false)
 const newFilePath = ref('')
 const newFileIsDir = ref(false)
-const editorRef = ref(null)
+const editorContainer = ref(null)
+let editorView = null
+
+const getLanguageExtension = (lang) => {
+  const map = {
+    python: python(), javascript: javascript(), typescript: javascript({ typescript: true }),
+    json: jsonLang(), markdown: markdown(), html: html(), css: css(), scss: css(),
+    yaml: yaml(), sql: sql(),
+  }
+  return map[lang] || []
+}
+
+function initEditor(content, language) {
+  destroyEditor()
+  if (!editorContainer.value) return
+
+  const extensions = [
+    lineNumbers(),
+    highlightActiveLineGutter(),
+    highlightSpecialChars(),
+    history(),
+    foldGutter(),
+    drawSelection(),
+    dropCursor(),
+    EditorState.allowMultipleSelections.of(true),
+    indentOnInput(),
+    syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+    bracketMatching(),
+    closeBrackets(),
+    autocompletion(),
+    rectangularSelection(),
+    crosshairCursor(),
+    highlightActiveLine(),
+    highlightSelectionMatches(),
+    keymap.of([
+      ...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap,
+      ...historyKeymap, ...foldKeymap, ...completionKeymap,
+      indentWithTab,
+      { key: 'Mod-s', run: () => { saveFile(); return true } },
+    ]),
+    oneDark,
+    EditorView.updateListener.of((update) => {
+      if (update.docChanged) {
+        fileContent.value = update.state.doc.toString()
+      }
+    }),
+    EditorView.theme({ '&': { height: '100%' }, '.cm-scroller': { overflow: 'auto' } }),
+    getLanguageExtension(language),
+  ].flat()
+
+  editorView = new EditorView({
+    state: EditorState.create({ doc: content, extensions }),
+    parent: editorContainer.value,
+  })
+}
+
+function destroyEditor() {
+  if (editorView) { editorView.destroy(); editorView = null }
+}
+
+onBeforeUnmount(destroyEditor)
+
+const codeRunning = ref(false)
+const codeOutput = ref(null)
+
+const RUN_COMMANDS = {
+  python: (f) => `python3 ${f}`,
+  javascript: (f) => `node ${f}`,
+  typescript: (f) => `npx ts-node ${f}`,
+  shell: (f) => `bash ${f}`,
+  bash: (f) => `bash ${f}`,
+  html: (f) => `open ${f}`,
+}
+
+async function runCurrentFile() {
+  if (!selectedFile.value || codeRunning.value) return
+  // Auto-save if modified
+  if (fileModified.value) await saveFile()
+  const lang = selectedFile.value.language || ''
+  const getCmd = RUN_COMMANDS[lang]
+  const cmd = getCmd ? getCmd(selectedFile.value.path) : selectedFile.value.path
+  codeRunning.value = true
+  codeOutput.value = null
+  try {
+    const result = await store.executeCommand(slug.value, { command: cmd, timeout: 60 })
+    codeOutput.value = result
+  } catch (e) {
+    codeOutput.value = { stdout: '', stderr: e.response?.data?.detail || e.message, exit_code: -1, duration_ms: 0, timed_out: false }
+  } finally {
+    codeRunning.value = false
+  }
+}
 
 async function loadFiles() {
   try {
@@ -735,6 +885,8 @@ async function selectFile(item) {
     selectedFile.value = item
     fileContent.value = data.content
     originalContent.value = data.content
+    await nextTick()
+    initEditor(data.content, data.language || item.language || '')
   } catch (e) { console.error(e) }
 }
 
@@ -742,8 +894,10 @@ async function saveFile() {
   if (!selectedFile.value || !fileModified.value) return
   fileSaving.value = true
   try {
-    await store.writeFile(slug.value, selectedFile.value.path, fileContent.value)
-    originalContent.value = fileContent.value
+    const content = editorView ? editorView.state.doc.toString() : fileContent.value
+    await store.writeFile(slug.value, selectedFile.value.path, content)
+    fileContent.value = content
+    originalContent.value = content
   } finally { fileSaving.value = false }
 }
 
@@ -767,6 +921,7 @@ async function deleteFileItem(item) {
   try {
     await store.deleteFile(slug.value, item.path)
     if (selectedFile.value?.path === item.path) {
+      destroyEditor()
       selectedFile.value = null
       fileContent.value = ''
       originalContent.value = ''
@@ -860,11 +1015,46 @@ watch([logLevel, logSource], loadLogs)
 // ── Settings ──
 const settingsForm = ref({})
 const settingsSaving = ref(false)
+const allAgents = ref([])
+
+const agentOptions = computed(() =>
+  allAgents.value.map(a => ({ title: a.name, value: String(a.id) }))
+)
+const leadAgentOptions = computed(() => {
+  // Lead can be any agent (not only from allowed list)
+  return allAgents.value.map(a => ({ title: a.name, value: String(a.id) }))
+})
+
+async function loadAgents() {
+  try {
+    await agentsStore.fetchAgents()
+    allAgents.value = agentsStore.agents || []
+  } catch (e) { console.error('Failed to load agents', e) }
+}
+
+const techStackOptions = [
+  'Python', 'JavaScript', 'TypeScript', 'Go', 'Rust', 'Java', 'C', 'C++', 'C#',
+  'Ruby', 'PHP', 'Swift', 'Kotlin', 'Dart', 'Scala', 'R', 'Lua', 'Perl',
+  'Shell', 'Bash', 'PowerShell', 'SQL',
+  'HTML', 'CSS', 'SCSS', 'Tailwind CSS',
+  'React', 'Vue.js', 'Angular', 'Svelte', 'Next.js', 'Nuxt.js',
+  'Node.js', 'Express', 'FastAPI', 'Django', 'Flask', 'Spring Boot', 'Rails', 'Laravel', '.NET',
+  'PostgreSQL', 'MySQL', 'MongoDB', 'Redis', 'SQLite', 'Elasticsearch',
+  'Docker', 'Kubernetes', 'Terraform', 'Nginx',
+  'GraphQL', 'REST API', 'gRPC', 'WebSocket',
+  'TensorFlow', 'PyTorch', 'LangChain', 'OpenAI', 'Ollama',
+  'Git', 'GitHub Actions', 'CI/CD',
+]
 
 async function saveSettings() {
   settingsSaving.value = true
   try {
-    const data = await store.updateProject(slug.value, settingsForm.value)
+    const payload = { ...settingsForm.value }
+    // Ensure lead_agent_id is sent as empty string (not null) so backend exclude_none doesn't skip it
+    if (payload.lead_agent_id === null || payload.lead_agent_id === undefined) {
+      payload.lead_agent_id = ''
+    }
+    const data = await store.updateProject(slug.value, payload)
     project.value = data
   } finally { settingsSaving.value = false }
 }
@@ -876,12 +1066,14 @@ async function loadProject() {
     project.value = data
     settingsForm.value = {
       name: data.name, description: data.description, goals: data.goals,
-      success_criteria: data.success_criteria, tech_stack: data.tech_stack,
+      success_criteria: data.success_criteria, tech_stack: data.tech_stack || [],
       status: data.status, access_level: data.access_level,
+      allowed_agent_ids: data.allowed_agent_ids || [],
+      lead_agent_id: data.lead_agent_id || null,
       execution_access: data.execution_access, tags: data.tags || [],
     }
     // Load all sub-data
-    await Promise.all([loadTasks(), loadFiles(), loadLogs()])
+    await Promise.all([loadTasks(), loadFiles(), loadLogs(), loadAgents()])
   } catch (e) {
     console.error(e)
     router.push('/projects')
@@ -903,20 +1095,15 @@ watch(slug, loadProject)
   background: rgba(var(--v-theme-primary), 0.08);
 }
 
-.code-editor {
-  width: 100%;
+.code-editor-container {
+  overflow: hidden;
+}
+
+.code-editor-container :deep(.cm-editor) {
   height: 100%;
-  background: #1e1e1e;
-  color: #d4d4d4;
-  border: none;
-  outline: none;
-  resize: none;
-  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
-  font-size: 13px;
-  line-height: 1.5;
-  padding: 12px;
-  tab-size: 2;
-  white-space: pre;
+}
+
+.code-editor-container :deep(.cm-scroller) {
   overflow: auto;
 }
 
@@ -925,5 +1112,27 @@ watch(slug, loadProject)
 }
 .kanban-card:active {
   cursor: grabbing;
+}
+
+.code-run-output {
+  max-height: 200px;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+  flex-shrink: 0;
+}
+
+.code-run-output-text {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 8px 12px;
+  margin: 0;
+  overflow: auto;
+  max-height: 150px;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 </style>

@@ -5,6 +5,11 @@ const backendUrl = process.env.VITE_BACKEND_URL || 'http://backend:8000'
 
 export default defineConfig({
   plugins: [vue()],
+  resolve: {
+    alias: {
+      vue: 'vue/dist/vue.esm-bundler.js',
+    },
+  },
   server: {
     host: '0.0.0.0',
     port: 4200,

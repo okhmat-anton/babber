@@ -102,8 +102,20 @@ async def start_autonomous_run(
         elif agent.model_id:
             model_ids = [str(agent.model_id)]
 
+        # Validate and remap stale model_ids
+        if model_ids:
+            from app.api.chat import _validate_and_remap_model_ids
+            model_ids = await _validate_and_remap_model_ids(model_ids, db)
+
+        # Fallback to base role model
         if not model_ids:
-            raise ValueError("Agent has no models configured")
+            from app.services.model_role_service import resolve_model_for_role
+            base_model = await resolve_model_for_role(db, "base")
+            if base_model:
+                model_ids = [str(base_model.id)]
+
+        if not model_ids:
+            raise ValueError("Agent has no models configured and no base model available")
 
         chat_session = ChatSession(
             title=f"🔄 Autonomous: {agent.name} — {protocol.name}",
@@ -354,6 +366,9 @@ async def _execute_cycle(db: AsyncSession, run: AutonomousRun, agent: Agent) -> 
         agent_beliefs = read_beliefs(agent.name)
         agent_aspirations = read_aspirations(agent.name)
 
+        # Load assigned projects with their pending tasks
+        assigned_projects = _load_assigned_projects(str(agent.id))
+
         # Load the loop protocol
         result = await db.execute(select(ThinkingProtocol).where(ThinkingProtocol.id == run.loop_protocol_id))
         loop_protocol = result.scalar_one_or_none()
@@ -366,12 +381,13 @@ async def _execute_cycle(db: AsyncSession, run: AutonomousRun, agent: Agent) -> 
         } if loop_protocol else {"name": "Default Autonomous", "steps": [], "type": "loop", "description": ""}
 
         await tracker.step(
-            "context_load", "Load protocols, skills, beliefs, aspirations",
+            "context_load", "Load protocols, skills, beliefs, aspirations, projects",
             output_data={
                 "protocols_count": len(agent_protocols),
                 "skills_count": len(agent_skills),
                 "has_beliefs": bool(agent_beliefs),
                 "has_aspirations": bool(agent_aspirations),
+                "assigned_projects_count": len(assigned_projects),
                 "loop_protocol": protocol_dict.get("name"),
             },
             duration_ms=tracker.elapsed_step_ms(),
@@ -390,6 +406,7 @@ async def _execute_cycle(db: AsyncSession, run: AutonomousRun, agent: Agent) -> 
             beliefs=agent_beliefs,
             aspirations=agent_aspirations,
             agent_name=agent.name,
+            assigned_projects=assigned_projects or None,
         )
 
         await tracker.step(
@@ -429,6 +446,30 @@ async def _execute_cycle(db: AsyncSession, run: AutonomousRun, agent: Agent) -> 
             pending = [t for t in cycle_state["todo_list"] if t.get("status") in ("pending", "in_progress")]
             if pending:
                 cycle_prompt += f" You have {len(pending)} pending tasks."
+
+        # Self-thinking mode: suggest task generation when idle
+        if agent.self_thinking:
+            has_pending_todo = cycle_state.get("todo_list") and any(
+                t.get("status") in ("pending", "in_progress") for t in cycle_state["todo_list"]
+            )
+            has_project_tasks = assigned_projects and any(
+                p.get("pending_tasks") for p in assigned_projects
+            )
+            if not has_pending_todo and not has_project_tasks:
+                cycle_prompt += (
+                    "\n\n🧠 **Self-Thinking Mode Active:** You have no pending tasks. "
+                    "Reflect on your mission, dreams, goals, and assigned projects. "
+                    "Generate new low-priority tasks aligned with your aspirations — "
+                    "think about what you could learn, explore, improve, or create. "
+                    "Add them to your todo list with <<<TODO>>> markers."
+                )
+            elif not has_pending_todo and has_project_tasks:
+                cycle_prompt += (
+                    "\n\n🧠 **Self-Thinking Mode:** Your personal todo list is empty, "
+                    "but you have project tasks waiting. Pick the highest-priority project task "
+                    "to work on, or generate supporting tasks aligned with project goals."
+                )
+
         history.append({"role": "user", "content": cycle_prompt})
 
         await tracker.step(
@@ -650,3 +691,78 @@ def _extract_summary(text: str) -> str:
     if paragraphs:
         return paragraphs[-1][:1000]
     return text[:1000]
+
+
+def _load_assigned_projects(agent_id: str) -> list[dict]:
+    """
+    Load projects assigned to agent (file-based).
+    Returns list of project dicts with pending_tasks included.
+    """
+    from pathlib import Path
+    from app.config import get_settings
+    import json as _json
+
+    settings = get_settings()
+    base = Path(settings.PROJECTS_DIR)
+    if not base.exists():
+        return []
+
+    projects = []
+    for entry in sorted(base.iterdir(), key=lambda e: e.name.lower()):
+        if not entry.is_dir():
+            continue
+        pj = entry / "project.json"
+        if not pj.exists():
+            continue
+        try:
+            config = _json.loads(pj.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+
+        if config.get("status") in ("archived",):
+            continue
+
+        access = config.get("access_level", "full")
+        allowed = config.get("allowed_agent_ids", [])
+        lead = config.get("lead_agent_id")
+
+        if access == "full" or agent_id in allowed or lead == agent_id:
+            proj = {
+                "name": config.get("name", ""),
+                "slug": config.get("slug", entry.name),
+                "description": config.get("description", ""),
+                "goals": config.get("goals", ""),
+                "tech_stack": config.get("tech_stack", []),
+                "status": config.get("status", "active"),
+                "is_lead": (lead == agent_id),
+            }
+
+            # Load tasks
+            tasks_file = entry / "tasks.json"
+            tasks = []
+            if tasks_file.exists():
+                try:
+                    tasks = _json.loads(tasks_file.read_text(encoding="utf-8"))
+                except Exception:
+                    pass
+
+            # Compute task stats
+            proj["task_stats"] = {
+                "total": len(tasks),
+                "backlog": sum(1 for t in tasks if t.get("status") == "backlog"),
+                "todo": sum(1 for t in tasks if t.get("status") == "todo"),
+                "in_progress": sum(1 for t in tasks if t.get("status") == "in_progress"),
+                "review": sum(1 for t in tasks if t.get("status") == "review"),
+                "done": sum(1 for t in tasks if t.get("status") == "done"),
+            }
+
+            # Include pending tasks (not done, not cancelled)
+            pending = [t for t in tasks if t.get("status") not in ("done", "cancelled")]
+            # Sort by priority
+            priority_order = {"highest": 0, "high": 1, "medium": 2, "low": 3, "lowest": 4}
+            pending.sort(key=lambda t: priority_order.get(t.get("priority", "medium"), 2))
+            proj["pending_tasks"] = pending
+
+            projects.append(proj)
+
+    return projects

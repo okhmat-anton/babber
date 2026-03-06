@@ -78,6 +78,7 @@
         <v-tab value="info">Info</v-tab>
         <v-tab value="beliefs">Beliefs</v-tab>
         <v-tab value="aspirations">Aspirations</v-tab>
+        <v-tab value="projects">Projects</v-tab>
         <v-tab value="files">Files</v-tab>
         <v-tab value="tasks">Tasks</v-tab>
         <v-tab value="thinking">Thinking Logs</v-tab>
@@ -292,6 +293,31 @@
                 </v-card>
               </v-col>
             </v-row>
+
+            <!-- Self-Thinking Mode -->
+            <v-card variant="outlined" class="pa-3 mt-3">
+              <div class="d-flex align-center">
+                <v-switch
+                  :model-value="agent.self_thinking"
+                  color="purple"
+                  hide-details
+                  density="compact"
+                  :loading="permSaving"
+                  @update:model-value="(v) => toggleAgentPermission('self_thinking', v)"
+                >
+                  <template #label>
+                    <div>
+                      <span class="font-weight-medium">🧠 Self-Thinking Mode</span>
+                      <div class="text-caption text-medium-emphasis">When idle, auto-generate tasks aligned with mission, aspirations, and projects</div>
+                    </div>
+                  </template>
+                </v-switch>
+                <v-spacer />
+                <v-chip :color="agent.self_thinking ? 'purple' : 'grey'" size="x-small" variant="flat">
+                  {{ agent.self_thinking ? 'ON' : 'OFF' }}
+                </v-chip>
+              </div>
+            </v-card>
           </div>
         </div>
 
@@ -729,6 +755,57 @@
           <div v-if="!allAvailableSkills.length" class="text-center text-grey pa-6">No skills available</div>
         </div>
 
+        <!-- Projects Tab -->
+        <div v-if="tab === 'projects'">
+          <div class="d-flex align-center mb-4">
+            <div class="text-h6">Assigned Projects</div>
+            <v-spacer />
+            <v-btn size="small" variant="tonal" prepend-icon="mdi-refresh" @click="loadAgentProjects" :loading="agentProjectsLoading">Refresh</v-btn>
+          </div>
+          <div v-if="agentProjectsLoading" class="text-center pa-6">
+            <v-progress-circular indeterminate size="32" />
+          </div>
+          <div v-else-if="!agentProjects.length" class="text-center text-grey pa-6">
+            <v-icon size="48" color="grey-darken-1" class="mb-2">mdi-folder-off-outline</v-icon>
+            <div>No projects assigned to this agent</div>
+            <div class="text-caption mt-1">Assign this agent to projects via Project Settings</div>
+          </div>
+          <v-row v-else>
+            <v-col v-for="p in agentProjects" :key="p.slug" cols="12" md="6" lg="4">
+              <v-card
+                variant="outlined"
+                class="project-card"
+                :to="`/projects/${p.slug}`"
+                hover
+              >
+                <v-card-title class="d-flex align-center">
+                  <v-icon start color="primary" size="20">mdi-folder-wrench</v-icon>
+                  {{ p.name }}
+                  <v-chip v-if="p.is_lead" size="x-small" color="amber" variant="flat" class="ml-2">Lead</v-chip>
+                  <v-spacer />
+                  <v-chip :color="projectStatusColor(p.status)" size="x-small" variant="flat">{{ p.status }}</v-chip>
+                </v-card-title>
+                <v-card-text>
+                  <div v-if="p.description" class="text-body-2 text-grey mb-2" style="display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">
+                    {{ p.description }}
+                  </div>
+                  <div class="d-flex align-center gap-2 flex-wrap">
+                    <v-chip v-for="tech in (p.tech_stack || []).slice(0, 4)" :key="tech" size="x-small" variant="tonal" color="cyan">{{ tech }}</v-chip>
+                    <v-chip v-if="(p.tech_stack || []).length > 4" size="x-small" variant="tonal">+{{ p.tech_stack.length - 4 }}</v-chip>
+                  </div>
+                  <div class="d-flex align-center mt-2 text-caption text-grey">
+                    <v-icon size="14" class="mr-1">mdi-clipboard-list-outline</v-icon>
+                    {{ p.task_stats?.done || 0 }}/{{ p.task_stats?.total || 0 }} tasks
+                    <v-spacer />
+                    <v-icon size="14" class="mr-1">mdi-file-document-outline</v-icon>
+                    {{ p.file_count || 0 }} files
+                  </div>
+                </v-card-text>
+              </v-card>
+            </v-col>
+          </v-row>
+        </div>
+
         <!-- Files Tab -->
         <div v-if="tab === 'files'" class="agent-files-tab">
           <div class="d-flex" style="height: 500px;">
@@ -1002,12 +1079,14 @@ import { useRoute, useRouter } from 'vue-router'
 import api from '../api'
 import { useAgentsStore } from '../stores/agents'
 import { useSettingsStore } from '../stores/settings'
+import { useProjectsStore } from '../stores/projects'
 import ProtocolFlow from '../components/ProtocolFlow.vue'
 
 const route = useRoute()
 const router = useRouter()
 const agentsStore = useAgentsStore()
 const settingsStore = useSettingsStore()
+const projectsStore = useProjectsStore()
 const tab = ref('info')
 const agent = ref(null)
 const stats = ref({})
@@ -1054,6 +1133,10 @@ const newSkillSaving = ref(false)
 // Files tab state
 const fileTree = ref([])
 const currentFilePath = ref(null)
+
+// Projects tab state
+const agentProjects = ref([])
+const agentProjectsLoading = ref(false)
 const fileContent = ref('')
 const fileModified = ref(false)
 const fileSaving = ref(false)
@@ -1147,6 +1230,19 @@ const loadData = async () => {
     globalFsEnabled.value = settingsStore.systemSettings.filesystem_access_enabled?.value === 'true'
     globalSysEnabled.value = settingsStore.systemSettings.system_access_enabled?.value === 'true'
   } catch {}
+}
+
+// ── Agent Projects ──
+async function loadAgentProjects() {
+  agentProjectsLoading.value = true
+  try {
+    agentProjects.value = await projectsStore.fetchProjectsForAgent(String(id.value))
+  } catch (e) { console.error('Failed to load agent projects', e) }
+  agentProjectsLoading.value = false
+}
+
+function projectStatusColor(status) {
+  return { active: 'success', paused: 'warning', completed: 'info', archived: 'grey' }[status] || 'grey'
 }
 
 const toggleAgentPermission = async (field, value) => {
@@ -1693,6 +1789,13 @@ const createAgentTask = () => router.push(`/tasks/new?agent_id=${id.value}`)
 onMounted(async () => {
   await loadData()
   await loadAutonomousStatus()
+})
+
+// Lazy-load projects when tab is selected
+watch(tab, (val) => {
+  if (val === 'projects' && !agentProjects.value.length && !agentProjectsLoading.value) {
+    loadAgentProjects()
+  }
 })
 
 onUnmounted(() => {

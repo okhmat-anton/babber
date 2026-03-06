@@ -383,6 +383,7 @@ def format_loop_protocol_prompt(
     beliefs: dict | None = None,
     aspirations: dict | None = None,
     agent_name: str = "Agent",
+    assigned_projects: list[dict] | None = None,
 ) -> str:
     """
     Build the system prompt for an autonomous loop cycle.
@@ -473,6 +474,34 @@ def format_loop_protocol_prompt(
                     lock = "🔒" if g.get("locked") else "🔓"
                     status = g.get("status", "active")
                     sections.append(f"  {lock} [{g.get('priority','medium')}] [{status}] {g.get('text','')}")
+            sections.append("")
+
+    # Assigned Projects
+    if assigned_projects:
+        sections.append("## Your Assigned Projects")
+        sections.append("These are the projects you are responsible for. Prioritize project work when tasks are available.")
+        sections.append("")
+        for proj in assigned_projects:
+            lead_marker = " ⭐ **[Lead]**" if proj.get("is_lead") else ""
+            sections.append(f"### 📁 {proj.get('name', 'Unnamed')}{lead_marker}")
+            if proj.get("description"):
+                sections.append(f"  {proj['description'][:300]}")
+            if proj.get("goals"):
+                sections.append(f"  **Goals:** {proj['goals'][:300]}")
+            if proj.get("tech_stack"):
+                sections.append(f"  **Tech:** {', '.join(proj['tech_stack'][:10])}")
+            ts = proj.get("task_stats", {})
+            if ts:
+                sections.append(f"  **Tasks:** {ts.get('total', 0)} total, {ts.get('done', 0)} done, {ts.get('in_progress', 0)} in progress, {ts.get('todo', 0)} todo, {ts.get('backlog', 0)} backlog")
+            # Show pending project tasks
+            project_tasks = proj.get("pending_tasks", [])
+            if project_tasks:
+                sections.append(f"  **Pending Tasks:**")
+                for pt in project_tasks[:10]:
+                    priority_icon = {"highest": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢", "lowest": "⚪"}.get(pt.get("priority", "medium"), "🟡")
+                    sections.append(f"    {priority_icon} [{pt.get('status','backlog')}] {pt.get('title','')} (priority: {pt.get('priority','medium')})")
+                if len(project_tasks) > 10:
+                    sections.append(f"    ... and {len(project_tasks) - 10} more tasks")
             sections.append("")
 
     # Protocol steps

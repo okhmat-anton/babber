@@ -46,6 +46,8 @@ class AgentCreate(BaseModel):
     # Permissions
     filesystem_access: bool = False
     system_access: bool = False
+    # Self-thinking mode
+    self_thinking: bool = False
     # Multi-model support
     models: list[AgentModelEntry] = []
     # Thinking protocols (multi-protocol)
@@ -71,6 +73,8 @@ class AgentUpdate(BaseModel):
     # Permissions
     filesystem_access: bool | None = None
     system_access: bool | None = None
+    # Self-thinking mode
+    self_thinking: bool | None = None
     # Multi-model support (if provided, replaces all)
     models: list[AgentModelEntry] | None = None
     # Thinking protocols (multi-protocol)
@@ -99,6 +103,7 @@ class AgentResponse(BaseModel):
     num_gpu: int
     filesystem_access: bool = False
     system_access: bool = False
+    self_thinking: bool = False
     beliefs: dict = {}                 # from beliefs.json (filesystem)
     aspirations: dict = {}             # from aspirations.json (filesystem)
     thinking_protocol_id: str | None = None

@@ -334,8 +334,13 @@ const modelItems = computed(() => chatStore.availableModels || [])
 
 const modelNamesDisplay = computed(() => {
   if (!chatStore.currentSession) return ''
-  const ids = chatStore.currentSession.model_ids || []
+  const session = chatStore.currentSession
+  const ids = session.model_ids || []
+  const serverNames = session.model_names || {}
   return ids.map(id => {
+    // First try server-provided name (always up-to-date)
+    if (serverNames[id]) return serverNames[id]
+    // Then try matching from available models
     const m = chatStore.availableModels.find(am => am.id === id)
     return m ? m.name : id
   }).join(', ')

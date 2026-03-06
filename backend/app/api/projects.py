@@ -215,6 +215,10 @@ def _enrich_project(config: dict, project_dir: Path) -> dict:
         "cancelled": sum(1 for t in tasks if t.get("status") == "cancelled"),
     }
     config["file_count"] = file_count
+    # Migrate legacy string tech_stack to list
+    ts = config.get("tech_stack", [])
+    if isinstance(ts, str):
+        config["tech_stack"] = [t.strip() for t in ts.split(",") if t.strip()] if ts else []
     return config
 
 
@@ -225,10 +229,11 @@ class ProjectCreate(BaseModel):
     description: str = ""
     goals: str = ""
     success_criteria: str = ""
-    tech_stack: str = ""
+    tech_stack: list[str] = []
     status: str = "active"
     access_level: str = "full"  # full = all agents, restricted = listed agents
     allowed_agent_ids: list[str] = []
+    lead_agent_id: Optional[str] = None  # agent designated as lead for this project
     execution_access: str = "restricted"  # restricted or full access to system
     tags: list[str] = []
 
@@ -238,10 +243,11 @@ class ProjectUpdate(BaseModel):
     description: Optional[str] = None
     goals: Optional[str] = None
     success_criteria: Optional[str] = None
-    tech_stack: Optional[str] = None
+    tech_stack: Optional[list[str]] = None
     status: Optional[str] = None
     access_level: Optional[str] = None
     allowed_agent_ids: Optional[list[str]] = None
+    lead_agent_id: Optional[str] = None
     execution_access: Optional[str] = None
     tags: Optional[list[str]] = None
 
@@ -308,6 +314,35 @@ async def list_projects(
     return {"items": projects, "total": len(projects)}
 
 
+@router.get("/by-agent/{agent_id}")
+async def list_projects_for_agent(
+    agent_id: str,
+    _user: User = Depends(get_current_user),
+):
+    """List projects accessible by a given agent (allowed or access_level=full, or lead)."""
+    _ensure_projects_dir()
+    base = Path(settings.PROJECTS_DIR)
+    projects = []
+    if not base.exists():
+        return {"items": [], "total": 0}
+    for entry in sorted(base.iterdir(), key=lambda e: e.name.lower()):
+        if entry.is_dir() and (entry / "project.json").exists():
+            config = _read_project_json(entry)
+            if not config:
+                continue
+            if config.get("status") in ("archived",):
+                continue
+            access = config.get("access_level", "full")
+            allowed = config.get("allowed_agent_ids", [])
+            lead = config.get("lead_agent_id")
+            # Agent has access if: access_level is full, or agent is in allowed list, or agent is lead
+            if access == "full" or agent_id in allowed or lead == agent_id:
+                enriched = _enrich_project(config, entry)
+                enriched["is_lead"] = (lead == agent_id)
+                projects.append(enriched)
+    return {"items": projects, "total": len(projects)}
+
+
 @router.post("", status_code=201)
 async def create_project(
     body: ProjectCreate,
@@ -342,6 +377,7 @@ async def create_project(
         "status": body.status if body.status in PROJECT_STATUSES else "active",
         "access_level": body.access_level,
         "allowed_agent_ids": body.allowed_agent_ids,
+        "lead_agent_id": body.lead_agent_id,
         "execution_access": body.execution_access,
         "tags": body.tags,
         "created_at": now,

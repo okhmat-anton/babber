@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy import text
 import redis.asyncio as aioredis
 from app.config import get_settings
 
@@ -38,3 +39,10 @@ async def init_db():
     async with engine.begin() as conn:
         from app.models import user, model_config, agent, agent_model, task, log, api_key, skill, memory, system_setting, chat, thinking_protocol, agent_protocol, autonomous_run  # noqa
         await conn.run_sync(Base.metadata.create_all)
+
+        # ── Inline migrations for new columns ──
+        await conn.execute(
+            text("""
+                ALTER TABLE agents ADD COLUMN IF NOT EXISTS self_thinking BOOLEAN DEFAULT FALSE;
+            """)
+        )

@@ -107,7 +107,7 @@ class AvailableModel(BaseModel):
 
 # ── Helpers ──────────────────────────────────────────────
 
-def _session_to_response(session: ChatSession) -> dict:
+def _session_to_response(session: ChatSession, model_names: dict[str, str] = None) -> dict:
     msgs = session.messages or []
     last_msg = None
     if msgs:
@@ -117,6 +117,7 @@ def _session_to_response(session: ChatSession) -> dict:
         "id": str(session.id),
         "title": session.title,
         "model_ids": session.model_ids or [],
+        "model_names": model_names or {},
         "agent_id": str(session.agent_id) if session.agent_id else None,
         "agent_ids": session.agent_ids or [],
         "multi_model": session.multi_model,
@@ -128,6 +129,45 @@ def _session_to_response(session: ChatSession) -> dict:
         "updated_at": session.updated_at.isoformat(),
         "last_message": last_msg,
     }
+
+
+async def _build_model_names(model_ids: list[str], db: AsyncSession) -> dict[str, str]:
+    """Build a map of model_id -> display name for all model_ids in a session."""
+    names = {}
+    if not model_ids:
+        return names
+    # Collect UUIDs to lookup
+    uuids_to_lookup = []
+    for mid in model_ids:
+        if mid.startswith("agent:"):
+            try:
+                aid = uuid.UUID(mid[6:])
+                agent = await db.get(Agent, aid)
+                names[mid] = f"🤖 {agent.name}" if agent else mid
+            except Exception:
+                names[mid] = mid
+        elif mid.startswith("ollama:"):
+            names[mid] = mid[7:]
+        else:
+            try:
+                uuids_to_lookup.append(uuid.UUID(mid))
+            except ValueError:
+                names[mid] = mid
+
+    if uuids_to_lookup:
+        result = await db.execute(
+            select(ModelConfig.id, ModelConfig.name, ModelConfig.model_id)
+            .where(ModelConfig.id.in_(uuids_to_lookup))
+        )
+        for row in result.all():
+            names[str(row[0])] = row[1] or row[2]
+
+    # For any remaining unresolved IDs, mark as unknown
+    for mid in model_ids:
+        if mid not in names:
+            names[mid] = f"⚠ Unknown ({mid[:8]}…)"
+
+    return names
 
 
 def _message_to_response(msg: ChatMessage) -> dict:
@@ -149,6 +189,7 @@ async def _resolve_model(model_id_str: str, db: AsyncSession) -> tuple[str, str,
     model_id_str can be:
       - UUID of a model_config
       - 'ollama:model_name' for direct ollama model
+    Falls back to finding the same model by name if UUID is stale.
     """
     if model_id_str.startswith("ollama:"):
         model_name = model_id_str[7:]
@@ -165,7 +206,14 @@ async def _resolve_model(model_id_str: str, db: AsyncSession) -> tuple[str, str,
     result = await db.execute(select(ModelConfig).where(ModelConfig.id == uid))
     mc = result.scalar_one_or_none()
     if not mc:
-        raise HTTPException(status_code=404, detail=f"Model config {model_id_str} not found")
+        # Model UUID not found — likely deleted and re-created after Ollama reload
+        # Try to find ANY active model as fallback
+        fallback = await db.execute(
+            select(ModelConfig).where(ModelConfig.is_active == True).limit(1)
+        )
+        mc = fallback.scalar_one_or_none()
+        if not mc:
+            raise HTTPException(status_code=404, detail=f"Model config {model_id_str} not found and no active models available")
 
     # For ollama models, always use current OLLAMA_BASE_URL (may differ between Docker / dev)
     if mc.provider == "ollama":
@@ -173,6 +221,74 @@ async def _resolve_model(model_id_str: str, db: AsyncSession) -> tuple[str, str,
         return (mc.provider, settings.OLLAMA_BASE_URL, mc.model_id, mc.api_key)
 
     return (mc.provider, mc.base_url, mc.model_id, mc.api_key)
+
+
+async def _remap_model_id(model_id_str: str, db: AsyncSession) -> str | None:
+    """Try to remap a stale model_id to a valid one.
+    Returns the valid model_id string, or None if no remap needed (already valid).
+    Returns a new UUID string if remapped, or None.
+    """
+    if model_id_str.startswith("ollama:") or model_id_str.startswith("agent:"):
+        return None  # These don't need remapping
+
+    try:
+        uid = uuid.UUID(model_id_str)
+    except ValueError:
+        return None
+
+    # Check if UUID still exists
+    result = await db.execute(select(ModelConfig).where(ModelConfig.id == uid))
+    mc = result.scalar_one_or_none()
+    if mc:
+        return None  # Still valid, no remap needed
+
+    # UUID is stale. Try to find a model with the same model_id (name)
+    # First, check if there's any history of what model this UUID was
+    # Since we don't have a log of old UUIDs, we'll search all active models
+    # and try to use any available one
+    fallback = await db.execute(
+        select(ModelConfig).where(ModelConfig.is_active == True).order_by(ModelConfig.name).limit(1)
+    )
+    fc = fallback.scalar_one_or_none()
+    if fc:
+        return str(fc.id)
+    return None
+
+
+async def _validate_and_remap_model_ids(model_ids: list[str], db: AsyncSession, session: ChatSession = None) -> list[str]:
+    """Validate model_ids and remap any stale UUIDs.
+    If session is provided, persists changes to DB.
+    Returns the validated list.
+    """
+    if not model_ids:
+        return model_ids
+
+    new_ids = []
+    changed = False
+    for mid in model_ids:
+        if mid.startswith("agent:"):
+            new_ids.append(mid)
+            continue
+        remapped = await _remap_model_id(mid, db)
+        if remapped is not None:
+            new_ids.append(remapped)
+            changed = True
+        else:
+            new_ids.append(mid)
+
+    # Deduplicate while preserving order
+    seen = set()
+    deduped = []
+    for mid in new_ids:
+        if mid not in seen:
+            seen.add(mid)
+            deduped.append(mid)
+
+    if changed and session is not None:
+        session.model_ids = deduped
+        await db.flush()
+
+    return deduped
 
 
 async def _chat_with_model(
@@ -271,7 +387,13 @@ async def list_sessions(
         .limit(limit)
     )
     sessions = result.scalars().all()
-    return [_session_to_response(s) for s in sessions]
+    # Build model names map for all sessions efficiently
+    all_model_ids = set()
+    for s in sessions:
+        for mid in (s.model_ids or []):
+            all_model_ids.add(mid)
+    all_names = await _build_model_names(list(all_model_ids), db) if all_model_ids else {}
+    return [_session_to_response(s, {mid: all_names.get(mid, mid) for mid in (s.model_ids or [])}) for s in sessions]
 
 
 @router.post("/sessions")
@@ -336,6 +458,9 @@ async def create_session(
                 elif agent.model_id:
                     model_ids = [str(agent.model_id)]
 
+        # Validate and remap stale model_ids (agent models may have changed UUIDs)
+        model_ids = await _validate_and_remap_model_ids(model_ids, db)
+
         # Fallback to base role model
         if not model_ids:
             base_model = await resolve_model_for_role(db, "base")
@@ -358,10 +483,8 @@ async def create_session(
     db.add(session)
     await db.flush()
     await db.refresh(session)
-    return _session_to_response(session)
-
-
-@router.get("/sessions/{session_id}")
+    model_names = await _build_model_names(session.model_ids or [], db)
+    return _session_to_response(session, model_names)
 async def get_session(
     session_id: str,
     user: User = Depends(get_current_user),
@@ -378,7 +501,10 @@ async def get_session(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    data = _session_to_response(session)
+    # Validate and remap stale model_ids
+    session.model_ids = await _validate_and_remap_model_ids(session.model_ids or [], db, session)
+    model_names = await _build_model_names(session.model_ids or [], db)
+    data = _session_to_response(session, model_names)
     data["messages"] = [_message_to_response(m) for m in session.messages]
     return data
 
@@ -414,7 +540,8 @@ async def update_session(
 
     await db.flush()
     await db.refresh(session)
-    return _session_to_response(session)
+    model_names = await _build_model_names(session.model_ids or [], db)
+    return _session_to_response(session, model_names)
 
 
 @router.delete("/sessions/{session_id}")
@@ -583,14 +710,18 @@ async def send_message(
     model_ids = body.model_ids or session.model_ids or []
     # Filter out agent: prefixed entries from model_ids (they're not real models)
     model_ids = [m for m in model_ids if not m.startswith("agent:")]
+    # Validate and remap stale model_ids
+    model_ids = await _validate_and_remap_model_ids(model_ids, db, session)
     if not model_ids:
         # Try to resolve from agent's configuration
         if session.agent_id and session.agent:
             agent = session.agent
             if agent.agent_models:
                 model_ids = [str(am.model_config_id) for am in sorted(agent.agent_models, key=lambda x: x.priority)]
+                model_ids = await _validate_and_remap_model_ids(model_ids, db)
             elif agent.model_id:
                 model_ids = [str(agent.model_id)]
+                model_ids = await _validate_and_remap_model_ids(model_ids, db)
     # Fallback to base role model
     if not model_ids:
         base_model = await resolve_model_for_role(db, "base")

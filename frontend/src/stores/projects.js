@@ -32,6 +32,11 @@ export const useProjectsStore = defineStore('projects', {
       return data
     },
 
+    async fetchProjectsForAgent(agentId) {
+      const { data } = await api.get(`/projects/by-agent/${agentId}`)
+      return data.items || []
+    },
+
     async createProject(payload) {
       const { data } = await api.post('/projects', payload)
       this.projects.unshift(data)

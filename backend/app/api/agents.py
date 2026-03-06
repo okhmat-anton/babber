@@ -146,6 +146,7 @@ async def create_agent(
     # Handle thinking_protocol_id separately
     if body.thinking_protocol_id:
         agent_data["thinking_protocol_id"] = body.thinking_protocol_id
+    # self_thinking is already in agent_data from model_dump
     agent = Agent(**agent_data)
     db.add(agent)
     await db.flush()
@@ -245,6 +246,8 @@ async def update_agent(
         agent.filesystem_access = update_data["filesystem_access"]
     if "system_access" in update_data:
         agent.system_access = update_data["system_access"]
+    if "self_thinking" in update_data:
+        agent.self_thinking = update_data["self_thinking"]
     if "thinking_protocol_id" in update_data:
         val = update_data["thinking_protocol_id"]
         agent.thinking_protocol_id = val if val else None

@@ -37,8 +37,8 @@
               <v-icon :color="statusColor(project.status)" size="28">{{ statusIcon(project.status) }}</v-icon>
             </template>
             <v-card-title class="text-truncate">{{ project.name }}</v-card-title>
-            <v-card-subtitle v-if="project.tech_stack" class="text-truncate">
-              {{ project.tech_stack }}
+            <v-card-subtitle v-if="project.tech_stack && project.tech_stack.length" class="text-truncate">
+              {{ Array.isArray(project.tech_stack) ? project.tech_stack.join(', ') : project.tech_stack }}
             </v-card-subtitle>
           </v-card-item>
 
@@ -138,13 +138,17 @@
             rows="2"
             class="mb-2"
           />
-          <v-text-field
+          <v-combobox
             v-model="form.tech_stack"
+            :items="techStackOptions"
             label="Tech Stack"
-            placeholder="Python, FastAPI, Vue.js..."
+            multiple
+            chips
+            closable-chips
             variant="outlined"
             density="compact"
             class="mb-2"
+            hint="Select or type custom technologies"
           />
           <v-row>
             <v-col cols="6">
@@ -188,6 +192,29 @@
               />
             </v-col>
           </v-row>
+          <v-select
+            v-model="form.allowed_agent_ids"
+            :items="agentOptions"
+            label="Assigned Agents"
+            variant="outlined"
+            density="compact"
+            multiple
+            chips
+            closable-chips
+            class="mb-2"
+            hint="Agents that can work on this project"
+            persistent-hint
+          />
+          <v-select
+            v-model="form.lead_agent_id"
+            :items="agentOptions"
+            label="Lead Agent"
+            variant="outlined"
+            density="compact"
+            clearable
+            hint="Agent coordinating work on this project"
+            persistent-hint
+          />
         </v-card-text>
         <v-card-actions>
           <v-spacer />
@@ -227,12 +254,14 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useProjectsStore } from '../stores/projects'
+import { useAgentsStore } from '../stores/agents'
 
 const router = useRouter()
 const store = useProjectsStore()
+const agentsStore = useAgentsStore()
 
 const loading = ref(false)
 const statusFilter = ref(null)
@@ -249,14 +278,35 @@ const defaultForm = () => ({
   description: '',
   goals: '',
   success_criteria: '',
-  tech_stack: '',
+  tech_stack: [],
   status: 'active',
   access_level: 'full',
+  allowed_agent_ids: [],
+  lead_agent_id: null,
   execution_access: 'restricted',
   tags: [],
 })
 
+const allAgents = ref([])
+const agentOptions = computed(() =>
+  allAgents.value.map(a => ({ title: a.name, value: String(a.id) }))
+)
+
 const form = ref(defaultForm())
+
+const techStackOptions = [
+  'Python', 'JavaScript', 'TypeScript', 'Go', 'Rust', 'Java', 'C', 'C++', 'C#',
+  'Ruby', 'PHP', 'Swift', 'Kotlin', 'Dart', 'Scala', 'R', 'Lua', 'Perl',
+  'Shell', 'Bash', 'PowerShell', 'SQL',
+  'HTML', 'CSS', 'SCSS', 'Tailwind CSS',
+  'React', 'Vue.js', 'Angular', 'Svelte', 'Next.js', 'Nuxt.js',
+  'Node.js', 'Express', 'FastAPI', 'Django', 'Flask', 'Spring Boot', 'Rails', 'Laravel', '.NET',
+  'PostgreSQL', 'MySQL', 'MongoDB', 'Redis', 'SQLite', 'Elasticsearch',
+  'Docker', 'Kubernetes', 'Terraform', 'Nginx',
+  'GraphQL', 'REST API', 'gRPC', 'WebSocket',
+  'TensorFlow', 'PyTorch', 'LangChain', 'OpenAI', 'Ollama',
+  'Git', 'GitHub Actions', 'CI/CD',
+]
 
 const statusOptions = [
   { title: 'Active', value: 'active' },
@@ -316,10 +366,15 @@ async function saveProject() {
   if (!form.value.name) return
   saving.value = true
   try {
+    const payload = { ...form.value }
+    // Ensure lead_agent_id sends empty string (not null) so backend doesn't skip it
+    if (payload.lead_agent_id === null || payload.lead_agent_id === undefined) {
+      payload.lead_agent_id = ''
+    }
     if (editingProject.value) {
-      await store.updateProject(editingProject.value.slug, form.value)
+      await store.updateProject(editingProject.value.slug, payload)
     } else {
-      await store.createProject(form.value)
+      await store.createProject(payload)
     }
     closeDialog()
     await load()
@@ -345,7 +400,16 @@ async function doDelete() {
   }
 }
 
-onMounted(load)
+async function loadAgents() {
+  try {
+    await agentsStore.fetchAgents()
+    allAgents.value = agentsStore.agents || []
+  } catch (e) { console.error('Failed to load agents', e) }
+}
+
+onMounted(async () => {
+  await Promise.all([load(), loadAgents()])
+})
 </script>
 
 <style scoped>
