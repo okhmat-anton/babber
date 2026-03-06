@@ -39,6 +39,16 @@
       <div class="layout-split">
         <!-- Main Content -->
         <div class="main-content" :style="{ marginRight: chatStore.panelOpen ? panelWidth + 'px' : '0' }">
+          <v-alert
+            v-if="baseModelAlert"
+            type="error"
+            variant="tonal"
+            density="compact"
+            class="mx-6 mt-4 mb-0"
+            icon="mdi-alert-circle"
+          >
+            <strong>{{ baseModelAlert }}</strong>
+          </v-alert>
           <v-container fluid class="pa-6">
             <router-view />
           </v-container>
@@ -81,18 +91,22 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useChatStore } from '../stores/chat'
+import { useSettingsStore } from '../stores/settings'
 import ChatPanel from '../components/ChatPanel.vue'
 import TopBar from '../components/TopBar.vue'
 
 const router = useRouter()
 const auth = useAuthStore()
 const chatStore = useChatStore()
+const settingsStore = useSettingsStore()
 const drawer = ref(true)
 const rail = ref(false)
+
+const baseModelAlert = computed(() => settingsStore.baseModelAlertText)
 
 const MIN_PANEL = 320
 const MAX_PANEL = 900
@@ -150,6 +164,10 @@ const navItems = [
   { path: '/system', icon: 'mdi-monitor-dashboard', title: 'System' },
   { path: '/system/logs', icon: 'mdi-text-box-search', title: 'System Logs' },
 ]
+
+onMounted(() => {
+  settingsStore.refreshBaseModelStatus()
+})
 
 const handleLogout = async () => {
   await auth.logout()

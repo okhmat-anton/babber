@@ -40,7 +40,7 @@
             <span>Active Models</span>
             <v-chip class="ml-2" size="small" variant="tonal">{{ displayedModels.length }}</v-chip>
             <v-spacer />
-            <v-btn size="small" variant="tonal" prepend-icon="mdi-tag-multiple" @click="rolesDialog = true" class="mr-2">Assign Roles</v-btn>
+            <v-btn size="small" variant="tonal" prepend-icon="mdi-tag-multiple" @click="openRolesDialog" class="mr-2">Assign Roles</v-btn>
           </v-card-title>
           <v-data-table :headers="modelHeaders" :items="displayedModels" hover>
             <template #item.provider="{ item }">
@@ -422,13 +422,28 @@
     />
 
     <!-- Roles Assignment Dialog -->
-    <v-dialog v-model="rolesDialog" max-width="800" scrollable>
+    <v-dialog v-model="rolesDialog" max-width="800" scrollable persistent>
       <v-card>
         <v-card-title class="d-flex align-center">
           <v-icon class="mr-2" color="primary">mdi-tag-multiple</v-icon>
           Assign Model Roles
+          <v-spacer />
+          <v-btn icon="mdi-close" variant="text" size="small" @click="rolesDialog = false" />
         </v-card-title>
         <v-card-subtitle>Each role can be assigned to one model. A model can have multiple roles.</v-card-subtitle>
+
+        <!-- Base model warning -->
+        <v-alert
+          v-if="!hasActiveBaseModel"
+          type="error"
+          variant="tonal"
+          density="compact"
+          class="mx-4 mt-2"
+          icon="mdi-alert-circle"
+        >
+          <span v-if="!roleAssignments['base']">Base model is not assigned!</span>
+          <span v-else>Base model is not available (not running)</span>
+        </v-alert>
         <v-card-text style="max-height: 60vh">
           <v-table density="comfortable">
             <thead>
@@ -568,10 +583,9 @@ const listModels = async (item) => {
 // ═══════════ Model Roles ═══════════
 const rolesDialog = ref(false)
 const savingRoles = ref(false)
+const rolesLoaded = ref(false)
 const availableRoles = ref([])
 const roleAssignments = ref({})  // { role: model_config_id }
-
-const activeModels = computed(() => settingsStore.models.filter(m => m.is_active))
 
 // Models shown on first tab: only running Ollama models + all API models
 const runningOllamaNames = computed(() => new Set(ollamaRunningModels.value.map(m => m.name)))
@@ -579,6 +593,18 @@ const displayedModels = computed(() => settingsStore.models.filter(m => {
   if (m.provider !== 'ollama') return true
   return runningOllamaNames.value.has(m.model_id)
 }))
+
+const activeModels = computed(() => displayedModels.value.filter(m => m.is_active))
+
+// Check if base model is assigned and available (running ollama or API)
+const hasActiveBaseModel = computed(() => {
+  const baseId = roleAssignments.value['base']
+  if (!baseId) return false
+  const model = settingsStore.models.find(m => m.id === baseId)
+  if (!model || !model.is_active) return false
+  if (model.provider === 'ollama' && !runningOllamaNames.value.has(model.model_id)) return false
+  return true
+})
 
 const roleColorMap = {
   understanding: 'blue', planning: 'indigo', code_generation: 'deep-purple',
@@ -610,7 +636,23 @@ const fetchRoles = async () => {
     for (const a of data.assignments) {
       roleAssignments.value[a.role] = a.model_config_id
     }
+    rolesLoaded.value = true
+    // Sync to global store for base model alert
+    settingsStore.roleAssignments = { ...roleAssignments.value }
+    settingsStore.rolesLoaded = true
   } catch (e) { console.error('Failed to fetch roles:', e) }
+}
+
+const openRolesDialog = async () => {
+  await fetchRoles()
+  // Reset assignments for models that are offline
+  const validIds = new Set(displayedModels.value.filter(m => m.is_active).map(m => m.id))
+  for (const [role, modelId] of Object.entries(roleAssignments.value)) {
+    if (!validIds.has(modelId)) {
+      delete roleAssignments.value[role]
+    }
+  }
+  rolesDialog.value = true
 }
 
 const saveRoles = async () => {
@@ -624,6 +666,8 @@ const saveRoles = async () => {
     for (const a of data.assignments) {
       roleAssignments.value[a.role] = a.model_config_id
     }
+    // Sync to global store
+    settingsStore.roleAssignments = { ...roleAssignments.value }
     rolesDialog.value = false
     showSnackbar('Roles saved')
   } catch (e) {
@@ -730,11 +774,12 @@ const fetchOllamaModels = async () => {
 }
 
 const fetchOllamaRunning = async () => {
-  if (!ollamaStatus.value.running) { ollamaRunningModels.value = []; return }
+  if (!ollamaStatus.value.running) { ollamaRunningModels.value = []; settingsStore.ollamaRunningModels = []; return }
   try {
     const { data } = await api.get('/ollama/running')
     ollamaRunningModels.value = data
-  } catch { ollamaRunningModels.value = [] }
+    settingsStore.ollamaRunningModels = data
+  } catch { ollamaRunningModels.value = []; settingsStore.ollamaRunningModels = [] }
 }
 
 const fetchCatalog = async () => {

@@ -7,7 +7,32 @@ export const useSettingsStore = defineStore('settings', {
     apiKeys: [],
     systemSettings: {},
     loading: false,
+    // Model roles global state (for base model alert)
+    roleAssignments: {},       // { role: model_config_id }
+    rolesLoaded: false,
+    ollamaRunningModels: [],   // [{ name, ... }]
   }),
+
+  getters: {
+    runningOllamaNames: (state) => new Set(state.ollamaRunningModels.map(m => m.name)),
+
+    hasActiveBaseModel(state) {
+      const baseId = state.roleAssignments['base']
+      if (!baseId) return false
+      const model = state.models.find(m => m.id === baseId)
+      if (!model || !model.is_active) return false
+      if (model.provider === 'ollama' && !this.runningOllamaNames.has(model.model_id)) return false
+      return true
+    },
+
+    baseModelAlertText(state) {
+      if (!state.rolesLoaded) return null
+      if (this.hasActiveBaseModel) return null
+      const baseId = state.roleAssignments['base']
+      if (!baseId) return 'Base model is not assigned! Assign a base model in role settings.'
+      return 'Base model is not available (not running). Assign a base model in role settings.'
+    },
+  },
 
   actions: {
     // --- System settings ---
@@ -76,6 +101,41 @@ export const useSettingsStore = defineStore('settings', {
 
     async changePassword(oldPassword, newPassword) {
       await api.put('/settings/password', { old_password: oldPassword, new_password: newPassword })
+    },
+
+    // --- Model Roles ---
+    async fetchModelRoles() {
+      try {
+        const { data } = await api.get('/settings/model-roles')
+        const map = {}
+        for (const a of data.assignments) {
+          map[a.role] = a.model_config_id
+        }
+        this.roleAssignments = map
+        this.rolesLoaded = true
+        return data
+      } catch (e) {
+        console.error('Failed to fetch model roles:', e)
+      }
+    },
+
+    // --- Ollama running models ---
+    async fetchOllamaRunning() {
+      try {
+        const { data } = await api.get('/ollama/running')
+        this.ollamaRunningModels = data
+      } catch {
+        this.ollamaRunningModels = []
+      }
+    },
+
+    // Refresh all data needed for base model alert
+    async refreshBaseModelStatus() {
+      await Promise.all([
+        this.fetchModels(),
+        this.fetchModelRoles(),
+        this.fetchOllamaRunning(),
+      ])
     },
   },
 })
