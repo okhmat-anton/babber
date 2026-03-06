@@ -1,8 +1,13 @@
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.config import get_settings
+
+# Configure app-level logging so watchdog and other services can log
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s [%(name)s] %(message)s")
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 from app.database import init_db, init_redis, async_session
 from app.services.auth_service import create_default_admin
 from app.services.skill_service import create_system_skills
@@ -32,6 +37,8 @@ from app.api.protocols import router as protocols_router
 from app.api.thinking_logs import agent_thinking_router, session_thinking_router
 from app.api.autonomous import router as autonomous_router
 
+from app.services.ollama_watchdog import start_watchdog, stop_watchdog
+
 settings = get_settings()
 
 
@@ -50,9 +57,13 @@ async def lifespan(app: FastAPI):
 
     await syslog_bg("info", "Server started", source="system", metadata={"version": settings.APP_VERSION})
 
+    # Start Ollama watchdog (auto-recovery, monitoring)
+    await start_watchdog()
+
     yield
 
     # Shutdown
+    await stop_watchdog()
     await syslog_bg("info", "Server shutting down", source="system")
 
 

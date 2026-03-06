@@ -441,8 +441,26 @@
           class="mx-4 mt-2"
           icon="mdi-alert-circle"
         >
-          <span v-if="!roleAssignments['base']">Base model is not assigned!</span>
-          <span v-else>Base model is not available (not running)</span>
+          <span v-if="!roleAssignments['base']">Base model is not assigned! The watchdog will auto-assign when a model starts.</span>
+          <span v-else>Base model is not available (not running). The watchdog will attempt to restart it.</span>
+        </v-alert>
+
+        <!-- Watchdog status -->
+        <v-alert
+          v-if="watchdogInfo"
+          type="info"
+          variant="tonal"
+          density="compact"
+          class="mx-4 mt-2"
+          icon="mdi-shield-check"
+        >
+          <div class="d-flex align-center">
+            <span>Watchdog active — auto-recovery enabled</span>
+            <v-spacer />
+            <v-chip v-if="watchdogInfo.manually_stopped_models?.length" size="x-small" color="warning" variant="tonal" class="ml-2">
+              {{ watchdogInfo.manually_stopped_models.length }} manually stopped
+            </v-chip>
+          </div>
         </v-alert>
         <v-card-text style="max-height: 60vh">
           <v-table density="comfortable">
@@ -450,6 +468,7 @@
               <tr>
                 <th style="width: 40%">Role</th>
                 <th>Model</th>
+                <th style="width: 60px">Status</th>
               </tr>
             </thead>
             <tbody>
@@ -465,7 +484,7 @@
                   <v-select
                     :model-value="roleAssignments[r.role] || null"
                     @update:model-value="v => setRoleAssignment(r.role, v)"
-                    :items="activeModels"
+                    :items="allActiveModels"
                     item-title="name"
                     item-value="id"
                     density="compact"
@@ -476,12 +495,36 @@
                   >
                     <template #item="{ item, props }">
                       <v-list-item v-bind="props">
+                        <template #prepend>
+                          <v-icon v-if="isModelOnline(item.raw)" size="14" color="success">mdi-circle</v-icon>
+                          <v-icon v-else size="14" color="grey">mdi-circle-outline</v-icon>
+                        </template>
                         <template #subtitle>
                           <span class="text-caption">{{ item.raw.model_id }} · {{ item.raw.provider }}</span>
+                          <span v-if="!isModelOnline(item.raw)" class="text-caption text-warning ml-1">(offline)</span>
                         </template>
                       </v-list-item>
                     </template>
                   </v-select>
+                </td>
+                <td class="text-center">
+                  <template v-if="roleAssignments[r.role]">
+                    <v-icon v-if="isRoleModelOnline(r.role)" size="18" color="success" title="Model is running">mdi-check-circle</v-icon>
+                    <v-tooltip v-else location="top">
+                      <template #activator="{ props }">
+                        <v-btn
+                          v-bind="props"
+                          icon size="x-small" variant="text" color="warning"
+                          :loading="restartingRole === r.role"
+                          @click="restartRoleModel(r.role)"
+                        >
+                          <v-icon size="18">mdi-restart-alert</v-icon>
+                        </v-btn>
+                      </template>
+                      <span>Model offline — click to restart</span>
+                    </v-tooltip>
+                  </template>
+                  <span v-else class="text-caption text-grey">—</span>
                 </td>
               </tr>
             </tbody>
@@ -596,6 +639,56 @@ const displayedModels = computed(() => settingsStore.models.filter(m => {
 
 const activeModels = computed(() => displayedModels.value.filter(m => m.is_active))
 
+// All active models (including offline Ollama) for role assignment dropdown
+const allActiveModels = computed(() => settingsStore.models.filter(m => m.is_active))
+
+// Check if a model is online (running for Ollama, always true for API)
+const isModelOnline = (model) => {
+  if (model.provider !== 'ollama') return true
+  return runningOllamaNames.value.has(model.model_id)
+}
+
+// Check if the model assigned to a role is online
+const isRoleModelOnline = (role) => {
+  const modelId = roleAssignments.value[role]
+  if (!modelId) return false
+  const model = settingsStore.models.find(m => m.id === modelId)
+  if (!model) return false
+  return isModelOnline(model)
+}
+
+// Watchdog info
+const watchdogInfo = ref(null)
+const restartingRole = ref(null)
+
+const fetchWatchdogInfo = async () => {
+  try {
+    const { data } = await api.get('/ollama/watchdog')
+    watchdogInfo.value = data
+  } catch (e) {
+    watchdogInfo.value = null
+  }
+}
+
+// Restart the model assigned to a role
+const restartRoleModel = async (role) => {
+  const modelId = roleAssignments.value[role]
+  if (!modelId) return
+  const model = settingsStore.models.find(m => m.id === modelId)
+  if (!model || model.provider !== 'ollama') return
+
+  restartingRole.value = role
+  try {
+    await api.post(`/ollama/models/${encodeURIComponent(model.model_id)}/load`)
+    await fetchOllamaRunning()
+    showSnackbar(`Model ${model.name} restarted`)
+  } catch (e) {
+    showSnackbar(e.response?.data?.detail || 'Failed to restart model', 'error')
+  } finally {
+    restartingRole.value = null
+  }
+}
+
 // Check if base model is assigned and available (running ollama or API)
 const hasActiveBaseModel = computed(() => {
   const baseId = roleAssignments.value['base']
@@ -645,13 +738,8 @@ const fetchRoles = async () => {
 
 const openRolesDialog = async () => {
   await fetchRoles()
-  // Reset assignments for models that are offline
-  const validIds = new Set(displayedModels.value.filter(m => m.is_active).map(m => m.id))
-  for (const [role, modelId] of Object.entries(roleAssignments.value)) {
-    if (!validIds.has(modelId)) {
-      delete roleAssignments.value[role]
-    }
-  }
+  await fetchWatchdogInfo()
+  // Keep all assignments including offline models — show status indicator instead of stripping
   rolesDialog.value = true
 }
 

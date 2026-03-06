@@ -12,6 +12,10 @@ from app.config import get_settings
 from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.services.log_service import syslog_bg
+from app.services.ollama_watchdog import (
+    mark_model_manually_stopped, mark_model_started,
+    mark_ollama_manually_stopped, mark_ollama_manually_started,
+)
 
 router = APIRouter(prefix="/api/ollama", tags=["ollama"])
 
@@ -223,6 +227,7 @@ async def start_ollama(_user: User = Depends(get_current_user)):
                 r = await client.get(f"{settings.OLLAMA_BASE_URL}/api/tags")
                 if r.status_code == 200:
                     await syslog_bg("info", "Ollama started successfully", source="system")
+                    await mark_ollama_manually_started()
                     return {"message": "Ollama started successfully", "started": True}
         except Exception:
             pass
@@ -239,6 +244,7 @@ async def start_ollama(_user: User = Depends(get_current_user)):
                 r = await client.get(f"{settings.OLLAMA_BASE_URL}/api/tags")
                 if r.status_code == 200:
                     await syslog_bg("info", "Ollama started successfully (delayed)", source="system")
+                    await mark_ollama_manually_started()
                     return {"message": "Ollama started successfully", "started": True}
         except Exception:
             pass
@@ -303,6 +309,7 @@ async def stop_ollama(_user: User = Depends(get_current_user)):
             pass  # Connection refused = stopped successfully
 
         await syslog_bg("info", "Ollama stopped", source="system")
+        await mark_ollama_manually_stopped()
         return {"message": "Ollama stopped", "stopped": True}
 
     except Exception as e:
@@ -551,6 +558,8 @@ async def load_model(model_name: str, _user: User = Depends(get_current_user)):
         raise HTTPException(status_code=503, detail="Ollama is not running")
 
     await syslog_bg("info", f"Model '{model_name}' loaded into memory", source="system")
+    # Track: model was explicitly started (clear manual-stop flag)
+    await mark_model_started(model_name)
     return {"message": f"Model '{model_name}' loaded"}
 
 
@@ -583,6 +592,8 @@ async def unload_model(model_name: str, _user: User = Depends(get_current_user))
             break
 
     await syslog_bg("info", f"Model '{model_name}' unloaded from memory", source="system")
+    # Track: model was manually stopped by user
+    await mark_model_manually_stopped(model_name)
     return {"message": f"Model '{model_name}' unloaded"}
 
 
@@ -652,3 +663,18 @@ async def running_models(_user: User = Depends(get_current_user)):
             "expires_at": m.get("expires_at", ""),
         })
     return models
+
+
+@router.get("/watchdog")
+async def watchdog_status(_user: User = Depends(get_current_user)):
+    """Get watchdog status — tracked state of Ollama and models."""
+    from app.services.ollama_watchdog import (
+        is_ollama_manually_stopped as _is_oms,
+        get_manually_stopped_models as _get_msm,
+        _get_last_known_running,
+    )
+    return {
+        "ollama_manually_stopped": await _is_oms(),
+        "manually_stopped_models": list(await _get_msm()),
+        "last_known_running": list(await _get_last_known_running()),
+    }
