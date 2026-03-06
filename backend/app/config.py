@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     AGENTS_DIR: str = "./data/agents"
 
     # Projects (code storage for agents)
-    PROJECTS_DIR: str = "./data/projects"
+    PROJECTS_DIR: str = "../data/projects"
 
     class Config:
         env_file = ".env"

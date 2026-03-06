@@ -534,7 +534,7 @@ async def upload_avatar(
     ext = ext_map.get(content_type, "png")
 
     # Agent avatar directory
-    base_dir = os.path.join("data", "agents", agent.name)
+    base_dir = os.path.join("..", "data", "agents", agent.name)
     os.makedirs(base_dir, exist_ok=True)
 
     # Remove old avatar files
@@ -584,7 +584,7 @@ async def delete_avatar(
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
-    base_dir = os.path.join("data", "agents", agent.name)
+    base_dir = os.path.join("..", "data", "agents", agent.name)
     if os.path.isdir(base_dir):
         for old in os.listdir(base_dir):
             if old.startswith("avatar."):

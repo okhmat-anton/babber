@@ -53,6 +53,38 @@ from app.services.log_service import syslog_bg
 # Maps run_id -> asyncio.Task
 active_runs: dict[str, asyncio.Task] = {}
 
+
+async def cleanup_orphaned_runs() -> int:
+    """
+    On server startup, find any autonomous runs stuck in 'running' status
+    (orphaned by a previous server restart) and mark them as 'stopped'.
+    Also resets corresponding agent statuses to 'idle'.
+    Returns the number of orphaned runs cleaned up.
+    """
+    count = 0
+    async with async_session() as db:
+        result = await db.execute(
+            select(AutonomousRun).where(AutonomousRun.status == "running")
+        )
+        orphaned_runs = result.scalars().all()
+        for run in orphaned_runs:
+            run.status = "stopped"
+            run.completed_at = datetime.now(timezone.utc)
+            run.error_message = "Orphaned: server restarted during active run"
+            # Reset agent status
+            agent_result = await db.execute(
+                select(Agent).where(Agent.id == run.agent_id)
+            )
+            agent = agent_result.scalar_one_or_none()
+            if agent and agent.status == "running":
+                agent.status = "idle"
+            count += 1
+        if count:
+            await db.commit()
+            logger.warning("Cleaned up %d orphaned autonomous run(s)", count)
+    return count
+
+
 # ── Status mapping: TODO statuses → Task statuses ──
 _TODO_STATUS_TO_TASK = {
     "pending": "pending",

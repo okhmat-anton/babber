@@ -116,8 +116,12 @@ SYSTEM_SKILLS = [
             "    if not str(file_path).startswith(str(code_dir)):\n"
             "        return {'error': 'Path traversal not allowed'}\n"
             "    file_path.parent.mkdir(parents=True, exist_ok=True)\n"
+            "    existed = file_path.exists()\n"
             "    file_path.write_text(content, encoding='utf-8')\n"
-            "    return {'written': len(content), 'path': str(file_path.relative_to(code_dir))}\n"
+            "    result = {'written': len(content), 'path': str(file_path.relative_to(code_dir))}\n"
+            "    if existed:\n"
+            "        result['warning'] = f'File {path} already existed and was OVERWRITTEN. Previous content was lost.'\n"
+            "    return result\n"
         ),
         "input_schema": {
             "type": "object",
@@ -194,6 +198,110 @@ SYSTEM_SKILLS = [
             "required": ["project_slug"],
         },
     },
+    {
+        "name": "project_update_task",
+        "display_name": "Project Update Task",
+        "description": "Update the status of a project task (e.g. move to in_progress, review, done).",
+        "description_for_agent": (
+            "Update a project task's status or other fields. "
+            "Parameters: project_slug (string), task_id (string, the task ID from the task list), "
+            "status (string, optional: 'backlog', 'todo', 'in_progress', 'review', 'done', 'cancelled'), "
+            "assignee (string, optional: your agent name). "
+            "Use this after completing work on a task to move it to 'done' or 'review'. "
+            "ALWAYS update task status when you start or finish working on a task."
+        ),
+        "category": "project",
+        "code": (
+            "from pathlib import Path\n"
+            "import os, json\n"
+            "from datetime import datetime, timezone\n"
+            "async def execute(project_slug, task_id, status=None, assignee=None):\n"
+            "    base = Path(os.environ.get('PROJECTS_DIR', './data/projects')).resolve()\n"
+            "    tasks_path = base / project_slug / 'tasks.json'\n"
+            "    if not tasks_path.exists():\n"
+            "        return {'error': f'Project {project_slug} tasks not found'}\n"
+            "    tasks = json.loads(tasks_path.read_text(encoding='utf-8'))\n"
+            "    valid_statuses = ['backlog', 'todo', 'in_progress', 'review', 'done', 'cancelled']\n"
+            "    for t in tasks:\n"
+            "        if t.get('id') == task_id or t.get('key') == task_id:\n"
+            "            old_status = t.get('status')\n"
+            "            if status:\n"
+            "                if status not in valid_statuses:\n"
+            "                    return {'error': f'Invalid status: {status}. Valid: {valid_statuses}'}\n"
+            "                t['status'] = status\n"
+            "            if assignee is not None:\n"
+            "                t['assignee'] = assignee\n"
+            "            t['updated_at'] = datetime.now(timezone.utc).isoformat()\n"
+            "            tasks_path.write_text(json.dumps(tasks, indent=2, ensure_ascii=False), encoding='utf-8')\n"
+            "            # Write to project log\n"
+            "            log_path = base / project_slug / 'log.jsonl'\n"
+            "            entry = json.dumps({'ts': datetime.now(timezone.utc).isoformat(), 'level': 'info', "
+            "'message': f\"Task {t.get('key')} moved: {old_status} → {status or old_status}\", 'source': 'agent'})\n"
+            "            with open(log_path, 'a') as f:\n"
+            "                f.write(entry + '\\n')\n"
+            "            return {'updated': True, 'task_key': t.get('key'), 'old_status': old_status, 'new_status': t.get('status')}\n"
+            "    return {'error': f'Task {task_id} not found in project {project_slug}'}\n"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "project_slug": {"type": "string", "description": "Project slug (e.g. 'hello-world')"},
+                "task_id": {"type": "string", "description": "Task ID or key (e.g. '245dd6f23bde' or 'T-1')"},
+                "status": {"type": "string", "description": "New status: backlog, todo, in_progress, review, done, cancelled"},
+                "assignee": {"type": "string", "description": "Agent name to assign (optional)"},
+            },
+            "required": ["project_slug", "task_id"],
+        },
+    },
+    {
+        "name": "project_task_comment",
+        "display_name": "Project Task Comment",
+        "description": "Add a comment to a project task.",
+        "description_for_agent": (
+            "Add a comment to a project task. "
+            "Parameters: project_slug (string), task_id (string, the task ID or key), "
+            "content (string, the comment text). "
+            "Use this to document your progress, explain what you did, or note any issues. "
+            "ALWAYS leave a comment when you complete or make progress on a task."
+        ),
+        "category": "project",
+        "code": (
+            "from pathlib import Path\n"
+            "import os, json, uuid\n"
+            "from datetime import datetime, timezone\n"
+            "async def execute(project_slug, task_id, content, author='agent'):\n"
+            "    base = Path(os.environ.get('PROJECTS_DIR', './data/projects')).resolve()\n"
+            "    tasks_path = base / project_slug / 'tasks.json'\n"
+            "    if not tasks_path.exists():\n"
+            "        return {'error': f'Project {project_slug} tasks not found'}\n"
+            "    tasks = json.loads(tasks_path.read_text(encoding='utf-8'))\n"
+            "    for t in tasks:\n"
+            "        if t.get('id') == task_id or t.get('key') == task_id:\n"
+            "            if 'comments' not in t:\n"
+            "                t['comments'] = []\n"
+            "            comment = {\n"
+            "                'id': uuid.uuid4().hex[:12],\n"
+            "                'content': content,\n"
+            "                'author': author,\n"
+            "                'created_at': datetime.now(timezone.utc).isoformat(),\n"
+            "            }\n"
+            "            t['comments'].append(comment)\n"
+            "            t['updated_at'] = datetime.now(timezone.utc).isoformat()\n"
+            "            tasks_path.write_text(json.dumps(tasks, indent=2, ensure_ascii=False), encoding='utf-8')\n"
+            "            return {'added': True, 'comment_id': comment['id'], 'task_key': t.get('key')}\n"
+            "    return {'error': f'Task {task_id} not found in project {project_slug}'}\n"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "project_slug": {"type": "string", "description": "Project slug (e.g. 'hello-world')"},
+                "task_id": {"type": "string", "description": "Task ID or key (e.g. '245dd6f23bde' or 'T-2')"},
+                "content": {"type": "string", "description": "Comment text"},
+                "author": {"type": "string", "description": "Comment author (default: 'agent')"},
+            },
+            "required": ["project_slug", "task_id", "content"],
+        },
+    },
 ]
 
 
@@ -208,6 +316,7 @@ async def create_system_skills(db: AsyncSession):
             name=skill_data["name"],
             display_name=skill_data["display_name"],
             description=skill_data["description"],
+            description_for_agent=skill_data.get("description_for_agent", ""),
             category=skill_data["category"],
             code=skill_data["code"],
             input_schema=skill_data.get("input_schema", {}),

@@ -59,6 +59,13 @@ async def lifespan(app: FastAPI):
         await sync_ollama_models(db)
         await create_default_protocols(db)
 
+    # Clean up orphaned autonomous runs (e.g. from server restart during active run)
+    from app.services.autonomous_runner import cleanup_orphaned_runs
+    orphaned = await cleanup_orphaned_runs()
+    if orphaned:
+        await syslog_bg("warning", f"Cleaned up {orphaned} orphaned autonomous run(s)",
+                        source="autonomous", metadata={"orphaned_count": orphaned})
+
     await syslog_bg("info", "Server started", source="system", metadata={"version": settings.APP_VERSION})
 
     # Start Ollama watchdog (auto-recovery, monitoring)
@@ -142,7 +149,7 @@ app.include_router(agent_error_router)
 app.include_router(all_errors_router)
 
 # Serve uploaded files (avatars, etc.) from data/agents/ directory
-_uploads_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "agents")
+_uploads_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "agents")
 os.makedirs(_uploads_dir, exist_ok=True)
 app.mount("/api/uploads/agents", StaticFiles(directory=_uploads_dir), name="uploads_agents")
 

@@ -7,5 +7,5 @@ dist/
 build/
 node_modules/
 .DS_Store
-backend/data/
+data/
 .env.agent
