@@ -304,7 +304,11 @@ async def stop_autonomous_run(run_id: str) -> AutonomousRun:
         task.cancel()
 
     async with async_session() as db:
-        result = await db.execute(select(AutonomousRun).where(AutonomousRun.id == uuid.UUID(run_id)))
+        result = await db.execute(
+            select(AutonomousRun)
+            .where(AutonomousRun.id == uuid.UUID(run_id))
+            .with_for_update()
+        )
         run = result.scalar_one_or_none()
         if not run:
             raise ValueError("Autonomous run not found")
@@ -313,7 +317,11 @@ async def stop_autonomous_run(run_id: str) -> AutonomousRun:
             run.status = "stopped"
             run.completed_at = datetime.now(timezone.utc)
             # Reset agent status
-            result2 = await db.execute(select(Agent).where(Agent.id == run.agent_id))
+            result2 = await db.execute(
+                select(Agent)
+                .where(Agent.id == run.agent_id)
+                .with_for_update()
+            )
             agent = result2.scalar_one_or_none()
             if agent:
                 agent.status = "idle"
@@ -347,7 +355,10 @@ async def _run_autonomous_loop(run_id: str, agent_id_str: str):
             # Open a fresh DB session per cycle
             async with async_session() as db:
                 # Load run
-                result = await db.execute(select(AutonomousRun).where(AutonomousRun.id == uuid.UUID(run_id)))
+                result = await db.execute(
+                    select(AutonomousRun)
+                    .where(AutonomousRun.id == uuid.UUID(run_id))
+                )
                 run = result.scalar_one_or_none()
                 if not run or run.status != "running":
                     break
@@ -1090,7 +1101,7 @@ def _load_assigned_projects(agent_id: str) -> list[dict]:
         except Exception:
             continue
 
-        if config.get("status") in ("archived",):
+        if config.get("status") in ("archived", "paused"):
             continue
 
         access = config.get("access_level", "full")

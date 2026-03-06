@@ -302,6 +302,54 @@ SYSTEM_SKILLS = [
             "required": ["project_slug", "task_id", "content"],
         },
     },
+    {
+        "name": "project_run_code",
+        "display_name": "Project Run Code",
+        "description": "Execute a Python file from a project's code directory.",
+        "description_for_agent": (
+            "Run/execute a Python file from project code directory. "
+            "Parameters: project_slug (string), file_path (string, relative path like 'main.py' or 't-5_solution.py'). "
+            "Returns stdout, stderr, exit code. Use this to test/run your code after writing it. "
+            "Working directory is set to the project's code directory."
+        ),
+        "category": "code",
+        "code": (
+            "from pathlib import Path\n"
+            "import os\n"
+            "import asyncio\n"
+            "async def execute(project_slug, file_path):\n"
+            "    base = Path(os.environ.get('PROJECTS_DIR', './data/projects')).resolve()\n"
+            "    code_dir = (base / project_slug / 'code').resolve()\n"
+            "    if not str(code_dir).startswith(str(base)):\n"
+            "        return {'error': 'Invalid project slug'}\n"
+            "    target = (code_dir / file_path).resolve()\n"
+            "    if not str(target).startswith(str(code_dir)):\n"
+            "        return {'error': 'Path traversal not allowed'}\n"
+            "    if not target.exists():\n"
+            "        return {'error': f'File {file_path} not found'}\n"
+            "    proc = await asyncio.create_subprocess_exec(\n"
+            "        'python3', target.name,\n"
+            "        stdout=asyncio.subprocess.PIPE,\n"
+            "        stderr=asyncio.subprocess.PIPE,\n"
+            "        cwd=str(code_dir)\n"
+            "    )\n"
+            "    stdout, stderr = await proc.communicate()\n"
+            "    return {\n"
+            "        'stdout': stdout.decode('utf-8', errors='replace')[:5000],\n"
+            "        'stderr': stderr.decode('utf-8', errors='replace')[:2000],\n"
+            "        'exit_code': proc.returncode,\n"
+            "        'success': proc.returncode == 0\n"
+            "    }\n"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "project_slug": {"type": "string", "description": "Project slug (e.g. 'hello-world')"},
+                "file_path": {"type": "string", "description": "Relative file path (e.g. 'main.py', 't-5_solution.py')"},
+            },
+            "required": ["project_slug", "file_path"],
+        },
+    },
 ]
 
 
