@@ -100,7 +100,7 @@
               </div>
             </div>
             <v-btn
-              v-if="editingSessionId !== session.id"
+              v-if="editingSessionId !== session.id && !session.isPseudo && session.chat_type !== 'agent' && session.chat_type !== 'project_task'"
               icon
               size="x-small"
               variant="text"
@@ -111,6 +111,7 @@
             </v-btn>
             <span class="text-caption text-medium-emphasis ml-1 flex-shrink-0">{{ formatDate(session.updated_at) }}</span>
             <v-btn
+              v-if="!(activeChatType === 'agent' && session.chat_type === 'agent') && !(activeChatType === 'project_task' && session.chat_type === 'project_task')"
               icon
               size="x-small"
               variant="text"
@@ -227,10 +228,10 @@
     </div>
     </template>
 
-    <!-- ═══ Input Area (bottom, always visible) ═══ -->
-    <div class="input-area">
-      <!-- Model / settings bar -->
-      <div class="input-toolbar d-flex align-center px-3 py-1">
+    <!-- ═══ Input Area (bottom, shown when: user chats always OR agent/project chats when chat is open) ═══ -->
+    <div v-if="activeChatType === 'user' || !sessionsExpanded" class="input-area">
+      <!-- Model / settings bar (hidden only for agent chats, shown for user and project_task) -->
+      <div v-if="activeChatType !== 'agent'" class="input-toolbar d-flex align-center px-3 py-1">
         <v-autocomplete
           v-model="selectedModels"
           :items="modelItems"
@@ -284,8 +285,8 @@
         </v-btn>
       </div>
 
-      <!-- Expandable settings -->
-      <v-expand-transition>
+      <!-- Expandable settings (hidden only for agent chats) -->
+      <v-expand-transition v-if="activeChatType !== 'agent'">
         <div v-if="showSettings" class="px-3 pb-2">
           <v-textarea
             v-model="systemPrompt"
@@ -338,6 +339,8 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, reactive } from 'vue'
 import { useChatStore } from '../stores/chat'
+import { useAgentsStore } from '../stores/agents'
+import api from '../api'
 import { marked } from 'marked'
 import { markedHighlight } from 'marked-highlight'
 import DOMPurify from 'dompurify'
@@ -345,6 +348,7 @@ import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
 
 const chatStore = useChatStore()
+const agentsStore = useAgentsStore()
 
 // State
 const selectedModels = ref([])
@@ -358,7 +362,10 @@ const showSettings = ref(false)
 const sessionSearch = ref('')
 const sessionsExpanded = ref(true)
 const expandedResponses = reactive({})
-const activeChatType = ref('user') // 'user', 'agent', 'project_task'
+// Restore active chat type from localStorage, default to 'user'
+const activeChatType = ref(localStorage.getItem('chat_active_tab') || 'user') // 'user', 'agent', 'project_task'
+const previousChatType = ref('user') // Remember which tab we came from
+const allProjects = ref([]) // All projects loaded from API
 
 const editingSessionId = ref(null)
 const editingSessionTitle = ref('')
@@ -395,16 +402,82 @@ const projectTaskUnreadCount = computed(() => {
 })
 
 const filteredSessions = computed(() => {
-  // Filter by active chat type
-  let sessions = chatStore.sortedSessions.filter(s => s.chat_type === activeChatType.value)
-  
-  // Then filter by search query
   const q = (sessionSearch.value || '').toLowerCase()
-  if (!q) return sessions
-  return sessions.filter(s =>
-    s.title.toLowerCase().includes(q) ||
-    (s.last_message || '').toLowerCase().includes(q)
-  )
+  let results = []
+
+  if (activeChatType.value === 'agent') {
+    // For agent chats: show all agents (regardless of sessions)
+    const realSessions = chatStore.sortedSessions.filter(s => s.chat_type === 'agent')
+    const sessionAgentIds = new Set(realSessions.filter(s => s.agent_ids?.length === 1).map(s => s.agent_ids[0]))
+
+    // Create pseudo-sessions for all agents
+    results = agentsStore.agents.map(agent => {
+      const existingSession = realSessions.find(s => s.agent_ids?.length === 1 && s.agent_ids[0] === agent.id)
+      if (existingSession) {
+        return existingSession
+      }
+      // Create pseudo-session
+      return {
+        id: `pseudo-agent-${agent.id}`,
+        title: agent.name,
+        chat_type: 'agent',
+        agent_ids: [agent.id],
+        isPseudo: true,
+        updated_at: new Date(0).toISOString(), // Sort to bottom
+        unread_count: 0
+      }
+    })
+
+    // Add multi-agent sessions that don't match single agent
+    const multiAgentSessions = realSessions.filter(s => !s.agent_ids?.length || s.agent_ids.length > 1)
+    results.push(...multiAgentSessions)
+  } else if (activeChatType.value === 'project_task') {
+    // For project/task chats: show all projects (regardless of sessions), but tasks only if they have sessions
+    const realSessions = chatStore.sortedSessions.filter(s => s.chat_type === 'project_task')
+    const sessionProjectSlugs = new Set(realSessions.filter(s => s.project_slug).map(s => s.project_slug))
+
+    // Create pseudo-sessions for all projects
+    results = allProjects.value.map(project => {
+      const existingSession = realSessions.find(s => s.project_slug === project.slug && !s.task_id)
+      if (existingSession) {
+        return existingSession
+      }
+      // Create pseudo-session for project
+      return {
+        id: `pseudo-project-${project.slug}`,
+        title: project.name || project.slug,
+        chat_type: 'project_task',
+        project_slug: project.slug,
+        lead_agent_id: project.lead_agent_id, // assigned agent for this project
+        isPseudo: true,
+        updated_at: new Date(0).toISOString(), // Sort to bottom
+        unread_count: 0
+      }
+    })
+
+    // Add task sessions (only real ones)
+    const taskSessions = realSessions.filter(s => s.task_id)
+    results.push(...taskSessions)
+  } else {
+    // For user chats: only show real sessions
+    results = chatStore.sortedSessions.filter(s => s.chat_type === activeChatType.value)
+  }
+
+  // Apply search filter
+  if (q) {
+    results = results.filter(s =>
+      s.title.toLowerCase().includes(q) ||
+      (s.last_message || '').toLowerCase().includes(q)
+    )
+  }
+
+  // Sort: real sessions first (by date), then pseudo-sessions alphabetically
+  return results.sort((a, b) => {
+    if (a.isPseudo && !b.isPseudo) return 1
+    if (!a.isPseudo && b.isPseudo) return -1
+    if (a.isPseudo && b.isPseudo) return a.title.localeCompare(b.title)
+    return new Date(b.updated_at) - new Date(a.updated_at)
+  })
 })
 
 const canSend = computed(() => {
@@ -476,6 +549,10 @@ function goBackToList() {
   chatStore.currentSession = null
   chatStore.messages = []
   sessionsExpanded.value = true
+  // Restore the tab we came from
+  if (previousChatType.value) {
+    activeChatType.value = previousChatType.value
+  }
   localStorage.removeItem('chat_current_session_id')
 }
 
@@ -516,21 +593,100 @@ async function handleSend() {
   scrollToBottom()
 }
 
+async function fetchProjects() {
+  try {
+    const { data } = await api.get('/projects')
+    allProjects.value = data.items || []
+  } catch (e) {
+    console.error('Failed to fetch projects:', e)
+  }
+}
+
 async function loadSession(sessionId) {
+  // Save current tab before opening session
+  previousChatType.value = activeChatType.value
+  
+  // Handle pseudo-sessions: create real session first
+  if (sessionId.startsWith('pseudo-')) {
+    const session = filteredSessions.value.find(s => s.id === sessionId)
+    if (!session) return
+
+    let params = {
+      title: session.title,
+      chat_type: session.chat_type,
+    }
+
+    if (session.chat_type === 'agent' && session.agent_ids) {
+      params.agent_ids = session.agent_ids
+      // For single agent, set as agent_id too
+      if (session.agent_ids.length === 1) {
+        params.agent_id = session.agent_ids[0]
+      }
+    } else if (session.chat_type === 'project_task' && session.project_slug) {
+      params.project_slug = session.project_slug
+      // If project has assigned lead agent, set it
+      if (session.lead_agent_id) {
+        params.agent_id = session.lead_agent_id
+      }
+    }
+
+    try {
+      await chatStore.createSession(params)
+      // Session is now created and set as current
+      // Sync local controls with created session
+      if (chatStore.currentSession) {
+        const agentIds = chatStore.currentSession.agent_ids || []
+        const singleAgentId = chatStore.currentSession.agent_id // Check single agent_id field
+        
+        if (agentIds.length > 1) {
+          selectedModels.value = agentIds.map(id => `agent:${id}`)
+          multiModel.value = true
+        } else if (agentIds.length === 1) {
+          // Single agent from agent_ids array
+          selectedModels.value = `agent:${agentIds[0]}`
+          multiModel.value = false
+        } else if (singleAgentId) {
+          // Single agent from agent_id field (used for projects with lead_agent)
+          selectedModels.value = `agent:${singleAgentId}`
+          multiModel.value = false
+        } else {
+          selectedModels.value = chatStore.currentSession.model_ids || []
+          multiModel.value = chatStore.currentSession.multi_model || false
+        }
+        systemPrompt.value = chatStore.currentSession.system_prompt || ''
+        temperature.value = chatStore.currentSession.temperature ?? 0.7
+      }
+      sessionsExpanded.value = false
+      await nextTick()
+      scrollToBottom()
+      return
+    } catch (e) {
+      console.error('Failed to create session from pseudo:', e)
+      return
+    }
+  }
+
+  // Load real session
   await chatStore.loadSession(sessionId)
   // Sync local controls with loaded session
   if (chatStore.currentSession) {
     // For multi-agent sessions, reconstruct agent:UUID selection
     const agentIds = chatStore.currentSession.agent_ids || []
+    const singleAgentId = chatStore.currentSession.agent_id // Check single agent_id field
+    
     if (agentIds.length > 1) {
       selectedModels.value = agentIds.map(id => `agent:${id}`)
       multiModel.value = true
     } else if (agentIds.length === 1) {
-      // Single agent — use agent: prefix so selector matches available-models
+      // Single agent from agent_ids array
       const agentId = `agent:${agentIds[0]}`
       const modelIds = chatStore.currentSession.model_ids || []
       selectedModels.value = multiModel.value ? [agentId, ...modelIds] : agentId
       multiModel.value = chatStore.currentSession.multi_model || false
+    } else if (singleAgentId) {
+      // Single agent from agent_id field (used for projects with lead_agent)
+      selectedModels.value = `agent:${singleAgentId}`
+      multiModel.value = false
     } else {
       selectedModels.value = chatStore.currentSession.model_ids || []
       multiModel.value = chatStore.currentSession.multi_model || false
@@ -588,6 +744,13 @@ watch([selectedModels, multiModel], () => {
 
 watch(() => chatStore.messages.length, () => scrollToBottom())
 
+// Save active chat type to localStorage when it changes
+watch(activeChatType, (newType) => {
+  if (newType) {
+    localStorage.setItem('chat_active_tab', newType)
+  }
+})
+
 // Poll available models every 10s while panel is open
 let modelPollInterval = null
 
@@ -606,8 +769,12 @@ function stopModelPolling() {
 }
 
 onMounted(async () => {
-  await chatStore.fetchAvailableModels()
-  await chatStore.fetchSessions()
+  await Promise.all([
+    chatStore.fetchAvailableModels(),
+    chatStore.fetchSessions(),
+    agentsStore.fetchAgents(),
+    fetchProjects()
+  ])
 
   // Restore last active session from localStorage
   const savedSessionId = localStorage.getItem('chat_current_session_id')

@@ -508,6 +508,9 @@ async def create_session(
     await db.refresh(session)
     model_names = await _build_model_names(session.model_ids or [], db)
     return _session_to_response(session, model_names)
+
+
+@router.get("/sessions/{session_id}")
 async def get_session(
     session_id: str,
     user: User = Depends(get_current_user),
