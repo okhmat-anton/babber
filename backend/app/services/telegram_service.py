@@ -774,38 +774,55 @@ async def _handle_incoming_message(
         {"chat_id": str(event.chat_id), "user_id": sender_id_str, "is_trusted": is_trusted, "length": len(message_text)},
     )
 
-    # Generate response via agent
-    response_text = await _generate_agent_response(
-        db=db,
-        agent_id=agent_id,
-        messenger_id=messenger_id,
-        message_text=message_text,
-        sender_username=sender.username or sender_id_str,
-        is_trusted=is_trusted,
-        public_permissions=public_permissions,
-        humanize=humanize,
-        casual=casual,
-        chat_id=str(event.chat_id),
-        context_messages_limit=context_messages_limit,
-    )
+    # --- Start typing indicator IMMEDIATELY (within 3 sec of receiving message) ---
+    typing_task = None
+    if typing_indicator:
+        async def _keep_typing():
+            """Continuously send typing indicator every 5s (Telegram expires it after ~6s)."""
+            try:
+                while True:
+                    try:
+                        await client(SetTypingRequest(
+                            peer=event.chat_id,
+                            action=SendMessageTypingAction()
+                        ))
+                    except Exception:
+                        pass
+                    await asyncio.sleep(5)
+            except asyncio.CancelledError:
+                pass
+
+        typing_task = asyncio.create_task(_keep_typing())
+
+    # Generate response via agent (typing indicator is already showing)
+    try:
+        response_text = await _generate_agent_response(
+            db=db,
+            agent_id=agent_id,
+            messenger_id=messenger_id,
+            message_text=message_text,
+            sender_username=sender.username or sender_id_str,
+            is_trusted=is_trusted,
+            public_permissions=public_permissions,
+            humanize=humanize,
+            casual=casual,
+            chat_id=str(event.chat_id),
+            context_messages_limit=context_messages_limit,
+        )
+    except Exception:
+        if typing_task:
+            typing_task.cancel()
+        raise
 
     if not response_text:
+        if typing_task:
+            typing_task.cancel()
         await _log_messenger_event(
             messenger_id, agent_id, "warning",
             "no_response", f"LLM returned no response for message from {sender.username or sender_id_str}",
             {"chat_id": str(event.chat_id), "user_id": sender_id_str, "message_preview": message_text[:100]},
         )
         return
-
-    # Simulate human behaviour: typing delay
-    if typing_indicator:
-        try:
-            await client(SetTypingRequest(
-                peer=event.chat_id,
-                action=SendMessageTypingAction()
-            ))
-        except Exception:
-            pass
 
     # Calculate realistic typing delay based on response length
     # ~40 chars/sec typing speed with some randomness
@@ -815,15 +832,9 @@ async def _handle_incoming_message(
     delay = max(delay_min, min(delay_max, delay))
     await asyncio.sleep(delay)
 
-    # Re-send typing indicator if delay was long
-    if typing_indicator and delay > 3:
-        try:
-            await client(SetTypingRequest(
-                peer=event.chat_id,
-                action=SendMessageTypingAction()
-            ))
-        except Exception:
-            pass
+    # Cancel the typing indicator loop before sending
+    if typing_task:
+        typing_task.cancel()
 
     # Send response
     try:
