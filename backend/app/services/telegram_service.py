@@ -647,7 +647,7 @@ async def _generate_agent_response(
     from app.mongodb.services import AgentService, ModelConfigService, MessengerMessageService
     from app.llm.ollama import OllamaProvider
     from app.llm.openai_compatible import OpenAICompatibleProvider
-    from app.llm.base import Message
+    from app.llm.base import Message, GenerationParams
 
     agent_svc = AgentService(db)
     agent = await agent_svc.get_by_id(agent_id)
@@ -657,37 +657,36 @@ async def _generate_agent_response(
 
     # Resolve model
     settings = get_settings()
-    model_id = agent.model_name
+    resolved_model = agent.model_name
     provider_instance = None
 
-    if model_id:
+    if resolved_model:
         mc_svc = ModelConfigService(db)
         # Try to find model config
         configs = await mc_svc.get_all()
         model_cfg = None
         for cfg in configs:
-            if cfg.model_id == model_id or cfg.id == (agent.model_id or ""):
+            if cfg.model_id == resolved_model or cfg.id == (agent.model_id or ""):
                 model_cfg = cfg
                 break
 
         if model_cfg:
+            resolved_model = model_cfg.model_id
             if model_cfg.provider == "ollama":
                 provider_instance = OllamaProvider(
                     base_url=settings.OLLAMA_BASE_URL,
-                    model=model_cfg.model_id,
                 )
             elif model_cfg.provider in ("openai", "openai_compatible"):
                 provider_instance = OpenAICompatibleProvider(
                     base_url=model_cfg.base_url or "https://api.openai.com/v1",
                     api_key=model_cfg.api_key or "",
-                    model=model_cfg.model_id,
                 )
 
     if not provider_instance:
         # Fallback: try first available ollama model
+        resolved_model = resolved_model or "llama3.2"
         provider_instance = OllamaProvider(
             base_url=settings.OLLAMA_BASE_URL,
-            model=model_id or "llama3.2",
         )
 
     # Build system prompt
@@ -729,10 +728,14 @@ async def _generate_agent_response(
     messages.append(Message(role="user", content=message_text))
 
     try:
-        response = await provider_instance.chat(
-            messages=messages,
+        params = GenerationParams(
             temperature=agent.temperature if humanize else 0.7,
             max_tokens=min(agent.max_tokens, 500),  # Keep telegram responses short
+        )
+        response = await provider_instance.chat(
+            model=resolved_model,
+            messages=messages,
+            params=params,
         )
         return response.content.strip() if response and response.content else None
     except Exception as e:
