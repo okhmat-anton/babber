@@ -48,6 +48,8 @@ class AgentCreate(BaseModel):
     system_access: bool = False
     # Chat settings
     max_messages_before_response: int = 5  # For agent-initiated chats
+    # Messenger context
+    messenger_context_limit: int = 10  # Recent messages passed as context in messenger chats
     # Self-thinking mode
     self_thinking: bool = False
     # Enabled flag
@@ -79,6 +81,8 @@ class AgentUpdate(BaseModel):
     system_access: bool | None = None
     # Chat settings
     max_messages_before_response: int | None = None  # For agent-initiated chats
+    # Messenger context
+    messenger_context_limit: int | None = None  # Recent messages passed as context in messenger chats
     # Self-thinking mode
     self_thinking: bool | None = None
     # Enabled flag
@@ -112,6 +116,7 @@ class AgentResponse(BaseModel):
     filesystem_access: bool = False
     system_access: bool = False
     max_messages_before_response: int = 5
+    messenger_context_limit: int = 10
     self_thinking: bool = False
     enabled: bool = True
     avatar_url: str | None = None

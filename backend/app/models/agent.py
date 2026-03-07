@@ -36,6 +36,8 @@ class Agent(Base):
     # Chat interaction settings
     # Maximum messages agent can send in agent-initiated chats before waiting for user response
     max_messages_before_response: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+    # Default number of recent messages to pass as context in messenger conversations
+    messenger_context_limit: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
 
     # Avatar
     avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)

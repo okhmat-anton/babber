@@ -35,6 +35,9 @@ class MongoAgent(BaseModel):
     # Chat interaction settings
     max_messages_before_response: int = 5
 
+    # Messenger context — default number of recent messages for messenger LLM context
+    messenger_context_limit: int = 10
+
     # Avatar
     avatar_url: Optional[str] = None
 

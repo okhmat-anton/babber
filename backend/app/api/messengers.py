@@ -38,6 +38,7 @@ class MessengerConfig(BaseModel):
     respond_in_groups: bool = False
     max_daily_messages: int = 100
     autonomous_mode: bool = True
+    context_messages_limit: int | None = None  # Override agent setting; None = use agent default
 
 
 class MessengerCreate(BaseModel):

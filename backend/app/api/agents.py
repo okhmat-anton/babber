@@ -249,7 +249,7 @@ async def update_agent(
 
     # Build MongoDB update dict
     mongo_update = {}
-    for key in ("name", "filesystem_access", "system_access", "self_thinking", "enabled"):
+    for key in ("name", "filesystem_access", "system_access", "self_thinking", "enabled", "messenger_context_limit"):
         if key in update_data:
             mongo_update[key] = update_data[key]
     if "thinking_protocol_id" in update_data:

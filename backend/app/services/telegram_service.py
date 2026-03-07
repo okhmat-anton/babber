@@ -424,6 +424,7 @@ async def start_telegram_listener(
     respond_mentions = config.get("respond_to_mentions", True)
     respond_groups = config.get("respond_in_groups", False)
     max_daily = config.get("max_daily_messages", 100)
+    context_messages_limit = config.get("context_messages_limit", None)  # None = use agent default
 
     # Store in registry
     _active_clients[messenger_id] = {
@@ -458,6 +459,7 @@ async def start_telegram_listener(
                 respond_mentions=respond_mentions,
                 respond_groups=respond_groups,
                 max_daily=max_daily,
+                context_messages_limit=context_messages_limit,
             )
         except Exception as e:
             logger.error(f"Error handling Telegram message for {messenger_id}: {e}", exc_info=True)
@@ -547,6 +549,7 @@ async def _handle_incoming_message(
     respond_mentions: bool,
     respond_groups: bool,
     max_daily: int,
+    context_messages_limit: int | None = None,
 ):
     """Process an incoming Telegram message."""
     from app.database import get_mongodb
@@ -637,6 +640,7 @@ async def _handle_incoming_message(
         humanize=humanize,
         casual=casual,
         chat_id=str(event.chat_id),
+        context_messages_limit=context_messages_limit,
     )
 
     if not response_text:
@@ -736,6 +740,7 @@ async def _generate_agent_response(
     humanize: bool,
     casual: bool,
     chat_id: str,
+    context_messages_limit: int | None = None,
 ) -> Optional[str]:
     """Call the agent's LLM to generate a response for a Telegram message."""
     from app.mongodb.services import AgentService, ModelConfigService, MessengerMessageService, ModelRoleAssignmentService
@@ -833,8 +838,14 @@ async def _generate_agent_response(
     system_prompt = "\n".join(system_parts)
 
     # Get recent conversation context from this chat
+    # Resolve limit: messenger override → agent default → 10
+    effective_limit = context_messages_limit
+    if effective_limit is None:
+        effective_limit = getattr(agent, 'messenger_context_limit', None) or 10
+    effective_limit = max(1, min(effective_limit, 100))  # clamp 1..100
+
     msg_svc = MessengerMessageService(db)
-    recent = await msg_svc.get_by_chat(messenger_id, chat_id, limit=10)
+    recent = await msg_svc.get_by_chat(messenger_id, chat_id, limit=effective_limit)
     recent.reverse()  # oldest first
 
     messages = [Message(role="system", content=system_prompt)]

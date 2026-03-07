@@ -139,6 +139,22 @@
             <v-list-item><strong>Context:</strong>&nbsp;{{ agent.num_ctx }}&nbsp;&nbsp;<strong>Max Tokens:</strong>&nbsp;{{ agent.max_tokens }}</v-list-item>
             <v-list-item><strong>Repeat Penalty:</strong>&nbsp;{{ agent.repeat_penalty }}&nbsp;&nbsp;<strong>Num Predict:</strong>&nbsp;{{ agent.num_predict }}</v-list-item>
             <v-list-item><strong>Threads:</strong>&nbsp;{{ agent.num_thread }}&nbsp;&nbsp;<strong>GPU Layers:</strong>&nbsp;{{ agent.num_gpu }}</v-list-item>
+            <v-list-item class="d-flex align-center">
+              <strong>Messenger Context:</strong>&nbsp;
+              <v-text-field
+                :model-value="agent.messenger_context_limit || 10"
+                @update:model-value="v => updateAgentField('messenger_context_limit', Number(v) || 10)"
+                type="number"
+                density="compact"
+                variant="outlined"
+                hide-details
+                style="max-width: 80px; display: inline-flex"
+                class="ml-2"
+                min="1"
+                max="100"
+              />
+              <span class="ml-1 text-caption text-grey">messages in Telegram context (default for all accounts)</span>
+            </v-list-item>
             <v-list-item v-if="agent.description"><strong>Description:</strong>&nbsp;{{ agent.description }}</v-list-item>
             <!-- Protocols (multi-protocol) -->
             <v-list-item v-if="agent.protocols && agent.protocols.length">
@@ -1109,6 +1125,7 @@
             <v-text-field v-model.number="messengerForm.response_delay_min" label="Min delay (sec)" type="number" density="compact" variant="outlined" style="max-width: 140px" />
             <v-text-field v-model.number="messengerForm.response_delay_max" label="Max delay (sec)" type="number" density="compact" variant="outlined" style="max-width: 140px" />
             <v-text-field v-model.number="messengerForm.max_daily_messages" label="Max daily msgs" type="number" density="compact" variant="outlined" style="max-width: 140px" />
+            <v-text-field v-model.number="messengerForm.context_messages_limit" :label="`Context msgs (agent: ${agent?.messenger_context_limit || 10})`" type="number" density="compact" variant="outlined" style="max-width: 180px" :placeholder="String(agent?.messenger_context_limit || 10)" hint="Override agent default. Empty = use agent setting." persistent-hint />
           </div>
           <v-checkbox v-model="messengerForm.typing_indicator" label="Show typing indicator" density="compact" hide-details />
           <v-checkbox v-model="messengerForm.humanize_responses" label="Humanize responses" density="compact" hide-details />
@@ -1837,6 +1854,7 @@ const messengerForm = ref({
   response_delay_min: 2,
   response_delay_max: 8,
   max_daily_messages: 100,
+  context_messages_limit: null,
   typing_indicator: true,
   humanize_responses: true,
   casual_tone: true,
@@ -2061,6 +2079,17 @@ const toggleAgentPermission = async (field, value) => {
     agent.value = await agentsStore.fetchAgent(id.value)
   } catch (e) { console.error('Toggle permission failed', e) }
   permSaving.value = false
+}
+
+let _updateFieldTimer = null
+const updateAgentField = (field, value) => {
+  clearTimeout(_updateFieldTimer)
+  _updateFieldTimer = setTimeout(async () => {
+    try {
+      await api.put(`/agents/${id.value}`, { [field]: value })
+      agent.value = await agentsStore.fetchAgent(id.value)
+    } catch (e) { console.error('Update agent field failed', e) }
+  }, 600)
 }
 
 const loadTasks = async () => {
@@ -2695,6 +2724,7 @@ function openAddMessenger() {
     platform: 'telegram', name: '', api_id: '', api_hash: '', phone: '',
     trusted_users: [], public_permissions: ['answer_questions', 'web_search'],
     response_delay_min: 2, response_delay_max: 8, max_daily_messages: 100,
+    context_messages_limit: null,
     typing_indicator: true, humanize_responses: true, casual_tone: true,
     respond_to_mentions: true, respond_in_groups: false,
   }
@@ -2712,6 +2742,7 @@ function openEditMessenger(acc) {
     response_delay_min: acc.config?.response_delay_min ?? 2,
     response_delay_max: acc.config?.response_delay_max ?? 8,
     max_daily_messages: acc.config?.max_daily_messages ?? 100,
+    context_messages_limit: acc.config?.context_messages_limit ?? null,
     typing_indicator: acc.config?.typing_indicator ?? true,
     humanize_responses: acc.config?.humanize_responses ?? true,
     casual_tone: acc.config?.casual_tone ?? true,
@@ -2734,6 +2765,7 @@ async function saveMessenger() {
         response_delay_min: f.response_delay_min,
         response_delay_max: f.response_delay_max,
         max_daily_messages: f.max_daily_messages,
+        context_messages_limit: f.context_messages_limit || null,
         typing_indicator: f.typing_indicator,
         humanize_responses: f.humanize_responses,
         casual_tone: f.casual_tone,

@@ -35,6 +35,7 @@ class MongoMessengerAccount(BaseModel):
         "respond_in_groups": False,
         "max_daily_messages": 100,
         "autonomous_mode": True,
+        "context_messages_limit": None,  # None = use agent default
     })
 
     is_active: bool = False
