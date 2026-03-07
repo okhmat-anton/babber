@@ -75,7 +75,8 @@ Think of it as your personal AI workforce: create agents with unique personaliti
 
 ### 🏗️ Infrastructure
 - Full **Docker Compose** setup — one command to run everything
-- PostgreSQL for data, Redis for caching, ChromaDB for vectors
+- **PostgreSQL** for relational data, **MongoDB** for JSON documents (tasks, logs)
+- **Redis** for caching, **ChromaDB** for vector embeddings
 - Ollama integration with auto-model sync, health monitoring, and watchdog
 - Alembic database migrations
 - Swagger/ReDoc API documentation
@@ -336,16 +337,20 @@ All configuration is managed via the `.env` file in the project root.
 | `POSTGRES_PORT` | `4532` | PostgreSQL port |
 | `REDIS_PORT` | `4379` | Redis port |
 | `CHROMADB_PORT` | `4800` | ChromaDB vector database port |
+| `MONGO_PORT` | `4717` | MongoDB port |
 | `POSTGRES_USER` | `agents` | Database username |
 | `POSTGRES_PASSWORD` | `agents_secret_2026` | Database password |
 | `POSTGRES_DB` | `ai_agents` | Database name |
 | `REDIS_PASSWORD` | `redis_secret_2026` | Redis password |
+| `MONGO_USER` | `agents` | MongoDB username |
+| `MONGO_PASSWORD` | `mongo_secret_2026` | MongoDB password |
+| `MONGO_DB` | `ai_agents` | MongoDB database name |
 | `JWT_SECRET_KEY` | `super-secret-jwt-key-...` | **Change in production!** |
 | `DEFAULT_ADMIN_USERNAME` | `admin` | Default admin login |
 | `DEFAULT_ADMIN_PASSWORD` | `admin123` | **Change in production!** |
 | `OLLAMA_BASE_URL` | `http://host.docker.internal:11434` | Ollama API URL |
 
-> ⚠️ **Production:** Always change `JWT_SECRET_KEY`, `DEFAULT_ADMIN_PASSWORD`, `POSTGRES_PASSWORD`, and `REDIS_PASSWORD` before deploying.
+> ⚠️ **Production:** Always change `JWT_SECRET_KEY`, `DEFAULT_ADMIN_PASSWORD`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, and `MONGO_PASSWORD` before deploying.
 
 ---
 
@@ -427,11 +432,11 @@ VITE_BACKEND_URL=http://localhost:4700 npm run dev -- --host 0.0.0.0 --port 4200
 │  └─────────┘  └──────────┘  └──────────┘  └─────────────┘  │
 └───┬──────────────┬──────────────┬───────────────┬───────────┘
     │              │              │               │
-┌───▼───┐   ┌─────▼─────┐  ┌────▼────┐   ┌──────▼──────┐
-│ Postgres│  │   Redis   │  │ChromaDB │   │   Ollama    │
-│  :4532 │  │   :4379   │  │  :4800  │   │  :11434     │
-│  Data  │  │   Cache   │  │ Vectors │   │  Local LLM  │
-└────────┘  └───────────┘  └─────────┘   └─────────────┘
+┌───▼───┐   ┌─────▼─────┐  ┌────▼────┐  ┌───▼────┐  ┌──────▼──────┐
+│Postgres│  │  MongoDB  │  │  Redis  │  │ChromaDB│  │   Ollama    │
+│ :4532  │  │   :4717   │  │  :4379  │  │ :4800  │  │  :11434     │
+│Relational│ │ Documents │  │  Cache  │  │Vectors │  │  Local LLM  │
+└────────┘  └───────────┘  └─────────┘  └────────┘  └─────────────┘
 ```
 
 ### Tech Stack
@@ -439,8 +444,8 @@ VITE_BACKEND_URL=http://localhost:4700 npm run dev -- --host 0.0.0.0 --port 4200
 | Layer | Technology |
 |-------|-----------|
 | **Frontend** | Vue 3.5, Vuetify 3.7, Pinia 2.3, Vue Router 4, Vite 6, CodeMirror 6 |
-| **Backend** | Python 3.11, FastAPI 0.115, SQLAlchemy 2.0 (async), Pydantic 2.10 |
-| **Database** | PostgreSQL 16 |
+| **Backend** | Python 3.11, FastAPI 0.115, SQLAlchemy 2.0 (async), Pydantic 2.10, Motor 3.6 |
+| **Database** | PostgreSQL 16 (relational), MongoDB 7 (documents) |
 | **Cache** | Redis 7 |
 | **Vector DB** | ChromaDB |
 | **LLM** | Ollama (local) + any OpenAI-compatible API |

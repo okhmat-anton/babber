@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://agents:agents_secret_2026@localhost:4532/ai_agents"
     REDIS_URL: str = "redis://:redis_secret_2026@localhost:4379/0"
     CHROMADB_URL: str = "http://localhost:4800"
+    MONGODB_URL: str = "mongodb://agents:mongo_secret_2026@localhost:4717/ai_agents?authSource=admin"
 
     # JWT
     JWT_SECRET_KEY: str = "super-secret-jwt-key-change-in-production-2026"

@@ -22,6 +22,7 @@ make clean        # docker compose down -v (removes all data)
 | Frontend   | 4200 |
 | Backend    | 4700 |
 | PostgreSQL | 4532 |
+| MongoDB    | 4717 |
 | Redis      | 4379 |
 | ChromaDB   | 4800 |
 | Ollama     | 11434 (host, not Docker) |
@@ -30,7 +31,7 @@ make clean        # docker compose down -v (removes all data)
 
 ```bash
 # Infrastructure
-docker compose up -d postgres redis chromadb
+docker compose up -d postgres redis chromadb mongodb
 
 # Backend (PYTHONPATH=. is required!)
 cd backend && PYTHONPATH=. OLLAMA_BASE_URL=http://localhost:11434 CHROMADB_URL=http://localhost:4800 \
@@ -50,7 +51,7 @@ cd frontend && VITE_BACKEND_URL=http://localhost:4700 npm run dev -- --host 0.0.
 
 ### Backend (`backend/`)
 - **Python 3.11** (venv at `backend/.venv`). **Python 3.14 NOT compatible** — pydantic-core build fails.
-- FastAPI 0.115.6, SQLAlchemy 2.0.36 async, asyncpg, Pydantic 2.10
+- FastAPI 0.115.6, SQLAlchemy 2.0.36 async, asyncpg, Pydantic 2.10, Motor 3.6.0 (MongoDB async driver)
 - Alembic for migrations, Redis for caching, ChromaDB for vector memory
 - `psutil` for system info, `httpx` for HTTP calls to Ollama/LLM
 
@@ -61,8 +62,12 @@ cd frontend && VITE_BACKEND_URL=http://localhost:4700 npm run dev -- --host 0.0.
 - Vite proxy: `/api` → `VITE_BACKEND_URL` (http://localhost:4700)
 
 ### Database
-- PostgreSQL 16: user `agents`, password `agents_secret_2026`, db `ai_agents`
-- All models use UUID primary keys, auto timestamps (`created_at`, `updated_at`)
+- **PostgreSQL 16**: user `agents`, password `agents_secret_2026`, db `ai_agents`
+  - Used for relational data: users, agents, models, skills, chat sessions (foreign keys, joins)
+  - All models use UUID primary keys, auto timestamps (`created_at`, `updated_at`)
+- **MongoDB 7**: user `agents`, password `mongo_secret_2026`, db `ai_agents`
+  - Used for JSON documents: tasks (dynamic result/error fields), autonomous runs, thinking logs
+  - Models defined as Pydantic with `to_mongo()` / `from_mongo()` methods for UUID/datetime conversion
 
 ## Project Structure
 
@@ -90,6 +95,9 @@ backend/
     models/              # SQLAlchemy ORM models
       user.py, agent.py, task.py, skill.py, chat.py,
       model_config.py, api_key.py, system_setting.py, log.py, memory.py
+    mongodb/             # MongoDB Pydantic models and services
+      models.py          # MongoTask with to_mongo()/from_mongo() UUID conversion
+      task_service.py    # CRUD operations for tasks using Motor async driver
     llm/                 # LLM provider abstraction
       base.py            # Message, GenerationParams, LLMResponse, LLMProvider protocol
       ollama.py          # OllamaProvider (chat timeout=300s)
@@ -128,6 +136,12 @@ frontend/
 - Ollama models auto-synced to `model_configs` table on startup
 - For Ollama models: always use `settings.OLLAMA_BASE_URL` at runtime (not stored DB `base_url`) — Docker vs local URLs differ
 
+**Database Strategy:**
+- **PostgreSQL** for relational data requiring foreign keys, joins, and referential integrity (users, agents, models, skills, chat sessions)
+- **MongoDB** for JSON-heavy documents with dynamic/flexible schemas (tasks with result/error fields, autonomous runs, thinking logs)
+- MongoDB access via `from app.database import get_mongodb` — returns Motor AsyncIOMotorDatabase
+- MongoDB models use Pydantic with `to_mongo()` / `from_mongo()` for UUID string conversion and datetime ISO formatting
+
 ### Frontend
 - Vuetify dark theme by default
 - Delete confirmations require typing "DELETE"
@@ -149,3 +163,4 @@ frontend/
 - **Ollama model errors** (nodename not known): usually means stored `base_url` = Docker URL used in dev mode. Fixed: `_resolve_model()` now uses runtime `OLLAMA_BASE_URL` for ollama provider
 - **Backend pip install fails**: ensure using `backend/.venv/bin/pip`, not system pip
 - **Redis import**: use `from app.database import redis_client` (module-level, not function)
+- **MongoDB import**: use `from app.database import get_mongodb` — returns AsyncIOMotorDatabase instance

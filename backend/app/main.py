@@ -10,7 +10,7 @@ from app.config import get_settings
 # Configure app-level logging so watchdog and other services can log
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s [%(name)s] %(message)s")
 logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
-from app.database import init_db, init_redis, async_session
+from app.database import init_db, init_redis, init_mongodb, async_session
 from app.services.auth_service import create_default_admin
 from app.services.skill_service import create_system_skills
 from app.services.model_service import sync_ollama_models
@@ -20,7 +20,7 @@ from app.services.protocol_service import create_default_protocols, deduplicate_
 from app.api.auth import router as auth_router
 from app.api.settings import router as settings_router
 from app.api.agents import router as agents_router
-from app.api.tasks import common_router as tasks_router, agent_task_router
+from app.api.tasks_mongo import common_router as tasks_router, agent_task_router
 from app.api.skills import router as skills_router, agent_skill_router
 from app.api.logs import agent_log_router
 from app.api.system import router as system_router
@@ -50,6 +50,7 @@ settings = get_settings()
 async def lifespan(app: FastAPI):
     # Startup
     await init_redis()
+    await init_mongodb()
     await init_db()
 
     # Create default admin & system skills

@@ -13,6 +13,7 @@ bcrypt==4.2.1
 python-multipart==0.0.20
 websockets==14.1
 chromadb-client==0.6.3
+motor==3.6.0
 psutil==6.1.1
 ruff==0.9.3
 pytest==8.3.4
