@@ -406,12 +406,13 @@ const filteredSessions = computed(() => {
   let results = []
 
   if (activeChatType.value === 'agent') {
-    // For agent chats: show all agents (regardless of sessions)
+    // For agent chats: show only enabled agents (regardless of sessions)
     const realSessions = chatStore.sortedSessions.filter(s => s.chat_type === 'agent')
     const sessionAgentIds = new Set(realSessions.filter(s => s.agent_ids?.length === 1).map(s => s.agent_ids[0]))
 
-    // Create pseudo-sessions for all agents
-    results = agentsStore.agents.map(agent => {
+    // Create pseudo-sessions for enabled agents only
+    const enabledAgents = agentsStore.agents.filter(a => a.enabled !== false)
+    results = enabledAgents.map(agent => {
       const existingSession = realSessions.find(s => s.agent_ids?.length === 1 && s.agent_ids[0] === agent.id)
       if (existingSession) {
         return existingSession

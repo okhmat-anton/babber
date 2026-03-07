@@ -357,10 +357,12 @@ async def get_available_models(
                 "type": "model",
             })
 
-    # 4. All agents
+    # 4. Only enabled agents
     agent_svc = AgentService(db)
     all_agents = await agent_svc.get_all(limit=500)
     for agent in all_agents:
+        if not getattr(agent, 'enabled', True):
+            continue
         models.append({
             "id": f"agent:{agent.id}",
             "name": f"🤖 {agent.name}",

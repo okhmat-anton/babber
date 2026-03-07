@@ -14,6 +14,7 @@ class MongoAgent(BaseModel):
     model_name: Optional[str] = None
     system_prompt: str = ""
     status: str = "idle"  # idle, running, paused, error, stopped
+    enabled: bool = True  # Whether agent is available for chat selection
 
     # Generation parameters
     temperature: float = 0.7

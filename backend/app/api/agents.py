@@ -158,6 +158,7 @@ async def create_agent(
         max_messages_before_response=body.max_messages_before_response,
         self_thinking=body.self_thinking,
         thinking_protocol_id=body.thinking_protocol_id,
+        enabled=body.enabled,
     )
     await svc.create(agent)
 
@@ -248,7 +249,7 @@ async def update_agent(
 
     # Build MongoDB update dict
     mongo_update = {}
-    for key in ("name", "filesystem_access", "system_access", "self_thinking"):
+    for key in ("name", "filesystem_access", "system_access", "self_thinking", "enabled"):
         if key in update_data:
             mongo_update[key] = update_data[key]
     if "thinking_protocol_id" in update_data:
