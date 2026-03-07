@@ -29,6 +29,31 @@
     <!-- ═══ Sessions List (full view, shown when sessionsExpanded) ═══ -->
     <template v-if="sessionsExpanded">
       <div class="sessions-view">
+        <!-- Chat Type Tabs -->
+        <v-tabs
+          v-model="activeChatType"
+          density="compact"
+          color="primary"
+          bg-color="transparent"
+          class="chat-type-tabs px-2"
+          slider-color="primary"
+        >
+          <v-tab value="user">
+            <v-icon size="14" class="mr-1">mdi-account</v-icon>
+            <span class="text-caption">My Chats</span>
+          </v-tab>
+          <v-tab value="agent">
+            <v-icon size="14" class="mr-1">mdi-robot</v-icon>
+            <span class="text-caption">Agent Chats</span>
+            <v-badge v-if="agentChatsUnreadCount > 0" :content="agentChatsUnreadCount" color="error" inline class="ml-1" />
+          </v-tab>
+          <v-tab value="project_task">
+            <v-icon size="14" class="mr-1">mdi-folder</v-icon>
+            <span class="text-caption">Projects & Tasks</span>
+            <v-badge v-if="projectTaskUnreadCount > 0" :content="projectTaskUnreadCount" color="error" inline class="ml-1" />
+          </v-tab>
+        </v-tabs>
+        
         <div class="px-2 py-1">
           <v-text-field
             v-model="sessionSearch"
@@ -63,7 +88,16 @@
                 @click.stop
                 autofocus
               />
-              <div v-else class="text-caption text-truncate" @dblclick.stop="startRenameSession(session)">{{ session.title }}</div>
+              <div v-else class="text-caption text-truncate d-flex align-center" @dblclick.stop="startRenameSession(session)">
+                <span class="text-truncate">{{ session.title }}</span>
+                <v-badge 
+                  v-if="session.unread_count > 0" 
+                  :content="session.unread_count" 
+                  color="error" 
+                  inline 
+                  class="ml-1"
+                />
+              </div>
             </div>
             <v-btn
               v-if="editingSessionId !== session.id"
@@ -324,6 +358,7 @@ const showSettings = ref(false)
 const sessionSearch = ref('')
 const sessionsExpanded = ref(true)
 const expandedResponses = reactive({})
+const activeChatType = ref('user') // 'user', 'agent', 'project_task'
 
 const editingSessionId = ref(null)
 const editingSessionTitle = ref('')
@@ -346,10 +381,27 @@ const modelNamesDisplay = computed(() => {
   }).join(', ')
 })
 
+// Unread counts by chat type
+const agentChatsUnreadCount = computed(() => {
+  return chatStore.sortedSessions
+    .filter(s => s.chat_type === 'agent')
+    .reduce((sum, s) => sum + (s.unread_count || 0), 0)
+})
+
+const projectTaskUnreadCount = computed(() => {
+  return chatStore.sortedSessions
+    .filter(s => s.chat_type === 'project_task')
+    .reduce((sum, s) => sum + (s.unread_count || 0), 0)
+})
+
 const filteredSessions = computed(() => {
+  // Filter by active chat type
+  let sessions = chatStore.sortedSessions.filter(s => s.chat_type === activeChatType.value)
+  
+  // Then filter by search query
   const q = (sessionSearch.value || '').toLowerCase()
-  if (!q) return chatStore.sortedSessions
-  return chatStore.sortedSessions.filter(s =>
+  if (!q) return sessions
+  return sessions.filter(s =>
     s.title.toLowerCase().includes(q) ||
     (s.last_message || '').toLowerCase().includes(q)
   )

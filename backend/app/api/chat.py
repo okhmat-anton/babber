@@ -54,6 +54,9 @@ class ChatSessionCreate(BaseModel):
     multi_model: bool = False
     system_prompt: Optional[str] = None
     temperature: float = 0.7
+    chat_type: str = "user"            # 'user', 'agent', 'project_task'
+    project_slug: Optional[str] = None # for project_task chats
+    task_id: Optional[str] = None      # for project_task chats
 
 
 class ChatSessionUpdate(BaseModel):
@@ -73,6 +76,10 @@ class ChatSessionResponse(BaseModel):
     multi_model: bool
     system_prompt: Optional[str] = None
     temperature: float
+    chat_type: str = "user"
+    project_slug: Optional[str] = None
+    task_id: Optional[str] = None
+    unread_count: int = 0
     message_count: int = 0
     created_at: str
     updated_at: str
@@ -124,6 +131,10 @@ def _session_to_response(session: ChatSession, model_names: dict[str, str] = Non
         "multi_model": session.multi_model,
         "system_prompt": session.system_prompt,
         "temperature": session.temperature,
+        "chat_type": session.chat_type,
+        "project_slug": session.project_slug,
+        "task_id": session.task_id,
+        "unread_count": session.unread_count,
         "protocol_state": session.protocol_state,
         "message_count": len(msgs),
         "created_at": session.created_at.isoformat(),
@@ -377,16 +388,23 @@ async def get_available_models(
 @router.get("/sessions")
 async def list_sessions(
     limit: int = Query(50, le=200),
+    chat_type: Optional[str] = Query(None, description="Filter by chat type: 'user', 'agent', 'project_task'"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """List chat sessions, newest first."""
-    result = await db.execute(
+    query = (
         select(ChatSession)
         .where(ChatSession.user_id == user.id)
-        .order_by(ChatSession.updated_at.desc())
-        .limit(limit)
     )
+    
+    # Filter by chat type if specified
+    if chat_type:
+        query = query.where(ChatSession.chat_type == chat_type)
+    
+    query = query.order_by(ChatSession.updated_at.desc()).limit(limit)
+    
+    result = await db.execute(query)
     sessions = result.scalars().all()
     # Build model names map for all sessions efficiently
     all_model_ids = set()
@@ -480,6 +498,10 @@ async def create_session(
         multi_model=body.multi_model,
         system_prompt=body.system_prompt,
         temperature=body.temperature,
+        chat_type=body.chat_type,
+        project_slug=body.project_slug,
+        task_id=body.task_id,
+        unread_count=0,
     )
     db.add(session)
     await db.flush()
@@ -563,6 +585,28 @@ async def delete_session(
         raise HTTPException(status_code=404, detail="Session not found")
     await db.delete(session)
     return {"message": "Session deleted"}
+
+
+@router.post("/sessions/{session_id}/mark-read")
+async def mark_session_as_read(
+    session_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark a chat session as read (reset unread count)."""
+    result = await db.execute(
+        select(ChatSession).where(
+            ChatSession.id == uuid.UUID(session_id),
+            ChatSession.user_id == user.id,
+        )
+    )
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    session.unread_count = 0
+    await db.commit()
+    return {"message": "Session marked as read", "unread_count": 0}
 
 
 # ── Send Message ─────────────────────────────────────────

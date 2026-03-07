@@ -15,6 +15,12 @@ class ChatSession(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     title: Mapped[str] = mapped_column(String(500), default="New Chat")
+    # Chat type: 'user' (default), 'agent' (agent-initiated), 'project_task' (project/task discussion)
+    chat_type: Mapped[str] = mapped_column(String(20), default="user", nullable=False)
+    # For project_task chats: project slug
+    project_slug: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # For project_task chats: task ID
+    task_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     # Models used in this chat (list of model_config IDs or ollama model names)
     model_ids: Mapped[list | None] = mapped_column(ARRAY(String), default=[])
     # Agent ID if chatting with a specific agent
@@ -28,6 +34,8 @@ class ChatSession(Base):
     temperature: Mapped[float] = mapped_column(Float, default=0.7)
     # Protocol execution state (todo list, active child protocol, etc.)
     protocol_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Unread messages count for user
+    unread_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

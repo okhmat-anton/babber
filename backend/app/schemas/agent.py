@@ -46,6 +46,8 @@ class AgentCreate(BaseModel):
     # Permissions
     filesystem_access: bool = False
     system_access: bool = False
+    # Chat settings
+    max_messages_before_response: int = 5  # For agent-initiated chats
     # Self-thinking mode
     self_thinking: bool = False
     # Multi-model support
@@ -73,6 +75,8 @@ class AgentUpdate(BaseModel):
     # Permissions
     filesystem_access: bool | None = None
     system_access: bool | None = None
+    # Chat settings
+    max_messages_before_response: int | None = None  # For agent-initiated chats
     # Self-thinking mode
     self_thinking: bool | None = None
     # Multi-model support (if provided, replaces all)
@@ -103,6 +107,7 @@ class AgentResponse(BaseModel):
     num_gpu: int
     filesystem_access: bool = False
     system_access: bool = False
+    max_messages_before_response: int = 5
     self_thinking: bool = False
     avatar_url: str | None = None
     beliefs: dict = {}                 # from beliefs.json (filesystem)

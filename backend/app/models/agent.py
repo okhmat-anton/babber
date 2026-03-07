@@ -33,6 +33,10 @@ class Agent(Base):
     filesystem_access: Mapped[bool] = mapped_column(Boolean, default=False)
     system_access: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Chat interaction settings
+    # Maximum messages agent can send in agent-initiated chats before waiting for user response
+    max_messages_before_response: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+
     # Avatar
     avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
 

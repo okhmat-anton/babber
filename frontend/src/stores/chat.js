@@ -54,6 +54,7 @@ export const useChatStore = defineStore('chat', {
     async fetchSessions() {
       this.loading = true
       try {
+        // Fetch all sessions - filtering by chat_type is done in the component
         const { data } = await api.get('/chat/sessions')
         this.sessions = data
       } catch (e) {
@@ -73,6 +74,9 @@ export const useChatStore = defineStore('chat', {
           multi_model: params.multi_model || false,
           system_prompt: params.system_prompt || null,
           temperature: params.temperature ?? 0.7,
+          chat_type: params.chat_type || 'user',
+          project_slug: params.project_slug || null,
+          task_id: params.task_id || null,
         })
         this.sessions.unshift(data)
         this.currentSession = data
@@ -93,6 +97,10 @@ export const useChatStore = defineStore('chat', {
         this.messages = data.messages || []
         this.showSessionList = false
         localStorage.setItem('chat_current_session_id', sessionId)
+        // Mark session as read (reset unread count)
+        if (data.unread_count > 0) {
+          await this.markSessionAsRead(sessionId)
+        }
       } catch (e) {
         console.error('Failed to load session:', e)
       } finally {
@@ -127,6 +135,22 @@ export const useChatStore = defineStore('chat', {
       } catch (e) {
         console.error('Failed to delete session:', e)
         throw e
+      }
+    },
+
+    async markSessionAsRead(sessionId) {
+      try {
+        await api.post(`/chat/sessions/${sessionId}/mark-read`)
+        // Update local state
+        const session = this.sessions.find(s => s.id === sessionId)
+        if (session) {
+          session.unread_count = 0
+        }
+        if (this.currentSession?.id === sessionId) {
+          this.currentSession.unread_count = 0
+        }
+      } catch (e) {
+        console.error('Failed to mark session as read:', e)
       }
     },
 
