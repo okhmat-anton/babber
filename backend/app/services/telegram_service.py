@@ -899,120 +899,26 @@ async def _generate_agent_response(
     chat_id: str,
     context_messages_limit: int | None = None,
 ) -> Optional[str]:
-    """Call the agent's LLM with full orchestrator support (protocols + skills)."""
-    import json as _json
-    from app.mongodb.services import (
-        AgentService, ModelConfigService, MessengerMessageService,
-        ModelRoleAssignmentService, AgentProtocolService, ThinkingProtocolService,
-        AgentSkillService, SkillService, AgentModelService,
-    )
-    from app.llm.ollama import OllamaProvider
-    from app.llm.openai_compatible import OpenAICompatibleProvider
-    from app.llm.base import Message, GenerationParams
-    from app.api.agent_files import read_agent_config, read_agent_settings
-    from app.api.agent_beliefs import read_beliefs
-    from app.api.agent_aspirations import read_aspirations
-    from app.services.protocol_executor import (
-        build_agent_system_prompt, parse_skill_invocations,
-    )
-    from app.api.chat import _execute_skill, _load_agent_skills, _load_agent_protocols
+    """Call the agent's LLM via AgentChatEngine with full orchestrator support."""
+    from app.mongodb.services import MessengerMessageService
+    from app.services.agent_chat_engine import AgentChatEngine
 
-    agent_svc = AgentService(db)
-    agent = await agent_svc.get_by_id(agent_id)
-    if not agent:
-        logger.error(f"Agent {agent_id} not found for messenger response")
-        return None
+    engine = AgentChatEngine(db)
 
-    # ── Resolve model ──
-    settings = get_settings()
-    mc_svc = ModelConfigService(db)
-    resolved_model = None
-    provider_instance = None
-    model_cfg = None
-
-    # 1) Try agent's assigned models
-    agent_model_svc = AgentModelService(db)
-    agent_models = await agent_model_svc.get_by_agent(agent_id)
-    if agent_models:
-        best = sorted(agent_models, key=lambda x: x.priority)[0]
-        model_cfg = await mc_svc.get_by_id(str(best.model_config_id))
-
-    # 2) Try agent's own model_id / model_name
-    if not model_cfg and (agent.model_name or agent.model_id):
-        configs = await mc_svc.get_all()
-        for cfg in configs:
-            if cfg.model_id == agent.model_name or cfg.id == (agent.model_id or ""):
-                model_cfg = cfg
-                break
-
-    # 3) Fallback: model role "dialog" or "base"
-    if not model_cfg:
-        role_svc = ModelRoleAssignmentService(db)
-        all_roles = await role_svc.get_all(skip=0, limit=100)
-        role_model_id = None
-        for r in all_roles:
-            if r.role == "dialog":
-                role_model_id = r.model_config_id
-                break
-        if not role_model_id:
-            for r in all_roles:
-                if r.role == "base":
-                    role_model_id = r.model_config_id
-                    break
-        if role_model_id:
-            model_cfg = await mc_svc.get_by_id(role_model_id)
-
-    # 4) Last resort: first active non-embedding model
-    if not model_cfg:
-        configs = await mc_svc.get_all()
-        for cfg in configs:
-            if cfg.is_active and "embed" not in (cfg.model_id or "").lower():
-                model_cfg = cfg
-                break
-
-    if model_cfg:
-        resolved_model = model_cfg.model_id
-        if model_cfg.provider == "ollama":
-            provider_instance = OllamaProvider(base_url=settings.OLLAMA_BASE_URL)
-        elif model_cfg.provider in ("openai", "openai_compatible"):
-            provider_instance = OpenAICompatibleProvider(
-                base_url=model_cfg.base_url or "https://api.openai.com/v1",
-                api_key=model_cfg.api_key or "",
-            )
-
-    if not provider_instance:
-        logger.error(f"No LLM model available for messenger {messenger_id}")
-        return None
-
-    # ── Load agent protocols, skills, beliefs, aspirations ──
-    agent_protocols = []
-    agent_skills = []
-    agent_beliefs = None
-    agent_aspirations = None
-
-    if is_trusted:
-        # Trusted users get full agent capabilities
-        try:
-            agent_protocols = await _load_agent_protocols(agent_id, db)
-            agent_skills = await _load_agent_skills(agent_id, db, agent=agent)
-            agent_beliefs = read_beliefs(agent.name)
-            agent_aspirations = read_aspirations(agent.name)
-        except Exception as e:
-            logger.warning(f"Failed to load agent context for messenger: {e}")
-
-    # ── Build system prompt ──
-    base_system_prompt = agent.system_prompt or ""
-
-    # Load file-based config if available
+    # ── Load agent context ──
     try:
-        agent_config = read_agent_config(agent.name)
-        file_prompt = agent_config.get("system_prompt", "")
-        if file_prompt:
-            base_system_prompt = file_prompt
-    except Exception:
-        pass
+        ctx = await engine.load_agent_context(
+            agent_id,
+            load_protocols=is_trusted,
+            load_skills=is_trusted,
+            load_beliefs=is_trusted,
+            load_aspirations=is_trusted,
+        )
+    except ValueError as e:
+        logger.error(f"Agent context load failed for messenger {messenger_id}: {e}")
+        return None
 
-    # Messenger context injection
+    # ── Build messenger-specific system prompt ──
     messenger_context = ""
     if is_trusted:
         messenger_context = (
@@ -1037,134 +943,52 @@ async def _generate_agent_response(
             f"{human_note}"
         )
 
-    # Build full system prompt with orchestrator if protocols available
-    if agent_protocols and is_trusted:
-        system_prompt = build_agent_system_prompt(
-            base_system_prompt=base_system_prompt,
-            agent_name=agent.name,
-            protocols=agent_protocols,
-            available_skills=agent_skills or None,
-            current_todo=None,
-            beliefs=agent_beliefs,
-            aspirations=agent_aspirations,
-        )
-        system_prompt += messenger_context
+    if ctx.protocols and is_trusted:
+        system_prompt = engine.build_system_prompt(ctx, extra_context=messenger_context)
     else:
-        system_prompt = base_system_prompt + messenger_context
+        system_prompt = (ctx.base_system_prompt or "") + messenger_context
 
-    # ── Conversation history ──
+    # ── Conversation history from messenger messages ──
     effective_limit = context_messages_limit
     if effective_limit is None:
-        effective_limit = getattr(agent, 'messenger_context_limit', None) or 10
+        effective_limit = getattr(ctx.agent, 'messenger_context_limit', None) or 10
     effective_limit = max(1, min(effective_limit, 100))
 
     msg_svc = MessengerMessageService(db)
     recent = await msg_svc.get_by_chat(messenger_id, chat_id, limit=effective_limit)
     recent.reverse()  # oldest first
 
-    messages = [Message(role="system", content=system_prompt)]
+    messages = [{"role": "system", "content": system_prompt}]
     for m in recent[:-1]:  # exclude the current message (already logged)
         role = "assistant" if m.direction == "outgoing" else "user"
-        messages.append(Message(role=role, content=m.content))
-    messages.append(Message(role="user", content=message_text))
+        messages.append({"role": role, "content": m.content})
+    messages.append({"role": "user", "content": message_text})
 
-    # ── LLM generation params ──
-    gen_params = GenerationParams(
-        temperature=agent.temperature if humanize else 0.7,
-        max_tokens=agent.max_tokens or 2048,
-    )
-
-    # Load agent file-based settings for more precise params
-    try:
-        agent_settings = read_agent_settings(agent.name)
-        if agent_settings:
-            gen_params = GenerationParams(
-                temperature=agent_settings.get("temperature", gen_params.temperature),
-                max_tokens=agent_settings.get("max_tokens", gen_params.max_tokens),
-                num_ctx=agent_settings.get("num_ctx", 32768),
-                top_p=agent_settings.get("top_p", 0.9),
-                top_k=agent_settings.get("top_k", 40),
-            )
-    except Exception:
-        pass
-
-    MAX_SKILL_ITERATIONS = 5  # prevent infinite loops
+    # ── Generate via engine ──
+    max_skills = 5 if is_trusted else 0
 
     try:
-        logger.info(f"Calling LLM model={resolved_model} for messenger {messenger_id} "
-                     f"(protocols={len(agent_protocols)}, skills={len(agent_skills)})")
-
-        response = await provider_instance.chat(
-            model=resolved_model,
-            messages=messages,
-            params=gen_params,
+        logger.info(
+            f"Calling AgentChatEngine for messenger {messenger_id} "
+            f"(protocols={len(ctx.protocols)}, skills={len(ctx.skills)})"
         )
-        if not response or not response.content:
-            logger.warning(f"LLM returned empty content for messenger {messenger_id}")
+        result = await engine.generate(
+            messages=messages,
+            agent_context=ctx,
+            max_skill_iterations=max_skills,
+            parse_protocols=is_trusted,
+        )
+        if not result.content:
+            logger.warning(f"Engine returned empty content for messenger {messenger_id}")
             return None
 
-        llm_content = response.content.strip()
-
-        # ── Skill execution loop (only for trusted users with skills) ──
-        if is_trusted and agent_skills:
-            iteration = 0
-            while iteration < MAX_SKILL_ITERATIONS:
-                skill_calls = parse_skill_invocations(llm_content)
-                if not skill_calls:
-                    break
-
-                iteration += 1
-                logger.info(f"Messenger {messenger_id}: executing {len(skill_calls)} skill(s), iteration {iteration}")
-
-                # Execute all skills
-                skill_results = []
-                for call in skill_calls:
-                    result = await _execute_skill(call["skill_name"], call["args"], agent_skills)
-                    skill_results.append({
-                        "skill": call["skill_name"],
-                        "args": call["args"],
-                        "result": result,
-                    })
-
-                # Build feedback and do follow-up LLM call
-                skill_feedback = "\n\n".join(
-                    f"**Skill `{sr['skill']}` result:**\n```json\n{_json.dumps(sr['result'], ensure_ascii=False, indent=2)}\n```"
-                    for sr in skill_results
-                )
-                follow_up_prompt = (
-                    f"Skills have been executed. Here are the results:\n\n{skill_feedback}\n\n"
-                    "Continue based on these results. Keep your response concise for messenger."
-                )
-
-                messages.append(Message(role="assistant", content=llm_content))
-                messages.append(Message(role="user", content=follow_up_prompt))
-
-                follow_resp = await provider_instance.chat(
-                    model=resolved_model,
-                    messages=messages,
-                    params=gen_params,
-                )
-                if not follow_resp or not follow_resp.content:
-                    break
-
-                llm_content = follow_resp.content.strip()
-
-        # Clean up skill markers from final response for clean messenger output
-        import re
-        clean = re.sub(r'<<<SKILL:\w+>>>\s*\{[^}]*\}\s*<<<END_SKILL>>>', '', llm_content)
-        clean = re.sub(r'<<<TODO>>>.*?<<<END_TODO>>>', '', clean, flags=re.DOTALL)
-        clean = re.sub(r'<<<DELEGATE:\w+>>>', '', clean)
-        clean = re.sub(r'<<<DELEGATE_DONE:[^>]*>>>', '', clean)
-        clean = re.sub(r'<<<DELEGATE_RESULT>>>.*?<<<END_DELEGATE_RESULT>>>', '', clean, flags=re.DOTALL)
-        clean = re.sub(r'\n{3,}', '\n\n', clean).strip()
-
-        return clean if clean else llm_content
+        return result.content
 
     except Exception as e:
-        logger.error(f"LLM error for messenger response (model={resolved_model}): {e}", exc_info=True)
+        logger.error(f"Engine error for messenger {messenger_id}: {e}", exc_info=True)
         await _log_messenger_error(
             messenger_id, agent_id,
             "llm_error", f"LLM call failed: {e}",
-            {"model": resolved_model, "exception": type(e).__name__, "detail": str(e)},
+            {"exception": type(e).__name__, "detail": str(e)},
         )
         return None

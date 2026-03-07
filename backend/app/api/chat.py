@@ -1,6 +1,7 @@
 """
 Chat API — persistent chat sessions with single/multi-model support.
 Integrates protocol execution: orchestrator delegation, todo tracking, skill invocation.
+Uses AgentChatEngine as the unified core for agent LLM interaction.
 """
 import asyncio
 import json
@@ -45,6 +46,7 @@ from app.services.chat_summary_service import (
     create_summary,
     get_session_messages_for_llm,
 )
+from app.services.agent_chat_engine import AgentChatEngine, AgentContext, EngineResult
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -593,75 +595,11 @@ async def mark_session_as_read(
 
 # ── Send Message ─────────────────────────────────────────
 
-async def _load_agent_protocols(agent_id: str, db: AsyncIOMotorDatabase) -> list[dict]:
-    """Load all protocols assigned to an agent."""
-    ap_svc = AgentProtocolService(db)
-    proto_svc = ThinkingProtocolService(db)
-    agent_protos = await ap_svc.get_by_agent(agent_id)
-    protocols = []
-    for ap in agent_protos:
-        p = await proto_svc.get_by_id(ap.protocol_id)
-        if p:
-            protocols.append({
-                "id": str(p.id),
-                "name": p.name,
-                "description": p.description or "",
-                "type": p.type or "standard",
-                "steps": p.steps or [],
-                "is_main": ap.is_main,
-                "priority": ap.priority,
-            })
-    return protocols
-
-
-async def _load_agent_skills(agent_id: str, db: AsyncIOMotorDatabase, agent=None) -> list[dict]:
-    """Load all enabled skills for an agent."""
-    from app.api.settings import get_setting_value
-
-    # Determine effective permissions (global AND agent-level)
-    global_fs = (await get_setting_value(db, "filesystem_access_enabled")) == "true"
-    global_sys = (await get_setting_value(db, "system_access_enabled")) == "true"
-    agent_fs = agent.filesystem_access if agent else False
-    agent_sys = agent.system_access if agent else False
-    effective_fs = global_fs and agent_fs
-    effective_sys = global_sys and agent_sys
-
-    FS_SKILLS = {"file_read", "file_write"}
-    SYS_SKILLS = {"shell_exec", "code_execute"}
-
-    # Get all potentially available skills (system, shared, or author)
-    skill_svc = SkillService(db)
-    all_skills_list = await skill_svc.get_all(limit=1000)
-    agent_id_str = str(agent_id)
-    all_skills = [
-        s for s in all_skills_list
-        if s.is_system or s.is_shared or s.author_agent_id == agent_id_str
-    ]
-
-    # Check disabled state from agent_skills
-    ask_svc = AgentSkillService(db)
-    agent_skill_records = await ask_svc.get_all(filter={"agent_id": agent_id_str}, limit=1000)
-    disabled_ids = {str(ask.skill_id) for ask in agent_skill_records if not ask.is_enabled}
-
-    skills = []
-    for s in all_skills:
-        if str(s.id) in disabled_ids:
-            continue
-        if s.name in FS_SKILLS and not effective_fs:
-            continue
-        if s.name in SYS_SKILLS and not effective_sys:
-            continue
-        skills.append({
-            "id": str(s.id),
-            "name": s.name,
-            "display_name": s.display_name,
-            "description": s.description or "",
-            "description_for_agent": s.description_for_agent or "",
-            "category": s.category,
-            "code": s.code,
-            "input_schema": s.input_schema or {},
-        })
-    return skills
+# ── Re-exports from AgentChatEngine for backward compatibility ──
+# (autonomous_runner.py imports these from here)
+_load_agent_protocols = AgentChatEngine.load_agent_protocols
+_load_agent_skills = AgentChatEngine.load_agent_skills
+_execute_skill = AgentChatEngine.execute_skill
 
 
 async def create_agent_error(
@@ -681,66 +619,6 @@ async def create_agent_error(
         context=context,
     )
     return await AgentErrorService(db).create(err)
-
-
-async def _execute_skill(skill_name: str, args: dict, agent_skills: list[dict]) -> dict:
-    """Execute a skill by name and return the result."""
-    skill = None
-    for s in agent_skills:
-        if s["name"] == skill_name:
-            skill = s
-            break
-
-    if not skill:
-        return {"error": f"Skill '{skill_name}' not found or not enabled"}
-
-    code = skill.get("code", "")
-    if not code or code.startswith("#"):
-        return {"error": f"Skill '{skill_name}' has no executable code"}
-
-    # Inject PROJECTS_DIR env var for project-aware skills
-    import os
-    from app.config import get_settings
-    _settings = get_settings()
-    os.environ.setdefault("PROJECTS_DIR", _settings.PROJECTS_DIR)
-
-    # Execute skill code in a sandboxed namespace
-    try:
-        namespace = {}
-        exec(code, namespace)
-
-        execute_fn = namespace.get("execute")
-        if not execute_fn:
-            return {"error": f"Skill '{skill_name}' has no execute() function"}
-
-        # Normalize args: map common LLM mistakes to actual parameter names
-        import inspect
-        sig = inspect.signature(execute_fn)
-        expected_params = set(sig.parameters.keys())
-        normalized = {}
-        # Build alias map from input_schema: e.g. if param is 'project_slug',
-        # also accept 'slug' (last part after underscore split)
-        alias_map = {}
-        for p in expected_params:
-            alias_map[p] = p
-            parts = p.split('_')
-            if len(parts) > 1:
-                alias_map[parts[-1]] = p          # slug -> project_slug
-                alias_map['_'.join(parts[1:])] = p  # project_slug -> project_slug (noop but safe)
-        for k, v in args.items():
-            mapped = alias_map.get(k, k)
-            normalized[mapped] = v
-        args = normalized
-
-        import asyncio
-        if asyncio.iscoroutinefunction(execute_fn):
-            result = await execute_fn(**args)
-        else:
-            result = execute_fn(**args)
-
-        return {"result": result}
-    except Exception as e:
-        return {"error": f"Skill '{skill_name}' execution failed: {str(e)}"}
 
 
 @router.post("/sessions/{session_id}/messages")
@@ -842,44 +720,28 @@ async def send_message(
     # Build generation params — agent's file settings are source of truth
     gen_params = GenerationParams(temperature=session.temperature)
     system_prompt = session.system_prompt
-    agent_protocols = []
-    agent_skills = []
-    agent_beliefs = None
+    agent_ctx = None  # AgentContext from engine
+    engine_result = None  # EngineResult if engine was used
     llm_calls_count = 0
     _resolved_model_name = None
 
     try:
-        if is_agent_session:
-            agent_name = agent.name
+        engine = AgentChatEngine(db)
 
-            # ── Step: Load agent config ──
+        if is_agent_session:
+            # ── Step: Load agent context via engine ──
             if tracker:
                 tracker.start_step_timer()
-            agent_config = read_agent_config(agent_name)
-            base_system_prompt = agent_config.get("system_prompt", "")
-
-            agent_settings = read_agent_settings(agent_name)
-            if agent_settings:
-                gen_params = GenerationParams(
-                    temperature=agent_settings.get("temperature", session.temperature),
-                    top_p=agent_settings.get("top_p", 0.9),
-                    top_k=agent_settings.get("top_k", 40),
-                    max_tokens=agent_settings.get("max_tokens", 2048),
-                    num_ctx=agent_settings.get("num_ctx", 32768),
-                    repeat_penalty=agent_settings.get("repeat_penalty", 1.1),
-                    num_predict=agent_settings.get("num_predict", -1),
-                    stop=agent_settings.get("stop") or None,
-                    num_thread=agent_settings.get("num_thread", 8),
-                    num_gpu=agent_settings.get("num_gpu", 1),
-                )
+            agent_ctx = await engine.load_agent_context(agent.id)
+            gen_params = agent_ctx.gen_params
 
             if tracker:
                 await tracker.step(
                     "config_load", "Load agent configuration",
-                    input_data={"agent_name": agent_name},
+                    input_data={"agent_name": agent_ctx.agent.name},
                     output_data={
-                        "has_system_prompt": bool(base_system_prompt),
-                        "system_prompt_length": len(base_system_prompt),
+                        "has_system_prompt": bool(agent_ctx.base_system_prompt),
+                        "system_prompt_length": len(agent_ctx.base_system_prompt),
                         "gen_params": {
                             "temperature": gen_params.temperature,
                             "top_p": gen_params.top_p,
@@ -887,57 +749,31 @@ async def send_message(
                             "max_tokens": gen_params.max_tokens,
                             "num_ctx": gen_params.num_ctx,
                         },
-                    },
-                    duration_ms=tracker.elapsed_step_ms(),
-                )
-
-            # ── Step: Load protocols, skills, beliefs, aspirations ──
-            if tracker:
-                tracker.start_step_timer()
-            agent_protocols = await _load_agent_protocols(agent.id, db)
-            agent_skills = await _load_agent_skills(agent.id, db, agent=agent)
-            agent_beliefs = read_beliefs(agent_name)
-            from app.api.agent_aspirations import read_aspirations
-            agent_aspirations = read_aspirations(agent_name)
-
-            if tracker:
-                await tracker.step(
-                    "context_load", "Load protocols, skills, beliefs, aspirations",
-                    output_data={
-                        "protocols_count": len(agent_protocols),
-                        "protocols": [p.get("name", "?") for p in agent_protocols],
-                        "skills_count": len(agent_skills),
-                        "skills": [s.get("name", "?") for s in agent_skills],
-                        "has_beliefs": bool(agent_beliefs),
-                        "has_aspirations": bool(agent_aspirations),
+                        "protocols_count": len(agent_ctx.protocols),
+                        "protocols": [p.get("name", "?") for p in agent_ctx.protocols],
+                        "skills_count": len(agent_ctx.skills),
+                        "skills": [s.get("name", "?") for s in agent_ctx.skills],
+                        "has_beliefs": bool(agent_ctx.beliefs),
+                        "has_aspirations": bool(agent_ctx.aspirations),
                     },
                     duration_ms=tracker.elapsed_step_ms(),
                 )
 
             # ── Step: Load project/task context (AIS-34) ──
-            project_context = None
-            task_context = None
             if session.project_slug or session.task_id:
                 if tracker:
                     tracker.start_step_timer()
-                
+
                 context_summary_parts = []
-                
-                # Load project context if available
+
                 if session.project_slug:
                     try:
-                        # Execute project_context_build skill
-                        proj_ctx_skill = None
-                        for s in agent_skills:
-                            if s["name"] == "project_context_build":
-                                proj_ctx_skill = s
-                                break
-                        
+                        proj_ctx_skill = any(s["name"] == "project_context_build" for s in agent_ctx.skills)
                         if proj_ctx_skill:
-                            proj_result = await _execute_skill(
+                            proj_result = await engine.execute_skill(
                                 "project_context_build",
                                 {"project_slug": session.project_slug, "max_recent_logs": 30},
-                                agent_skills
+                                agent_ctx.skills,
                             )
                             if "result" in proj_result:
                                 project_context = proj_result["result"]
@@ -950,28 +786,17 @@ async def send_message(
                                     f"{project_context.get('task_stats', {}).get('in_progress', 0)} in progress\n"
                                     f"   Files: {project_context.get('file_tree', {}).get('total_files', 0)}"
                                 )
-                    except Exception as e:
-                        # Silent fail - context is optional
+                    except Exception:
                         pass
-                
-                # Load task context if available
+
                 if session.task_id and session.project_slug:
                     try:
-                        # Execute task_context_build skill
-                        task_ctx_skill = None
-                        for s in agent_skills:
-                            if s["name"] == "task_context_build":
-                                task_ctx_skill = s
-                                break
-                        
+                        task_ctx_skill = any(s["name"] == "task_context_build" for s in agent_ctx.skills)
                         if task_ctx_skill:
-                            task_result = await _execute_skill(
+                            task_result = await engine.execute_skill(
                                 "task_context_build",
-                                {
-                                    "project_slug": session.project_slug,
-                                    "task_id": session.task_id
-                                },
-                                agent_skills
+                                {"project_slug": session.project_slug, "task_id": session.task_id},
+                                agent_ctx.skills,
                             )
                             if "result" in task_result:
                                 task_context = task_result["result"]
@@ -983,96 +808,44 @@ async def send_message(
                                     f"   Comments: {len(task_context.get('comments', []))}, "
                                     f"Related Files: {len(task_context.get('related_files', []))}"
                                 )
-                    except Exception as e:
-                        # Silent fail - context is optional
+                    except Exception:
                         pass
-                
-                # Append context summary to base system prompt
+
                 if context_summary_parts:
                     context_summary = "\n\n## Current Work Context\n\n" + "\n".join(context_summary_parts)
-                    base_system_prompt = base_system_prompt + context_summary
-                
+                    agent_ctx.base_system_prompt += context_summary
+
                 if tracker:
                     await tracker.step(
                         "project_task_context", "Load project/task context",
                         output_data={
-                            "has_project_context": bool(project_context),
-                            "has_task_context": bool(task_context),
-                            "context_summary_length": len(context_summary) if context_summary_parts else 0,
+                            "has_project_context": bool(context_summary_parts),
+                            "context_summary_length": sum(len(p) for p in context_summary_parts),
                         },
                         duration_ms=tracker.elapsed_step_ms(),
                     )
 
-            # Get current protocol state (todo list, delegation stack)
+            # ── Step: Build system prompt via engine ──
             protocol_state = session.protocol_state or {}
             current_todo = protocol_state.get("todo_list")
-            # Support both old (active_child_protocol) and new (delegation_stack) format
             delegation_stack = protocol_state.get("delegation_stack", [])
             if not delegation_stack and protocol_state.get("active_child_protocol"):
                 delegation_stack = [protocol_state["active_child_protocol"]]
-            active_child = delegation_stack[-1] if delegation_stack else None
 
-            # ── Step: Build system prompt ──
             if tracker:
                 tracker.start_step_timer()
-            if agent_protocols:
-                if active_child:
-                    # Find the active child protocol
-                    child_proto = None
-                    for p in agent_protocols:
-                        if p["name"] == active_child or p["id"] == active_child:
-                            child_proto = p
-                            break
-                    if child_proto:
-                        # If child is an orchestrator itself, attach its child protocols
-                        if child_proto.get("type") == "orchestrator":
-                            child_proto["child_protocols"] = [
-                                p for p in agent_protocols
-                                if p["id"] != child_proto["id"] and p.get("type") != "orchestrator"
-                            ]
-                        system_prompt = build_agent_system_prompt(
-                            base_system_prompt=base_system_prompt,
-                            agent_name=agent_name,
-                            protocols=[{**child_proto, "is_main": True}],
-                            available_skills=agent_skills or None,
-                            current_todo=current_todo,
-                            beliefs=agent_beliefs,
-                            aspirations=agent_aspirations,
-                        )
-                        # Add delegation context
-                        if len(delegation_stack) > 0:
-                            stack_info = " → ".join(delegation_stack)
-                            system_prompt += f"\n\n_Active delegation chain: {stack_info}_\n"
-                            system_prompt += "When done with this delegated work, output: `<<<DELEGATE_DONE:summary>>>`\n"
-                    else:
-                        system_prompt = build_agent_system_prompt(
-                            base_system_prompt=base_system_prompt,
-                            agent_name=agent_name,
-                            protocols=agent_protocols,
-                            available_skills=agent_skills or None,
-                            current_todo=current_todo,
-                            beliefs=agent_beliefs,
-                            aspirations=agent_aspirations,
-                        )
-                else:
-                    system_prompt = build_agent_system_prompt(
-                        base_system_prompt=base_system_prompt,
-                        agent_name=agent_name,
-                        protocols=agent_protocols,
-                        available_skills=agent_skills or None,
-                        current_todo=current_todo,
-                        beliefs=agent_beliefs,
-                        aspirations=agent_aspirations,
-                    )
-            else:
-                system_prompt = system_prompt or base_system_prompt
+
+            system_prompt = engine.build_system_prompt(
+                agent_ctx,
+                current_todo=current_todo,
+                delegation_stack=delegation_stack,
+            )
 
             if tracker:
                 await tracker.step(
                     "prompt_build", "Build system prompt",
                     input_data={
                         "delegation_stack": delegation_stack,
-                        "active_child_protocol": active_child,
                         "has_todo": bool(current_todo),
                     },
                     output_data={
@@ -1083,20 +856,14 @@ async def send_message(
                 )
 
         # Build conversation history
-        # Get existing messages
         existing_msgs = await msg_svc.get_by_session(session.id)
         existing_msgs.sort(key=lambda m: m.created_at if m.created_at else datetime.min)
-        
+
         # Check if auto-summarization is needed (AIS-35)
         if should_summarize_session(existing_msgs, context_limit=gen_params.num_ctx or 32768):
-            # Create summary in background (non-blocking for this request)
-            # Note: Summary will be used in next message
             asyncio.create_task(create_summary(session, existing_msgs, db))
-        
-        # Build history with summary injection (if session has summary)
+
         history = await get_session_messages_for_llm(session, existing_msgs, system_prompt)
-        
-        # Add current user message
         history.append({"role": "user", "content": body.content})
 
         if tracker:
@@ -1129,13 +896,52 @@ async def send_message(
             response_data = await _multi_agent_chat(
                 session.agent_ids, body.content, bare_history, db, session.temperature
             )
-            llm_calls_count = len(session.agent_ids) + 1  # agents + synthesis
+            llm_calls_count = len(session.agent_ids) + 1
             _resolved_model_name = response_data.get("model_name")
+            llm_duration_ms = int((time.monotonic() - start) * 1000)
+
         elif session.multi_model and len(model_ids) > 1:
             response_data = await _multi_model_chat(model_ids, history, gen_params, db)
-            llm_calls_count = len(model_ids) + 1  # models + synthesis
+            llm_calls_count = len(model_ids) + 1
             _resolved_model_name = response_data.get("model_name")
+            llm_duration_ms = int((time.monotonic() - start) * 1000)
+
+        elif is_agent_session and agent_ctx:
+            # ── Single-agent chat via engine ──
+            try:
+                engine_result = await engine.generate(
+                    messages=history,
+                    agent_context=agent_ctx,
+                    model_id=model_ids[0] if model_ids else None,
+                    max_skill_iterations=5,
+                    parse_protocols=bool(agent_ctx.protocols),
+                )
+            except Exception as e:
+                if tracker:
+                    await tracker.step(
+                        "llm_call", f"LLM call failed",
+                        status="error",
+                        error_message=str(e),
+                        duration_ms=tracker.elapsed_step_ms(),
+                    )
+                    await tracker.fail(f"Model error: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"Model error: {str(e)}")
+
+            llm_calls_count = engine_result.llm_calls_count
+            _resolved_model_name = engine_result.model_name
+            llm_duration_ms = engine_result.duration_ms
+
+            response_data = {
+                "content": engine_result.raw_content,
+                "model_name": engine_result.model_name,
+                "model_responses": None,
+                "total_tokens": engine_result.total_tokens,
+                "prompt_tokens": engine_result.prompt_tokens,
+                "completion_tokens": engine_result.completion_tokens,
+            }
+
         else:
+            # Non-agent single-model chat
             model_id = model_ids[0]
             provider, base_url, model_name, api_key = await _resolve_model(model_id, db)
             _resolved_model_name = model_name
@@ -1157,6 +963,7 @@ async def send_message(
                 raise HTTPException(status_code=500, detail=f"Model error: {str(e)}")
 
             llm_calls_count = 1
+            llm_duration_ms = int((time.monotonic() - start) * 1000)
             response_data = {
                 "content": llm_resp.content,
                 "model_name": model_name,
@@ -1165,8 +972,6 @@ async def send_message(
                 "prompt_tokens": getattr(llm_resp, "prompt_tokens", 0),
                 "completion_tokens": getattr(llm_resp, "completion_tokens", 0),
             }
-
-        llm_duration_ms = int((time.monotonic() - start) * 1000)
 
         if tracker:
             await tracker.step(
@@ -1188,163 +993,73 @@ async def send_message(
 
         elapsed_ms = llm_duration_ms
 
-        # ── Protocol response parsing ──
+        # ── Protocol response parsing (agent sessions with engine result) ──
         msg_metadata = {}
         llm_content = response_data["content"]
 
-        if session.agent_id and agent_protocols:
+        if engine_result and agent_ctx and agent_ctx.protocols:
+            # Engine already parsed — use engine_result directly
             if tracker:
                 tracker.start_step_timer()
 
             protocol_state = session.protocol_state or {}
 
-            # 1. Parse todo list updates
-            new_todo = parse_todo_list(llm_content)
-            if new_todo:
-                protocol_state["todo_list"] = new_todo
-                msg_metadata["todo_list"] = new_todo
+            # 1. Todo list from engine result
+            if engine_result.todo_list:
+                protocol_state["todo_list"] = engine_result.todo_list
+                msg_metadata["todo_list"] = engine_result.todo_list
 
-                # Sync TODO items → persistent Tasks table
                 try:
                     from app.services.todo_sync_service import sync_todos_to_tasks
                     updated_map = await sync_todos_to_tasks(
-                        db, session.agent_id, new_todo,
+                        db, session.agent_id, engine_result.todo_list,
                         todo_task_map=protocol_state.get("todo_task_map"),
                     )
                     protocol_state["todo_task_map"] = updated_map
                 except Exception as e:
                     print(f"[CHAT] Warning: failed to sync todos to tasks: {e}")
 
-            # 2. Parse delegation (new delegation or returning from one)
-            delegate_to = parse_delegate(llm_content)
-            delegate_done = parse_delegate_done(llm_content)
-
-            # Initialize delegation_stack in protocol_state if not present
+            # 2. Delegation from engine result
             if "delegation_stack" not in protocol_state:
-                # Migrate from old format
                 old_child = protocol_state.get("active_child_protocol")
                 protocol_state["delegation_stack"] = [old_child] if old_child else []
 
-            if delegate_done:
-                # Child protocol finished → pop from delegation stack, return to parent
+            if engine_result.delegate_done:
                 if protocol_state["delegation_stack"]:
                     finished_protocol = protocol_state["delegation_stack"].pop()
                     msg_metadata["delegate_done_from"] = finished_protocol
-                    msg_metadata["delegate_done_summary"] = delegate_done.get("summary", "")
-                    if delegate_done.get("result"):
-                        msg_metadata["delegate_result"] = delegate_done["result"]
-                # Update active_child_protocol for backward compat
+                    msg_metadata["delegate_done_summary"] = engine_result.delegate_done.get("summary", "")
+                    if engine_result.delegate_done.get("result"):
+                        msg_metadata["delegate_result"] = engine_result.delegate_done["result"]
                 protocol_state["active_child_protocol"] = (
                     protocol_state["delegation_stack"][-1]
                     if protocol_state["delegation_stack"] else None
                 )
 
-            if delegate_to:
-                # Push new delegation onto the stack
-                protocol_state["delegation_stack"].append(delegate_to)
-                protocol_state["active_child_protocol"] = delegate_to
-                msg_metadata["delegated_to"] = delegate_to
+            if engine_result.delegate_to:
+                protocol_state["delegation_stack"].append(engine_result.delegate_to)
+                protocol_state["active_child_protocol"] = engine_result.delegate_to
+                msg_metadata["delegated_to"] = engine_result.delegate_to
 
-            # 3. Parse skill invocations
-            skill_calls = parse_skill_invocations(llm_content)
+            # 3. Skill results from engine
+            if engine_result.skill_results:
+                msg_metadata["skill_results"] = engine_result.skill_results
 
             if tracker:
                 await tracker.step(
                     "response_parse", "Parse LLM response (todo, delegation, skills)",
                     output_data={
-                        "todo_found": bool(new_todo),
-                        "delegation_found": bool(delegate_to),
-                        "delegation_target": delegate_to,
-                        "delegate_done": bool(delegate_done),
+                        "todo_found": bool(engine_result.todo_list),
+                        "delegation_found": bool(engine_result.delegate_to),
+                        "delegation_target": engine_result.delegate_to,
+                        "delegate_done": bool(engine_result.delegate_done),
                         "delegation_stack": protocol_state.get("delegation_stack", []),
-                        "skill_calls_found": len(skill_calls) if skill_calls else 0,
-                        "skill_calls": [c["skill_name"] for c in skill_calls] if skill_calls else [],
+                        "skill_calls_found": len(engine_result.skill_results),
                     },
                     duration_ms=tracker.elapsed_step_ms(),
                 )
 
-            if skill_calls and agent_skills:
-                # ── Step: Execute skills ──
-                if tracker:
-                    tracker.start_step_timer()
-
-                skill_results = []
-                for call in skill_calls:
-                    result = await _execute_skill(call["skill_name"], call["args"], agent_skills)
-                    skill_results.append({
-                        "skill": call["skill_name"],
-                        "args": call["args"],
-                        "result": result,
-                    })
-                msg_metadata["skill_results"] = skill_results
-
-                if tracker:
-                    await tracker.step(
-                        "skill_exec", f"Execute {len(skill_results)} skill(s)",
-                        input_data={"skills": [c["skill_name"] for c in skill_calls]},
-                        output_data={
-                            "results": [
-                                {"skill": sr["skill"], "has_error": "error" in sr["result"]}
-                                for sr in skill_results
-                            ],
-                        },
-                        duration_ms=tracker.elapsed_step_ms(),
-                    )
-
-                # ── Step: Follow-up LLM call with skill results ──
-                skill_feedback = "\n\n".join(
-                    f"**Skill `{sr['skill']}` result:**\n```json\n{json.dumps(sr['result'], ensure_ascii=False, indent=2)}\n```"
-                    for sr in skill_results
-                )
-                follow_up_prompt = (
-                    f"Skills have been executed. Here are the results:\n\n{skill_feedback}\n\n"
-                    "Continue with your protocol steps based on these results."
-                )
-                history.append({"role": "assistant", "content": llm_content})
-                history.append({"role": "user", "content": follow_up_prompt})
-
-                try:
-                    if tracker:
-                        tracker.start_step_timer()
-
-                    model_id = model_ids[0]
-                    provider, base_url, model_name, api_key = await _resolve_model(model_id, db)
-                    follow_resp = await _chat_with_model(
-                        provider, base_url, model_name, api_key,
-                        history, gen_params,
-                    )
-                    llm_calls_count += 1
-
-                    response_data["content"] = llm_content + "\n\n---\n\n" + follow_resp.content
-                    response_data["total_tokens"] = response_data.get("total_tokens", 0) + follow_resp.total_tokens
-                    elapsed_ms = int((time.monotonic() - start) * 1000)
-
-                    new_todo2 = parse_todo_list(follow_resp.content)
-                    if new_todo2:
-                        protocol_state["todo_list"] = new_todo2
-                        msg_metadata["todo_list"] = new_todo2
-
-                    if tracker:
-                        await tracker.step(
-                            "follow_up_call", f"Follow-up LLM call after skills ({model_name})",
-                            input_data={"model": model_name, "skill_feedback_length": len(skill_feedback)},
-                            output_data={
-                                "response_length": len(follow_resp.content),
-                                "response_preview": follow_resp.content[:500],
-                                "tokens": follow_resp.total_tokens,
-                            },
-                            duration_ms=tracker.elapsed_step_ms(),
-                        )
-                except Exception as e:
-                    if tracker:
-                        await tracker.step(
-                            "follow_up_call", "Follow-up LLM call after skills",
-                            status="error",
-                            error_message=str(e),
-                            duration_ms=tracker.elapsed_step_ms() if tracker._step_start else 0,
-                        )
-
-            # Save protocol state to session
+            # Save protocol state
             if tracker:
                 tracker.start_step_timer()
             await sess_svc.update(session.id, {
@@ -1361,6 +1076,10 @@ async def send_message(
                     },
                     duration_ms=tracker.elapsed_step_ms(),
                 )
+
+        elif session.agent_id and not is_agent_session:
+            # Legacy fallback: parse protocols manually for non-engine paths
+            pass
 
         # Save assistant message
         display_model_name = response_data.get("model_name")
