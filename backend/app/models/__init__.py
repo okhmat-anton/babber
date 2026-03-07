@@ -9,10 +9,17 @@ from app.models.skill import Skill, AgentSkill
 from app.models.memory import Memory, MemoryLink
 from app.models.system_setting import SystemSetting
 from app.models.chat import ChatSession, ChatMessage
+from app.models.thinking_protocol import ThinkingProtocol
+from app.models.agent_protocol import AgentProtocol
+from app.models.autonomous_run import AutonomousRun
+from app.models.thinking_log import ThinkingLog
+from app.models.model_role import ModelRoleAssignment
 
 __all__ = [
     "User", "ModelConfig", "Agent", "AgentModel", "Task",
     "SystemLog", "AgentLog", "AgentError", "ApiKey",
     "Skill", "AgentSkill", "Memory", "MemoryLink",
     "SystemSetting", "ChatSession", "ChatMessage",
+    "ThinkingProtocol", "AgentProtocol", "AutonomousRun",
+    "ThinkingLog", "ModelRoleAssignment",
 ]

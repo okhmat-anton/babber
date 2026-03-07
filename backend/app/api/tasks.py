@@ -267,3 +267,73 @@ async def cancel_agent_task(
     await db.flush()
     await db.refresh(task)
     return task
+
+
+@agent_task_router.post("/{task_id}/decompose", response_model=TaskResponse)
+async def decompose_task(
+    agent_id: UUID,
+    task_id: UUID,
+    subtasks: list[TaskCreate],
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Decompose a task into subtasks. Marks parent as decomposed and creates child tasks.
+    """
+    await _get_agent(agent_id, db)
+    result = await db.execute(select(Task).where(Task.id == task_id, Task.agent_id == agent_id))
+    parent_task = result.scalar_one_or_none()
+    if not parent_task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Mark parent as decomposed
+    parent_task.is_decomposed = True
+    parent_task.status = "decomposed"
+    
+    # Create child tasks
+    for subtask_data in subtasks:
+        child_task = Task(
+            **subtask_data.model_dump(),
+            agent_id=agent_id,
+            parent_task_id=task_id
+        )
+        db.add(child_task)
+    
+    await db.flush()
+    await db.refresh(parent_task)
+    return parent_task
+
+
+@agent_task_router.get("/{task_id}/children", response_model=list[TaskResponse])
+async def get_task_children(
+    agent_id: UUID,
+    task_id: UUID,
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all child tasks of a parent task."""
+    await _get_agent(agent_id, db)
+    q = select(Task).where(Task.parent_task_id == task_id)
+    result = await db.execute(q)
+    return result.scalars().all()
+
+
+@agent_task_router.post("/{task_id}/mark-ready", response_model=TaskResponse)
+async def mark_task_ready(
+    agent_id: UUID,
+    task_id: UUID,
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark a task as ready to execute (after decomposition or assessment)."""
+    await _get_agent(agent_id, db)
+    result = await db.execute(select(Task).where(Task.id == task_id, Task.agent_id == agent_id))
+    task = result.scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    task.ready_to_execute = True
+    task.status = "pending"  # Reset to pending if it was in assessment
+    await db.flush()
+    await db.refresh(task)
+    return task
