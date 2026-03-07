@@ -215,7 +215,9 @@ async def _load_model(model_name: str) -> bool:
 # ── Auto-assign base role ──────────────────────────────
 
 async def _auto_assign_base_if_needed(running_models: set[str]):
-    """If no base role is assigned, auto-assign the first running ollama model."""
+    """If no base role is assigned, auto-assign the first running ollama model.
+    If base role is assigned to an Ollama model that is not running,
+    attempt to load it (unless manually stopped)."""
     try:
         db = get_mongodb()
         role_svc = ModelRoleAssignmentService(db)
@@ -232,8 +234,35 @@ async def _auto_assign_base_if_needed(running_models: set[str]):
                     return  # Base model is fine
                 elif model.provider != "ollama":
                     return  # API model, always available
-                # Base model is Ollama but not running — don't reassign,
-                # watchdog will try to restart it
+                # Base model is Ollama but NOT running — try to load it
+                if model.provider == "ollama" and model.model_id not in running_models:
+                    manually_stopped = await is_model_manually_stopped(model.model_id)
+                    if not manually_stopped:
+                        logger.warning(
+                            f"Base model '{model.model_id}' is not running — attempting auto-load"
+                        )
+                        await syslog(
+                            "warning",
+                            f"Base model '{model.name}' ({model.model_id}) not running — auto-loading",
+                            source="ollama_watchdog",
+                        )
+                        success = await _load_model(model.model_id)
+                        if success:
+                            running_models.add(model.model_id)
+                            logger.info(f"Base model '{model.model_id}' auto-loaded successfully")
+                            await syslog(
+                                "info",
+                                f"Base model '{model.name}' auto-loaded successfully",
+                                source="ollama_watchdog",
+                            )
+                        else:
+                            logger.error(f"Failed to auto-load base model '{model.model_id}'")
+                            await syslog(
+                                "error",
+                                f"Failed to auto-load base model '{model.name}'",
+                                source="ollama_watchdog",
+                            )
+                    return
                 return
             # Model deleted or inactive — fall through to reassign
 
@@ -351,9 +380,8 @@ async def _watchdog_tick():
                              f"Failed to auto-restart model '{model_name}'",
                              source="ollama_watchdog")
 
-    # ── 4. Auto-assign base role if needed ──
-    if current_running:
-        await _auto_assign_base_if_needed(current_running)
+    # ── 4. Auto-assign base role / auto-load base model if needed ──
+    await _auto_assign_base_if_needed(current_running)
 
     # ── 5. Update last known running models ──
     await _update_last_known_running(current_running)
