@@ -899,26 +899,13 @@ async def _generate_agent_response(
     chat_id: str,
     context_messages_limit: int | None = None,
 ) -> Optional[str]:
-    """Call the agent's LLM via AgentChatEngine with full orchestrator support."""
-    from app.mongodb.services import MessengerMessageService
+    """Call the agent's LLM via AgentChatEngine.generate_full() with full context + thinking log."""
+    from app.mongodb.services import MessengerMessageService, AgentService
     from app.services.agent_chat_engine import AgentChatEngine
 
     engine = AgentChatEngine(db)
 
-    # ── Load agent context ──
-    try:
-        ctx = await engine.load_agent_context(
-            agent_id,
-            load_protocols=is_trusted,
-            load_skills=is_trusted,
-            load_beliefs=is_trusted,
-            load_aspirations=is_trusted,
-        )
-    except ValueError as e:
-        logger.error(f"Agent context load failed for messenger {messenger_id}: {e}")
-        return None
-
-    # ── Build messenger-specific system prompt ──
+    # ── Build messenger-specific context ──
     messenger_context = ""
     if is_trusted:
         messenger_context = (
@@ -943,40 +930,49 @@ async def _generate_agent_response(
             f"{human_note}"
         )
 
-    if ctx.protocols and is_trusted:
-        system_prompt = engine.build_system_prompt(ctx, extra_context=messenger_context)
-    else:
-        system_prompt = (ctx.base_system_prompt or "") + messenger_context
-
     # ── Conversation history from messenger messages ──
+    # Determine context limit before loading agent (use a sensible default)
     effective_limit = context_messages_limit
     if effective_limit is None:
-        effective_limit = getattr(ctx.agent, 'messenger_context_limit', None) or 10
+        # Try to get agent's messenger_context_limit
+        try:
+            agent_svc = AgentService(db)
+            agent = await agent_svc.get_by_id(agent_id)
+            effective_limit = getattr(agent, 'messenger_context_limit', None) or 10
+        except Exception:
+            effective_limit = 10
     effective_limit = max(1, min(effective_limit, 100))
 
     msg_svc = MessengerMessageService(db)
     recent = await msg_svc.get_by_chat(messenger_id, chat_id, limit=effective_limit)
     recent.reverse()  # oldest first
 
-    messages = [{"role": "system", "content": system_prompt}]
-    for m in recent[:-1]:  # exclude the current message (already logged)
+    # Build history (exclude current message — generate_full adds it as user_input)
+    history = []
+    for m in recent[:-1]:
         role = "assistant" if m.direction == "outgoing" else "user"
-        messages.append({"role": role, "content": m.content})
-    messages.append({"role": "user", "content": message_text})
+        history.append({"role": role, "content": m.content})
 
-    # ── Generate via engine ──
+    # ── Generate via engine.generate_full() — full context + thinking log ──
     max_skills = 5 if is_trusted else 0
 
     try:
         logger.info(
-            f"Calling AgentChatEngine for messenger {messenger_id} "
-            f"(protocols={len(ctx.protocols)}, skills={len(ctx.skills)})"
+            f"Calling AgentChatEngine.generate_full() for messenger {messenger_id} "
+            f"(trusted={is_trusted}, chat_id={chat_id})"
         )
-        result = await engine.generate(
-            messages=messages,
-            agent_context=ctx,
+        result = await engine.generate_full(
+            agent_id=agent_id,
+            user_input=message_text,
+            history=history,
+            session_id=f"tg:{messenger_id}:{chat_id}",
+            extra_context=messenger_context,
+            load_protocols=is_trusted,
+            load_skills=is_trusted,
+            load_beliefs=is_trusted,
+            load_aspirations=is_trusted,
             max_skill_iterations=max_skills,
-            parse_protocols=is_trusted,
+            enable_thinking_log=True,
         )
         if not result.content:
             logger.warning(f"Engine returned empty content for messenger {messenger_id}")

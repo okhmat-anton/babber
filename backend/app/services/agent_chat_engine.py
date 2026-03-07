@@ -10,14 +10,20 @@ Used by:
 The engine handles:
   - Model resolution (agent models, role fallback, runtime Ollama URL)
   - Agent context loading (config, settings, protocols, skills, beliefs, aspirations)
+  - Project/task context enrichment (via skills)
+  - System prompt building (always includes beliefs, aspirations, skills, protocols)
   - Generation parameter construction
   - LLM calls (single model)
   - Response parsing (todo, delegation, skill invocations)
   - Skill execution loop with follow-up LLM calls
   - Response cleanup (strip protocol markers)
+  - Thinking log recording (optional, for all channels)
+
+Recommended entry point:
+  - generate_full() — handles context, prompt, LLM, skills, thinking log
+  - generate()      — lower-level, caller builds messages manually
 
 Callers are responsible for:
-  - Building the system prompt (using protocol_executor helpers)
   - Building conversation history (from their message store)
   - Persisting results (messages, protocol state, etc.)
   - Channel-specific logic (typing indicators, session management, etc.)
@@ -91,6 +97,8 @@ class EngineResult:
     delegate_to: Optional[str] = None
     delegate_done: Optional[dict] = None
     metadata: dict = field(default_factory=dict)
+    agent_context: Optional[Any] = None   # AgentContext used for generation
+    thinking_log_id: Optional[str] = None # ThinkingLog ID if tracking was enabled
 
 
 # ── Engine ───────────────────────────────────────────────────────────────
@@ -110,8 +118,8 @@ class AgentChatEngine:
         """Resolve a model_id string to (provider, base_url, model_name, api_key).
 
         Supports:
-          - 'ollama:modelname' → direct Ollama
-          - UUID string → ModelConfig lookup
+          - 'ollama:modelname' -> direct Ollama
+          - UUID string -> ModelConfig lookup
           - fallback to first active model
         """
         settings = get_settings()
@@ -426,6 +434,269 @@ class AgentChatEngine:
         except Exception as e:
             return {"error": f"Skill '{skill_name}' execution failed: {str(e)}"}
 
+    # ── Project/Task Context ──────────────────────────────────────────
+
+    async def load_project_task_context(
+        self,
+        agent_context: AgentContext,
+        project_slug: str | None = None,
+        task_id: str | None = None,
+    ) -> list[str]:
+        """Load project and task context via skills, append to agent_context.base_system_prompt.
+
+        Returns list of context summary parts (for logging/tracking).
+        """
+        context_parts = []
+
+        if not project_slug and not task_id:
+            return context_parts
+
+        if project_slug:
+            try:
+                has_skill = any(s["name"] == "project_context_build" for s in agent_context.skills)
+                if has_skill:
+                    proj_result = await self.execute_skill(
+                        "project_context_build",
+                        {"project_slug": project_slug, "max_recent_logs": 30},
+                        agent_context.skills,
+                    )
+                    if "result" in proj_result:
+                        pc = proj_result["result"]
+                        proj_info = pc.get("project", {})
+                        context_parts.append(
+                            f"\U0001f4c1 Project: {proj_info.get('name')} ({project_slug})\n"
+                            f"   Goals: {proj_info.get('goals', 'N/A')[:200]}\n"
+                            f"   Tech Stack: {', '.join(proj_info.get('tech_stack', []))}\n"
+                            f"   Tasks: {pc.get('task_stats', {}).get('total', 0)} total, "
+                            f"{pc.get('task_stats', {}).get('in_progress', 0)} in progress\n"
+                            f"   Files: {pc.get('file_tree', {}).get('total_files', 0)}"
+                        )
+            except Exception as e:
+                logger.warning(f"Failed to load project context for {project_slug}: {e}")
+
+        if task_id and project_slug:
+            try:
+                has_skill = any(s["name"] == "task_context_build" for s in agent_context.skills)
+                if has_skill:
+                    task_result = await self.execute_skill(
+                        "task_context_build",
+                        {"project_slug": project_slug, "task_id": task_id},
+                        agent_context.skills,
+                    )
+                    if "result" in task_result:
+                        tc = task_result["result"]
+                        task_info = tc.get("task", {})
+                        context_parts.append(
+                            f"\n\U0001f4cb Current Task: {task_info.get('key')} - {task_info.get('title')}\n"
+                            f"   Status: {task_info.get('status')} | Priority: {task_info.get('priority')}\n"
+                            f"   Description: {task_info.get('description', 'N/A')[:300]}\n"
+                            f"   Comments: {len(tc.get('comments', []))}, "
+                            f"Related Files: {len(tc.get('related_files', []))}"
+                        )
+            except Exception as e:
+                logger.warning(f"Failed to load task context for {task_id}: {e}")
+
+        if context_parts:
+            context_summary = "\n\n## Current Work Context\n\n" + "\n".join(context_parts)
+            agent_context.base_system_prompt += context_summary
+
+        return context_parts
+
+    # ── High-Level Generate ───────────────────────────────────────────
+
+    async def generate_full(
+        self,
+        agent_id: str,
+        user_input: str,
+        history: list[dict],
+        *,
+        session_id: str | None = None,
+        project_slug: str | None = None,
+        task_id: str | None = None,
+        model_id: str | None = None,
+        max_skill_iterations: int = 5,
+        extra_context: str = "",
+        current_todo: list[dict] | None = None,
+        delegation_stack: list[str] | None = None,
+        load_protocols: bool = True,
+        load_skills: bool = True,
+        load_beliefs: bool = True,
+        load_aspirations: bool = True,
+        enable_thinking_log: bool = True,
+        summary: str | None = None,
+    ) -> EngineResult:
+        """Full pipeline: context load -> prompt build -> LLM -> skills -> thinking log.
+
+        This is the recommended entry point for ALL channels (web chat, Telegram, etc.).
+        It handles everything: context loading, project/task context enrichment,
+        system prompt building with full agent context (beliefs, aspirations, skills,
+        protocols), thinking log recording, LLM calls, and skill execution.
+
+        Args:
+            agent_id: Agent ID to generate for.
+            user_input: Current user message text.
+            history: Previous conversation messages [{role, content}].
+                     Do NOT include system prompt or the current user message.
+            session_id: Enables thinking log. Can be chat session ID, messenger chat_id, etc.
+            project_slug: Load project context via project_context_build skill.
+            task_id: Load task context via task_context_build skill.
+            model_id: Explicit model_id. If None, resolved from agent.
+            max_skill_iterations: Max skill loops (0 = no skills).
+            extra_context: Extra text appended to system prompt (e.g. messenger context).
+            current_todo: Current protocol todo list.
+            delegation_stack: Protocol delegation stack.
+            load_protocols/skills/beliefs/aspirations: What to load.
+            enable_thinking_log: Record thinking log steps (requires session_id).
+            summary: Conversation summary to inject as system message.
+
+        Returns:
+            EngineResult with clean content, thinking_log_id, agent_context, etc.
+        """
+        from app.services.thinking_log_service import ThinkingTracker
+
+        tracker = None
+        if enable_thinking_log and session_id:
+            tracker = ThinkingTracker(self.db, agent_id, session_id, user_input)
+            await tracker.start()
+
+        try:
+            # ── 1. Load agent context ──
+            if tracker:
+                tracker.start_step_timer()
+
+            ctx = await self.load_agent_context(
+                agent_id,
+                load_protocols=load_protocols,
+                load_skills=load_skills,
+                load_beliefs=load_beliefs,
+                load_aspirations=load_aspirations,
+            )
+
+            if tracker:
+                await tracker.step(
+                    "config_load", "Load agent configuration",
+                    input_data={"agent_name": ctx.agent.name},
+                    output_data={
+                        "has_system_prompt": bool(ctx.base_system_prompt),
+                        "system_prompt_length": len(ctx.base_system_prompt),
+                        "gen_params": {
+                            "temperature": ctx.gen_params.temperature,
+                            "top_p": ctx.gen_params.top_p,
+                            "top_k": ctx.gen_params.top_k,
+                            "max_tokens": ctx.gen_params.max_tokens,
+                            "num_ctx": ctx.gen_params.num_ctx,
+                        },
+                        "protocols_count": len(ctx.protocols),
+                        "protocols": [p.get("name", "?") for p in ctx.protocols],
+                        "skills_count": len(ctx.skills),
+                        "skills": [s.get("name", "?") for s in ctx.skills],
+                        "has_beliefs": bool(ctx.beliefs),
+                        "has_aspirations": bool(ctx.aspirations),
+                    },
+                    duration_ms=tracker.elapsed_step_ms(),
+                )
+
+            # ── 2. Load project/task context ──
+            if project_slug or task_id:
+                if tracker:
+                    tracker.start_step_timer()
+
+                context_parts = await self.load_project_task_context(
+                    ctx, project_slug=project_slug, task_id=task_id,
+                )
+
+                if tracker:
+                    await tracker.step(
+                        "project_task_context", "Load project/task context",
+                        output_data={
+                            "has_project_context": bool(context_parts),
+                            "context_summary_length": sum(len(p) for p in context_parts),
+                        },
+                        duration_ms=tracker.elapsed_step_ms(),
+                    )
+
+            # ── 3. Build system prompt ──
+            if tracker:
+                tracker.start_step_timer()
+
+            system_prompt = self.build_system_prompt(
+                ctx,
+                current_todo=current_todo,
+                delegation_stack=delegation_stack,
+                extra_context=extra_context,
+            )
+
+            if tracker:
+                await tracker.step(
+                    "prompt_build", "Build system prompt",
+                    input_data={
+                        "delegation_stack": delegation_stack,
+                        "has_todo": bool(current_todo),
+                    },
+                    output_data={
+                        "system_prompt_length": len(system_prompt) if system_prompt else 0,
+                        "system_prompt_preview": (
+                            (system_prompt[:500] + "...") if system_prompt and len(system_prompt) > 500
+                            else system_prompt
+                        ),
+                    },
+                    duration_ms=tracker.elapsed_step_ms(),
+                )
+
+            # ── 4. Build messages ──
+            messages = [{"role": "system", "content": system_prompt}]
+
+            if summary:
+                messages.append({"role": "system", "content": (
+                    f"**Previous conversation summary:**\n\n{summary}"
+                )})
+
+            messages.extend(history)
+            messages.append({"role": "user", "content": user_input})
+
+            if tracker:
+                await tracker.step(
+                    "history_build", "Build conversation history",
+                    output_data={
+                        "history_messages": len(messages),
+                        "total_chars": sum(len(m["content"]) for m in messages),
+                        "has_summary": bool(summary),
+                    },
+                )
+
+            # ── 5. Generate (LLM + skills) ──
+            result = await self.generate(
+                messages=messages,
+                agent_context=ctx,
+                model_id=model_id,
+                max_skill_iterations=max_skill_iterations,
+                parse_protocols=bool(ctx.protocols),
+                tracker=tracker,
+            )
+
+            # Attach agent context and thinking log ID
+            result.agent_context = ctx
+            if tracker and tracker.log:
+                result.thinking_log_id = str(tracker.log.id)
+
+            # ── 6. Complete thinking log ──
+            if tracker:
+                await tracker.complete(
+                    result.content,
+                    model_name=result.model_name,
+                    total_tokens=result.total_tokens,
+                    prompt_tokens=result.prompt_tokens,
+                    completion_tokens=result.completion_tokens,
+                    llm_calls_count=result.llm_calls_count,
+                )
+
+            return result
+
+        except Exception as e:
+            if tracker:
+                await tracker.fail(str(e))
+            raise
+
     # ── Core Generate ─────────────────────────────────────────────────
 
     async def generate(
@@ -435,8 +706,11 @@ class AgentChatEngine:
         model_id: str | None = None,
         max_skill_iterations: int = 5,
         parse_protocols: bool = True,
+        tracker: Any = None,
     ) -> EngineResult:
-        """Full pipeline: LLM call → parse response → skill execution → follow-up → return.
+        """LLM call -> parse response -> skill execution -> follow-up -> return.
+
+        For full pipeline with context loading and thinking log, use generate_full().
 
         Args:
             messages: Conversation history [{role, content}, ...] including system prompt.
@@ -444,6 +718,7 @@ class AgentChatEngine:
             model_id: Explicit model_id to use. If None, resolves from agent.
             max_skill_iterations: Max skill execution loops (0 = no skills).
             parse_protocols: Whether to parse todo/delegation/skill markers.
+            tracker: Optional ThinkingTracker for recording LLM/skill steps.
 
         Returns:
             EngineResult with clean content, raw content, tokens, skills, etc.
@@ -461,6 +736,9 @@ class AgentChatEngine:
         gen_params = agent_context.gen_params
 
         # ── Initial LLM call ──
+        if tracker:
+            tracker.start_step_timer()
+
         try:
             llm_resp = await self.chat_with_model(
                 provider, base_url, model_name, api_key,
@@ -468,6 +746,14 @@ class AgentChatEngine:
             )
         except Exception as e:
             logger.error(f"LLM call failed (model={model_name}): {e}", exc_info=True)
+            if tracker:
+                await tracker.step(
+                    "llm_call", f"LLM call failed ({model_name})",
+                    input_data={"model": model_name, "provider": provider},
+                    status="error",
+                    error_message=str(e),
+                    duration_ms=tracker.elapsed_step_ms(),
+                )
             raise
 
         llm_content = llm_resp.content.strip() if llm_resp.content else ""
@@ -477,6 +763,24 @@ class AgentChatEngine:
         llm_calls = 1
         all_skill_results = []
         raw_parts = [llm_content]
+
+        if tracker:
+            await tracker.step(
+                "llm_call", f"LLM inference ({model_name})",
+                input_data={
+                    "model": model_name,
+                    "provider": provider,
+                    "history_messages": len(messages),
+                },
+                output_data={
+                    "response_length": len(llm_content),
+                    "response_preview": llm_content[:500] if llm_content else "",
+                    "total_tokens": total_tokens,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                },
+                duration_ms=tracker.elapsed_step_ms(),
+            )
 
         # ── Protocol parsing + skill loop ──
         result_todo = None
@@ -508,6 +812,9 @@ class AgentChatEngine:
                     )
 
                     # Execute all skills
+                    if tracker:
+                        tracker.start_step_timer()
+
                     iter_results = []
                     for call in skill_calls:
                         result = await self.execute_skill(
@@ -519,6 +826,20 @@ class AgentChatEngine:
                             "result": result,
                         })
                     all_skill_results.extend(iter_results)
+
+                    if tracker:
+                        await tracker.step(
+                            "skill_exec", f"Execute skills (iteration {iteration})",
+                            input_data={"skills": [c["skill_name"] for c in skill_calls]},
+                            output_data={
+                                "results_count": len(iter_results),
+                                "results_preview": [
+                                    {"skill": r["skill"], "has_error": "error" in r["result"]}
+                                    for r in iter_results
+                                ],
+                            },
+                            duration_ms=tracker.elapsed_step_ms(),
+                        )
 
                     # Build feedback and follow-up LLM call
                     skill_feedback = "\n\n".join(
@@ -578,6 +899,18 @@ class AgentChatEngine:
 
         duration_ms = int((time.monotonic() - start) * 1000)
 
+        if tracker and parse_protocols:
+            await tracker.step(
+                "response_parse", "Parse LLM response (todo, delegation, skills)",
+                output_data={
+                    "todo_found": bool(result_todo),
+                    "delegation_found": bool(result_delegate_to),
+                    "delegation_target": result_delegate_to,
+                    "delegate_done": bool(result_delegate_done),
+                    "skill_calls_total": len(all_skill_results),
+                },
+            )
+
         return EngineResult(
             content=clean_content,
             raw_content=raw_content,
@@ -619,10 +952,18 @@ class AgentChatEngine:
     ) -> str:
         """Build a full system prompt from agent context using protocol_executor.
 
-        This is a convenience wrapper. Callers can build prompts manually if needed.
+        ALWAYS includes beliefs, aspirations, and skills — even without protocols.
         """
         if not agent_context.protocols:
-            prompt = agent_context.base_system_prompt or ""
+            # No protocols — still include all agent context (beliefs, aspirations, skills)
+            prompt = build_agent_system_prompt(
+                base_system_prompt=agent_context.base_system_prompt,
+                agent_name=agent_context.agent.name,
+                protocols=[],
+                available_skills=agent_context.skills or None,
+                beliefs=agent_context.beliefs,
+                aspirations=agent_context.aspirations,
+            )
             if extra_context:
                 prompt += extra_context
             return prompt
@@ -657,7 +998,7 @@ class AgentChatEngine:
 
         # Add delegation context
         if delegation_stack and active_child:
-            stack_info = " → ".join(delegation_stack)
+            stack_info = " -> ".join(delegation_stack)
             system_prompt += f"\n\n_Active delegation chain: {stack_info}_\n"
             system_prompt += "When done with this delegated work, output: `<<<DELEGATE_DONE:summary>>>`\n"
 
