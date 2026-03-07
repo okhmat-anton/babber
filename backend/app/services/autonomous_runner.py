@@ -490,7 +490,7 @@ async def _execute_cycle(db, run: MongoAutonomousRun, agent) -> bool:
             input_data={"cycle": cycle_num, "has_previous_state": bool(cycle_state)},
             output_data={
                 "prompt_length": len(system_prompt),
-                "prompt_preview": system_prompt[:500] + "..." if len(system_prompt) > 500 else system_prompt,
+                "system_prompt": system_prompt,
             },
             duration_ms=tracker.elapsed_step_ms(),
         )

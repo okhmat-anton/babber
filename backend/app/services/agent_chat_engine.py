@@ -777,10 +777,7 @@ class AgentChatEngine:
                     },
                     output_data={
                         "system_prompt_length": len(system_prompt) if system_prompt else 0,
-                        "system_prompt_preview": (
-                            (system_prompt[:500] + "...") if system_prompt and len(system_prompt) > 500
-                            else system_prompt
-                        ),
+                        "system_prompt": system_prompt or "",
                     },
                     duration_ms=tracker.elapsed_step_ms(),
                 )

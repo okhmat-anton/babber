@@ -585,7 +585,7 @@
                           </div>
                           <div v-if="step.output_data && Object.keys(step.output_data).length">
                             <div class="text-caption text-grey mb-1">Output:</div>
-                            <v-sheet class="pa-2 rounded bg-grey-darken-4" style="font-family: monospace; font-size: 12px; white-space: pre-wrap; max-height: 200px; overflow-y: auto;">{{ formatJsonCompact(step.output_data) }}</v-sheet>
+                            <v-sheet class="pa-2 rounded bg-grey-darken-4" style="font-family: monospace; font-size: 12px; white-space: pre-wrap; max-height: 500px; overflow-y: auto;">{{ formatJsonCompact(step.output_data) }}</v-sheet>
                           </div>
                         </div>
                       </v-timeline-item>
