@@ -27,7 +27,7 @@ AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
 KIEAI_API_BASE = "https://api.kie.ai/api/v1/jobs"
 KIEAI_CREATE_TASK = f"{KIEAI_API_BASE}/createTask"
-KIEAI_GET_TASK = f"{KIEAI_API_BASE}/getTask"  # + /{taskId}
+KIEAI_RECORD_INFO = f"{KIEAI_API_BASE}/recordInfo"  # + ?taskId=...
 
 KIEAI_TTS_MODEL = "elevenlabs/text-to-speech-turbo-2-5"
 
@@ -95,8 +95,8 @@ async def _poll_task(
     task_id: str,
     max_wait: int,
 ) -> dict:
-    """Poll getTask/{taskId} until task completes or timeout."""
-    url = f"{KIEAI_GET_TASK}/{task_id}"
+    """Poll recordInfo?taskId= until task completes or timeout."""
+    url = f"{KIEAI_RECORD_INFO}?taskId={task_id}"
     start = time.time()
     attempt = 0
 
