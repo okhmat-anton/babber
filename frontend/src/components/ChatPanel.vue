@@ -444,7 +444,7 @@
         <v-textarea
           ref="inputRef"
           v-model="messageInput"
-          :placeholder="isCurrentAgentDisabled ? 'Agent is disabled' : chatStore.currentSession ? 'Send a message…' : 'Ask a question to start a new chat…'"
+          :placeholder="chatStore.sending ? 'Edit message to restart generation…' : (isCurrentAgentDisabled ? 'Agent is disabled' : chatStore.currentSession ? 'Send a message…' : 'Ask a question to start a new chat…')"
           :disabled="isCurrentAgentDisabled"
           variant="outlined"
           density="compact"
@@ -457,13 +457,13 @@
         />
         <v-btn
           icon
-          color="primary"
+          :color="sendButtonColor"
           size="small"
-          :disabled="!canSend"
-          :loading="chatStore.sending"
+          :disabled="sendButtonDisabled"
           @click="handleSend"
         >
-          <v-icon>mdi-send</v-icon>
+          <v-icon>{{ sendButtonIcon }}</v-icon>
+          <v-tooltip activator="parent" location="top">{{ sendButtonTooltip }}</v-tooltip>
         </v-btn>
       </div>
     </div>
@@ -687,6 +687,26 @@ const canSend = computed(() => {
   return models.length > 0
 })
 
+// Send button state — changes to stop/resend during generation
+const sendButtonIcon = computed(() => {
+  if (chatStore.sending && !messageInput.value?.trim()) return 'mdi-stop'
+  return 'mdi-send'
+})
+const sendButtonColor = computed(() => {
+  if (chatStore.sending && !messageInput.value?.trim()) return 'error'
+  if (chatStore.sending && messageInput.value?.trim()) return 'warning'
+  return 'primary'
+})
+const sendButtonDisabled = computed(() => {
+  if (chatStore.sending) return false // stop/resend buttons always active
+  return !canSend.value
+})
+const sendButtonTooltip = computed(() => {
+  if (chatStore.sending && !messageInput.value?.trim()) return 'Stop generation'
+  if (chatStore.sending && messageInput.value?.trim()) return 'Stop & resend with edited message'
+  return 'Send message'
+})
+
 const resolvedModelIds = computed(() => {
   if (Array.isArray(selectedModels.value)) return selectedModels.value.filter(Boolean)
   if (selectedModels.value) return [selectedModels.value]
@@ -847,7 +867,23 @@ function goBackToList() {
 
 async function handleSend() {
   const msg = messageInput.value?.trim()
-  if (!msg || chatStore.sending) return
+
+  // ── While generating: stop or edit-and-regenerate ──
+  if (chatStore.sending) {
+    if (msg) {
+      // User typed new text → stop current generation and resend with edited message
+      messageInput.value = ''
+      await chatStore.editAndRegenerate(msg)
+      scrollToBottom()
+    } else {
+      // No text → just stop generation
+      chatStore.cancelGeneration()
+    }
+    return
+  }
+
+  // ── Normal send ──
+  if (!msg) return
   const models = resolvedModelIds.value
   if (!models.length) return
 

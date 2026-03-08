@@ -11,6 +11,9 @@ export const useChatStore = defineStore('chat', {
     sending: false,
     panelOpen: localStorage.getItem('chat_panel_open') === 'true',
     showSessionList: false,
+    // Edit & regenerate support
+    abortController: null,
+    lastSentContent: '',
   }),
 
   getters: {
@@ -157,22 +160,37 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    async sendMessage(content, modelIds = null) {
+    async sendMessage(content, modelIds = null, replaceLast = false) {
       if (!this.currentSession) return
       this.sending = true
+      this.lastSentContent = content
 
-      // Optimistic: add user message
-      const userMsg = {
-        id: 'temp-' + Date.now(),
-        role: 'user',
-        content,
-        model_name: null,
-        model_responses: null,
-        total_tokens: 0,
-        duration_ms: 0,
-        created_at: new Date().toISOString(),
+      // Create AbortController for cancellation support
+      const controller = new AbortController()
+      this.abortController = controller
+
+      // Optimistic: add user message (unless replacing last)
+      if (!replaceLast) {
+        const userMsg = {
+          id: 'temp-' + Date.now(),
+          role: 'user',
+          content,
+          model_name: null,
+          model_responses: null,
+          total_tokens: 0,
+          duration_ms: 0,
+          created_at: new Date().toISOString(),
+        }
+        this.messages.push(userMsg)
+      } else {
+        // For replace_last: update the last user message content in local state
+        for (let i = this.messages.length - 1; i >= 0; i--) {
+          if (this.messages[i].role === 'user') {
+            this.messages[i].content = content
+            break
+          }
+        }
       }
-      this.messages.push(userMsg)
 
       const MAX_RETRIES = 2
 
@@ -181,8 +199,8 @@ export const useChatStore = defineStore('chat', {
           try {
             const { data } = await api.post(
               `/chat/sessions/${this.currentSession.id}/messages`,
-              { content, model_ids: modelIds },
-              { timeout: 300000 }
+              { content, model_ids: modelIds, replace_last: replaceLast },
+              { timeout: 300000, signal: controller.signal }
             )
             this.messages.push(data)
 
@@ -196,6 +214,12 @@ export const useChatStore = defineStore('chat', {
 
             return data
           } catch (e) {
+            // Check if deliberately cancelled (edit & regenerate or stop)
+            const isCancelled = e.code === 'ERR_CANCELED' || e.name === 'CanceledError'
+            if (isCancelled) {
+              return null
+            }
+
             const isNetworkError = !e.response && e.message === 'Network Error'
             const isTimeout = e.code === 'ECONNABORTED'
 
@@ -232,7 +256,37 @@ export const useChatStore = defineStore('chat', {
         }
       } finally {
         this.sending = false
+        this.abortController = null
       }
+    },
+
+    cancelGeneration() {
+      if (this.abortController) {
+        this.abortController.abort()
+      }
+    },
+
+    async editAndRegenerate(newContent) {
+      // 1. Cancel current generation
+      this.cancelGeneration()
+
+      // 2. Wait for current request to complete (abort triggers finally block)
+      for (let i = 0; i < 100 && this.sending; i++) {
+        await new Promise(r => setTimeout(r, 50))
+      }
+
+      // 3. Remove trailing error/temp messages from the cancelled request
+      while (this.messages.length > 0) {
+        const last = this.messages[this.messages.length - 1]
+        if (last.id?.startsWith?.('error-') || last.id?.startsWith?.('temp-')) {
+          this.messages.pop()
+        } else {
+          break
+        }
+      }
+
+      // 4. Re-send with replace_last flag
+      return this.sendMessage(newContent, null, true)
     },
 
     async autoTitle(sessionId) {

@@ -111,6 +111,8 @@ class SendMessageRequest(BaseModel):
     content: str
     # Override models for this message (optional)
     model_ids: Optional[list[str]] = None
+    # If true, replace the last user message instead of creating a new one (edit & regenerate)
+    replace_last: bool = False
 
 
 class AvailableModel(BaseModel):
@@ -730,13 +732,39 @@ async def send_message(
     if not model_ids:
         raise HTTPException(status_code=400, detail="No models selected for this chat")
 
-    # Save user message
-    user_msg = MongoChatMessage(
-        session_id=session.id,
-        role="user",
-        content=body.content,
-    )
-    user_msg = await msg_svc.create(user_msg)
+    # Save user message (or replace last one if editing)
+    if body.replace_last:
+        # Edit & regenerate: find last user message, update content, delete subsequent messages
+        all_existing = await msg_svc.get_by_session(session.id)
+        all_existing.sort(key=lambda m: m.created_at if m.created_at else datetime.min)
+        last_user = None
+        for m in reversed(all_existing):
+            if m.role == "user":
+                last_user = m
+                break
+        if last_user:
+            await msg_svc.update(last_user.id, {"content": body.content})
+            last_user.content = body.content
+            # Delete all messages after the last user message
+            for m in all_existing:
+                if m.created_at and last_user.created_at and m.created_at > last_user.created_at:
+                    await msg_svc.delete(m.id)
+            user_msg = last_user
+        else:
+            # No previous user message found, create normally
+            user_msg = MongoChatMessage(
+                session_id=session.id,
+                role="user",
+                content=body.content,
+            )
+            user_msg = await msg_svc.create(user_msg)
+    else:
+        user_msg = MongoChatMessage(
+            session_id=session.id,
+            role="user",
+            content=body.content,
+        )
+        user_msg = await msg_svc.create(user_msg)
 
     # ── Initialize thinking tracker (only for agent sessions) ──
     tracker = None
