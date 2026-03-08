@@ -994,9 +994,11 @@ function stopModelPolling() {
 }
 
 onMounted(async () => {
+  // Fetch sessions first, then other data in parallel
+  await chatStore.fetchSessions()
+  
   await Promise.all([
     chatStore.fetchAvailableModels(),
-    chatStore.fetchSessions(),
     agentsStore.fetchAgents(),
     fetchProjects()
   ])

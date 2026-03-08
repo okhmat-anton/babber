@@ -78,9 +78,15 @@ async def _tts_kieai(db: AsyncIOMotorDatabase, text: str, voice: str | None) -> 
             raise ValueError(f"kie.ai TTS error: HTTP {resp.status_code}: {error_text}")
         
         # Response is direct audio bytes
-        filepath.write_bytes(resp.content)
+        audio_data = resp.content
+        if not audio_data or len(audio_data) == 0:
+            raise ValueError(f"kie.ai returned empty audio data")
+        
+        filepath.write_bytes(audio_data)
+        file_size = len(audio_data)
+        await syslog("debug", f"TTS audio file created: {filename} ({file_size} bytes)", source="audio")
 
-    return {"audio_url": f"/api/uploads/audio/{filename}", "filename": filename}
+    return {"audio_url": f"/api/uploads/audio/{filename}", "filename": filename, "file_size": file_size}
 
 
 
