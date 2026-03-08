@@ -1,7 +1,7 @@
 """
 Audio API: TTS (Text-to-Speech) and STT (Speech-to-Text) via kie.ai.
 """
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
 from pydantic import BaseModel
 from typing import Optional
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -11,7 +11,9 @@ from app.core.dependencies import get_current_user
 from app.services.audio_service import (
     text_to_speech, speech_to_text,
     get_available_voices, KIEAI_VOICES,
+    resolve_task,
 )
+from app.services.log_service import syslog
 
 router = APIRouter(prefix="/api/audio", tags=["audio"])
 
@@ -67,6 +69,34 @@ async def generate_speech(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"TTS error: {e}")
 
+
+# ── kie.ai callback (no auth — called by kie.ai servers) ────────────
+
+@router.post("/callback")
+async def kieai_callback(request: Request):
+    """
+    Receive callback from kie.ai when an async TTS task completes.
+    kie.ai POSTs: {code: 200, data: {state, resultJson, taskId, failMsg, failCode, ...}}
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        await syslog("error", "KIEAI CALLBACK: failed to parse JSON body", source="audio")
+        return {"status": "error", "detail": "invalid JSON"}
+
+    await syslog("info", f"KIEAI CALLBACK received: {str(body)[:1000]}", source="audio")
+
+    data = body.get("data") or {}
+    task_id = data.get("taskId")
+
+    if not task_id:
+        await syslog("warning", f"KIEAI CALLBACK: no taskId in body: {str(body)[:500]}", source="audio")
+        return {"status": "error", "detail": "no taskId"}
+
+    resolve_task(task_id, data)
+    await syslog("info", f"KIEAI CALLBACK: resolved task {task_id}, state={data.get('state')}", source="audio")
+
+    return {"status": "ok"}
 
 @router.post("/stt", response_model=STTResponse)
 async def recognize_speech(

@@ -292,6 +292,7 @@ _DEFAULT_SETTINGS = {
     # Audio / TTS / STT via kie.ai
     "kieai_api_key": {"value": "", "description": "kie.ai API key for TTS/STT (ElevenLabs proxy)"},
     "tts_timeout": {"value": "120", "description": "Maximum time (seconds) to wait for TTS audio generation. kie.ai processes async, so longer texts need more time."},
+    "callback_base_url": {"value": "", "description": "Public base URL for kie.ai callbacks (e.g. https://xxxx.ngrok.io). Required for TTS — kie.ai must be able to reach this server."},
 }
 
 

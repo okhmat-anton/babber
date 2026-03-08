@@ -114,6 +114,19 @@
           </v-col>
         </v-row>
         <v-row>
+          <v-col cols="12">
+            <v-text-field
+              v-model="audioSettings.callback_base_url"
+              label="Callback Base URL"
+              variant="outlined"
+              density="compact"
+              hide-details
+              placeholder="https://xxxx.ngrok.io (public URL for kie.ai callbacks)"
+              hint="Public URL so kie.ai can send TTS results back. Use ngrok or similar tunnel for localhost."
+            />
+          </v-col>
+        </v-row>
+        <v-row>
           <v-col cols="4">
             <v-text-field
               v-model.number="audioSettings.tts_timeout"
@@ -142,7 +155,8 @@
           </v-col>
         </v-row>
         <v-alert type="info" variant="tonal" density="compact" class="mt-4">
-          kie.ai API key is used for TTS (Text-to-Speech) and STT (Speech-to-Text) features via ElevenLabs proxy.
+          kie.ai uses async processing with callbacks. Set the <b>Callback Base URL</b> to a publicly reachable address
+          (e.g. via ngrok) so kie.ai can deliver TTS results back to this server.
         </v-alert>
       </v-card-text>
     </v-card>
@@ -229,10 +243,12 @@ const sysToggling = ref(false)
 const audioSettings = ref({
   kieai_api_key: '',
   tts_timeout: 120,
+  callback_base_url: '',
 })
 const originalAudioSettings = ref({
   kieai_api_key: '',
   tts_timeout: 120,
+  callback_base_url: '',
 })
 const showKieaiKey = ref(false)
 const savingAudio = ref(false)
@@ -240,6 +256,7 @@ const savingAudio = ref(false)
 const audioSettingsChanged = computed(() => {
   return audioSettings.value.kieai_api_key !== originalAudioSettings.value.kieai_api_key
     || String(audioSettings.value.tts_timeout) !== String(originalAudioSettings.value.tts_timeout)
+    || audioSettings.value.callback_base_url !== originalAudioSettings.value.callback_base_url
 })
 
 // Confirmation dialog
@@ -271,7 +288,7 @@ onMounted(async () => {
     fsAccessEnabled.value = store.systemSettings.filesystem_access_enabled?.value === 'true'
     sysAccessEnabled.value = store.systemSettings.system_access_enabled?.value === 'true'
     // Load audio settings
-    const audioKeys = ['kieai_api_key', 'tts_timeout']
+    const audioKeys = ['kieai_api_key', 'tts_timeout', 'callback_base_url']
     for (const key of audioKeys) {
       if (store.systemSettings[key]?.value) {
         const val = key === 'tts_timeout' ? Number(store.systemSettings[key].value) : store.systemSettings[key].value
@@ -289,8 +306,10 @@ const saveAudioSettings = async () => {
   try {
     await store.updateSystemSetting('kieai_api_key', audioSettings.value.kieai_api_key)
     await store.updateSystemSetting('tts_timeout', String(audioSettings.value.tts_timeout))
+    await store.updateSystemSetting('callback_base_url', audioSettings.value.callback_base_url)
     originalAudioSettings.value.kieai_api_key = audioSettings.value.kieai_api_key
     originalAudioSettings.value.tts_timeout = audioSettings.value.tts_timeout
+    originalAudioSettings.value.callback_base_url = audioSettings.value.callback_base_url
     showSnackbar('Audio settings saved')
   } catch (e) {
     showSnackbar(e.response?.data?.detail || 'Failed to save audio settings', 'error')
