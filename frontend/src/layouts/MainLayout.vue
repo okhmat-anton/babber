@@ -156,6 +156,7 @@ const navItems = [
   { path: '/creator', icon: 'mdi-account-heart', title: 'Creator' },
   { path: '/agents', icon: 'mdi-robot', title: 'Agents' },
   { path: '/protocols', icon: 'mdi-head-cog', title: 'Protocols' },
+  { path: '/research-resources', icon: 'mdi-book-search', title: 'Research Resources' },
   { path: '/tasks', icon: 'mdi-clipboard-list', title: 'Tasks' },
   { path: '/skills', icon: 'mdi-puzzle', title: 'Skills (Codes)' },
   { path: '/projects', icon: 'mdi-folder-wrench', title: 'Projects' },

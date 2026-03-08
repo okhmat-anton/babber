@@ -27,6 +27,7 @@ from app.mongodb.models import (
 )
 from app.mongodb.models.messenger import MongoMessengerAccount, MongoMessengerMessage, MongoMessengerLog
 from app.mongodb.models.agent_fact import MongoAgentFact
+from app.mongodb.models.research_resource import MongoResearchResource
 
 
 class UserService(BaseMongoService[MongoUser]):
@@ -334,4 +335,50 @@ class AgentFactService(BaseMongoService[MongoAgentFact]):
     async def delete_by_agent(self, agent_id: str):
         result = await self.collection.delete_many({"agent_id": agent_id})
         return result.deleted_count
+
+
+class ResearchResourceService(BaseMongoService[MongoResearchResource]):
+    """CRUD service for trusted research resources."""
+    def __init__(self, db: AsyncIOMotorDatabase):
+        super().__init__(db, "research_resources", MongoResearchResource)
+
+    async def get_by_trust_level(self, min_level: str = "medium", limit: int = 100) -> list:
+        """Get active resources with minimum trust level."""
+        level_order = {"low": 0, "medium": 1, "high": 2, "highest": 3}
+        min_val = level_order.get(min_level, 1)
+        allowed = [k for k, v in level_order.items() if v >= min_val]
+        filt = {"is_active": True, "trust_level": {"$in": allowed}}
+        cursor = self.collection.find(filt).sort("agent_rating", -1).limit(limit)
+        docs = await cursor.to_list(length=limit)
+        return [self.model_class.from_mongo(doc) for doc in docs]
+
+    async def get_active(self, category: str = None, limit: int = 100, skip: int = 0) -> list:
+        """Get all active resources with optional category filter."""
+        filt = {"is_active": True}
+        if category:
+            filt["category"] = category
+        cursor = self.collection.find(filt).sort("user_rating", -1).skip(skip).limit(limit)
+        docs = await cursor.to_list(length=limit)
+        return [self.model_class.from_mongo(doc) for doc in docs]
+
+    async def search(self, query: str, limit: int = 50) -> list:
+        """Search resources by name, url, or description."""
+        filt = {
+            "$or": [
+                {"name": {"$regex": query, "$options": "i"}},
+                {"url": {"$regex": query, "$options": "i"}},
+                {"description": {"$regex": query, "$options": "i"}},
+            ]
+        }
+        cursor = self.collection.find(filt).sort("user_rating", -1).limit(limit)
+        docs = await cursor.to_list(length=limit)
+        return [self.model_class.from_mongo(doc) for doc in docs]
+
+    async def increment_use(self, resource_id: str):
+        """Increment use count and set last_used_at."""
+        from datetime import datetime, timezone
+        await self.collection.update_one(
+            {"_id": resource_id},
+            {"$inc": {"use_count": 1}, "$set": {"last_used_at": datetime.now(timezone.utc).isoformat()}}
+        )
 
