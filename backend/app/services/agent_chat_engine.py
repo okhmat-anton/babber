@@ -648,8 +648,13 @@ class AgentChatEngine:
         load_aspirations: bool = True,
         enable_thinking_log: bool = True,
         summary: str | None = None,
+        use_staged_pipeline: bool | str = "auto",
     ) -> EngineResult:
         """Full pipeline: context load -> prompt build -> LLM -> skills -> thinking log.
+
+        Args:
+            use_staged_pipeline: "auto" (default) enables staged pipeline when agent
+                has skills loaded. True/False for explicit control.
 
         This is the recommended entry point for ALL channels (web chat, Telegram, etc.).
         It handles everything: context loading, project/task context enrichment,
@@ -809,15 +814,35 @@ class AgentChatEngine:
                     },
                 )
 
-            # ── 5. Generate (LLM + skills) ──
-            result = await self.generate(
-                messages=messages,
-                agent_context=ctx,
-                model_id=model_id,
-                max_skill_iterations=max_skill_iterations,
-                parse_protocols=bool(ctx.protocols),
-                tracker=tracker,
+            # ── 5. Generate ──
+            # Auto-detect staged pipeline: use when agent has skills
+            should_use_staged = (
+                (use_staged_pipeline == "auto" and ctx.skills)
+                or (use_staged_pipeline is True and ctx.skills)
             )
+            if should_use_staged:
+                # Multi-stage pipeline: Understand → Plan → Execute → Synthesize
+                staged_prompt = system_prompt
+                if summary:
+                    staged_prompt += f"\n\n**Previous conversation summary:**\n\n{summary}"
+                result = await self.generate_staged(
+                    user_input=user_input,
+                    history=history,
+                    system_prompt=staged_prompt,
+                    agent_context=ctx,
+                    model_id=model_id,
+                    tracker=tracker,
+                )
+            else:
+                # Classic single-shot pipeline (LLM + skill markers)
+                result = await self.generate(
+                    messages=messages,
+                    agent_context=ctx,
+                    model_id=model_id,
+                    max_skill_iterations=max_skill_iterations,
+                    parse_protocols=bool(ctx.protocols),
+                    tracker=tracker,
+                )
 
             # Attach agent context and thinking log ID
             result.agent_context = ctx
@@ -1090,6 +1115,68 @@ class AgentChatEngine:
             delegate_to=result_delegate_to,
             delegate_done=result_delegate_done,
             metadata={},
+        )
+
+    # ── Staged Pipeline ─────────────────────────────────────────────
+
+    async def generate_staged(
+        self,
+        user_input: str,
+        history: list[dict],
+        system_prompt: str,
+        agent_context: AgentContext,
+        model_id: str | None = None,
+        tracker: Any = None,
+    ) -> EngineResult:
+        """Multi-stage pipeline: Pre-process → Understand → Plan → Execute → Synthesize.
+
+        An alternative to generate() that uses multiple focused LLM calls
+        instead of relying on the model to generate <<<SKILL>>> markers.
+        Effective even with small models (3B, 7B).
+
+        Args:
+            user_input: Current user message.
+            history: Previous messages [{role, content}] — user/assistant only.
+            system_prompt: Full agent system prompt.
+            agent_context: Loaded agent context.
+            model_id: Optional explicit model ID.
+            tracker: Optional ThinkingTracker.
+
+        Returns:
+            EngineResult compatible with generate().
+        """
+        from app.services.staged_pipeline import StagedPipeline
+
+        pipeline = StagedPipeline(self, agent_context, tracker)
+        result = await pipeline.run(
+            user_input=user_input,
+            history=history,
+            system_prompt=system_prompt,
+            model_id=model_id,
+        )
+
+        return EngineResult(
+            content=result["content"],
+            raw_content=result.get("raw_content", result["content"]),
+            model_name=result["model_name"],
+            provider=result.get("provider", "unknown"),
+            total_tokens=result["total_tokens"],
+            prompt_tokens=result["prompt_tokens"],
+            completion_tokens=result["completion_tokens"],
+            llm_calls_count=result["llm_calls_count"],
+            duration_ms=result["duration_ms"],
+            skill_results=[],
+            todo_list=None,
+            delegate_to=None,
+            delegate_done=None,
+            metadata={
+                "pipeline": "staged",
+                "analysis": result.get("analysis"),
+                "plan": result.get("plan"),
+                "execution": result.get("execution"),
+                "classification": result.get("classification"),
+                "stages_run": result.get("stages_run"),
+            },
         )
 
     # ── Utilities ─────────────────────────────────────────────────────

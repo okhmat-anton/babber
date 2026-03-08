@@ -931,14 +931,28 @@ async def send_message(
             llm_duration_ms = int((time.monotonic() - start) * 1000)
 
         elif is_agent_session and agent_ctx:
-            # ── Single-agent chat via engine ──
+            # ── Single-agent chat via staged pipeline ──
+            # Build clean conversation history (user/assistant only, no system, no current msg)
+            staged_history = []
+            for msg in existing_msgs:
+                if msg.role in ("user", "assistant") and msg.id != user_msg.id:
+                    staged_history.append({"role": msg.role, "content": msg.content})
+
+            # Include summary in system prompt if present
+            staged_system = system_prompt or ""
+            if session.summary:
+                staged_system += (
+                    f"\n\n**Previous conversation summary:**\n\n{session.summary}"
+                )
+
             try:
-                engine_result = await engine.generate(
-                    messages=history,
+                engine_result = await engine.generate_staged(
+                    user_input=body.content,
+                    history=staged_history,
+                    system_prompt=staged_system,
                     agent_context=agent_ctx,
                     model_id=model_ids[0] if model_ids else None,
-                    max_skill_iterations=5,
-                    parse_protocols=bool(agent_ctx.protocols),
+                    tracker=tracker,
                 )
             except Exception as e:
                 if tracker:
@@ -998,30 +1012,36 @@ async def send_message(
             }
 
         if tracker:
-            await tracker.step(
-                "llm_call", f"LLM inference ({_resolved_model_name})",
-                input_data={
-                    "model": _resolved_model_name,
-                    "history_messages": len(history),
-                    "multi_model": bool(session.multi_model and len(model_ids) > 1),
-                },
-                output_data={
-                    "response_length": len(response_data["content"]),
-                    "response": response_data["content"],
-                    "total_tokens": response_data.get("total_tokens", 0),
-                    "prompt_tokens": response_data.get("prompt_tokens", 0),
-                    "completion_tokens": response_data.get("completion_tokens", 0),
-                },
-                duration_ms=llm_duration_ms,
-            )
+            # Staged pipeline already recorded its own detailed steps,
+            # so we record a summary "llm_call" step only for non-staged paths
+            is_staged = engine_result and engine_result.metadata.get("pipeline") == "staged"
+            if not is_staged:
+                await tracker.step(
+                    "llm_call", f"LLM inference ({_resolved_model_name})",
+                    input_data={
+                        "model": _resolved_model_name,
+                        "history_messages": len(history),
+                        "multi_model": bool(session.multi_model and len(model_ids) > 1),
+                    },
+                    output_data={
+                        "response_length": len(response_data["content"]),
+                        "response": response_data["content"],
+                        "total_tokens": response_data.get("total_tokens", 0),
+                        "prompt_tokens": response_data.get("prompt_tokens", 0),
+                        "completion_tokens": response_data.get("completion_tokens", 0),
+                    },
+                    duration_ms=llm_duration_ms,
+                )
 
         elapsed_ms = llm_duration_ms
 
         # ── Protocol response parsing (agent sessions with engine result) ──
+        # Skip for staged pipeline (it has its own plan/execution, not protocol markers)
         msg_metadata = {}
         llm_content = response_data["content"]
+        is_staged = engine_result and engine_result.metadata.get("pipeline") == "staged"
 
-        if engine_result and agent_ctx and agent_ctx.protocols:
+        if engine_result and agent_ctx and agent_ctx.protocols and not is_staged:
             # Engine already parsed — use engine_result directly
             if tracker:
                 tracker.start_step_timer()
@@ -1112,6 +1132,16 @@ async def send_message(
             # Legacy fallback: parse protocols manually for non-engine paths
             pass
 
+        # Add staged pipeline metadata if available
+        if is_staged and engine_result:
+            staged_meta = engine_result.metadata or {}
+            if staged_meta.get("analysis"):
+                msg_metadata["staged_analysis"] = staged_meta["analysis"]
+            if staged_meta.get("plan"):
+                msg_metadata["staged_plan"] = staged_meta["plan"]
+            if staged_meta.get("execution"):
+                msg_metadata["staged_execution"] = staged_meta["execution"]
+
         # Save assistant message
         display_model_name = response_data.get("model_name")
         if is_multi_agent:
@@ -1163,6 +1193,8 @@ async def send_message(
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         if tracker:
             await tracker.fail(str(e))
         raise
