@@ -289,12 +289,8 @@ _DEFAULT_SETTINGS = {
     "filesystem_access_enabled": {"value": "false", "description": "Allow full filesystem access (read/write/delete files on host)"},
     "system_access_enabled": {"value": "false", "description": "Allow terminal commands, process management and full system control"},
     "log_retention_days": {"value": "14", "description": "Number of days to retain logs (system, agent, thinking). Older logs are automatically deleted."},
-    # Audio / TTS / STT
-    "tts_provider": {"value": "openai", "description": "Text-to-Speech provider: openai or minimax"},
-    "stt_provider": {"value": "openai", "description": "Speech-to-Text provider: openai (Whisper)"},
-    "openai_api_key": {"value": "", "description": "OpenAI API key for TTS/STT (Whisper, TTS-1)"},
-    "minimax_api_key": {"value": "", "description": "MiniMax API key for TTS (speech-01-turbo)"},
-    "minimax_group_id": {"value": "", "description": "MiniMax Group ID for API access"},
+    # Audio / TTS / STT via kie.ai
+    "kieai_api_key": {"value": "", "description": "kie.ai API key for TTS/STT (ElevenLabs proxy)"},
 }
 
 

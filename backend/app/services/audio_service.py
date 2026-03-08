@@ -1,12 +1,11 @@
 """
-Audio service: TTS (Text-to-Speech) and STT (Speech-to-Text).
+Audio service: TTS (Text-to-Speech) and STT (Speech-to-Text) via kie.ai.
 
-Providers:
- - OpenAI: TTS via /v1/audio/speech, STT via /v1/audio/transcriptions (Whisper)
- - MiniMax: TTS via /v1/t2a_v2, STT not natively supported (fallback to OpenAI)
+Provider: kie.ai (ElevenLabs proxy)
+ - TTS: https://api.kie.ai/v1/audio/text-to-speech
+ - STT: https://api.kie.ai/v1/audio/speech-to-text
 
-API keys stored in SystemSettings: openai_api_key, minimax_api_key, minimax_group_id
-Provider selection: tts_provider, stt_provider  (system settings)
+API key stored in SystemSettings: kieai_api_key
 """
 import os
 import uuid
@@ -37,120 +36,54 @@ async def text_to_speech(
     provider: str | None = None,
 ) -> dict:
     """
-    Generate audio from text.
-    Returns: {"audio_url": "/api/uploads/audio/<file>", "provider": "...", "duration_ms": ...}
+    Generate audio from text via kie.ai.
+    Returns: {"audio_url": "/api/uploads/audio/<file>", "provider": "kieai", "duration_ms": ...}
     """
-    if not provider:
-        provider = await _get_setting(db, "tts_provider") or "openai"
-
     start = time.time()
-
-    if provider == "minimax":
-        result = await _tts_minimax(db, text, voice)
-    elif provider == "openai":
-        result = await _tts_openai(db, text, voice)
-    else:
-        raise ValueError(f"Unknown TTS provider: {provider}")
-
+    result = await _tts_kieai(db, text, voice)
     duration_ms = int((time.time() - start) * 1000)
     result["duration_ms"] = duration_ms
-    result["provider"] = provider
-    await syslog("info", f"TTS [{provider}]: {len(text)} chars → {result.get('filename', '?')} ({duration_ms}ms)", source="audio")
+    result["provider"] = "kieai"
+    await syslog("info", f"TTS [kieai]: {len(text)} chars → {result.get('filename', '?')} ({duration_ms}ms)", source="audio")
     return result
 
 
-async def _tts_openai(db: AsyncIOMotorDatabase, text: str, voice: str | None) -> dict:
-    api_key = await _get_setting(db, "openai_api_key")
+async def _tts_kieai(db: AsyncIOMotorDatabase, text: str, voice: str | None) -> dict:
+    """kie.ai TTS (ElevenLabs proxy): https://kie.ai/elevenlabs/text-to-dialogue-v3"""
+    api_key = await _get_setting(db, "kieai_api_key")
     if not api_key:
-        raise ValueError("OpenAI API key not configured. Set 'openai_api_key' in System Settings.")
+        raise ValueError("kie.ai API key not configured. Set 'kieai_api_key' in System Settings.")
 
-    voice = voice or "alloy"  # alloy, echo, fable, onyx, nova, shimmer
+    voice = voice or "Rachel"  # ElevenLabs default voices
     filename = f"{uuid.uuid4().hex}.mp3"
     filepath = AUDIO_DIR / filename
 
+    # kie.ai uses ElevenLabs-compatible API
     async with httpx.AsyncClient(timeout=60) as client:
         resp = await client.post(
-            "https://api.openai.com/v1/audio/speech",
-            headers={"Authorization": f"Bearer {api_key}"},
-            json={
-                "model": "tts-1",
-                "input": text,
-                "voice": voice,
-                "response_format": "mp3",
-            },
-        )
-        if resp.status_code != 200:
-            raise ValueError(f"OpenAI TTS error: {resp.status_code} {resp.text[:500]}")
-        filepath.write_bytes(resp.content)
-
-    return {"audio_url": f"/api/uploads/audio/{filename}", "filename": filename}
-
-
-async def _tts_minimax(db: AsyncIOMotorDatabase, text: str, voice: str | None) -> dict:
-    api_key = await _get_setting(db, "minimax_api_key")
-    if not api_key:
-        raise ValueError("MiniMax API key not configured. Set 'minimax_api_key' in System Settings.")
-
-    group_id = await _get_setting(db, "minimax_group_id")
-    if not group_id:
-        raise ValueError("MiniMax Group ID not configured. Set 'minimax_group_id' in System Settings.")
-
-    voice = voice or "male-qn-qingse"
-    filename = f"{uuid.uuid4().hex}.mp3"
-    filepath = AUDIO_DIR / filename
-
-    url = f"https://api.minimaxi.com/v1/t2a_v2?GroupId={group_id}"
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.post(
-            url,
+            "https://api.kie.ai/v1/audio/text-to-speech",
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
             json={
-                "model": "speech-01-turbo",
                 "text": text,
-                "voice_setting": {
-                    "voice_id": voice,
-                    "speed": 1.0,
-                    "vol": 1.0,
-                    "pitch": 0,
-                },
-                "audio_setting": {
-                    "sample_rate": 32000,
-                    "bitrate": 128000,
-                    "format": "mp3",
-                },
+                "voice_id": voice,
+                "model_id": "eleven_multilingual_v2",
+                "output_format": "mp3_44100_128",
             },
         )
         if resp.status_code != 200:
-            raise ValueError(f"MiniMax TTS HTTP error: {resp.status_code} {resp.text[:500]}")
-
-        data = resp.json()
-        base_resp = data.get("base_resp", {})
-        status_code = base_resp.get("status_code", 0)
-        if status_code != 0:
-            status_msg = base_resp.get("status_msg", "unknown error")
-            if status_code == 2049 or "invalid api key" in status_msg.lower():
-                raise ValueError(
-                    f"MiniMax API key is invalid. Please check your API key in Settings → Audio & AI API Keys. "
-                    f"(MiniMax error: {status_msg})"
-                )
-            elif status_code == 1004:
-                raise ValueError(f"MiniMax authentication failed: {status_msg}")
-            raise ValueError(f"MiniMax TTS error ({status_code}): {status_msg}")
-
-        # MiniMax returns audio data in hex-encoded format or base64
-        audio_hex = data.get("data", {}).get("audio", "")
-        if not audio_hex:
-            # Try direct streaming endpoint
-            raise ValueError("MiniMax TTS returned no audio data")
-
-        import base64
-        audio_bytes = bytes.fromhex(audio_hex) if all(c in '0123456789abcdef' for c in audio_hex[:20]) else base64.b64decode(audio_hex)
-        filepath.write_bytes(audio_bytes)
+            error_text = resp.text[:500]
+            raise ValueError(f"kie.ai TTS error: HTTP {resp.status_code}: {error_text}")
+        
+        # Response is direct audio bytes
+        filepath.write_bytes(resp.content)
 
     return {"audio_url": f"/api/uploads/audio/{filename}", "filename": filename}
+
+
+
 
 
 # ── STT ──────────────────────────────────────────────────────────────
@@ -163,57 +96,46 @@ async def speech_to_text(
     language: str | None = None,
 ) -> dict:
     """
-    Transcribe audio to text.
-    Returns: {"text": "...", "provider": "...", "duration_ms": ..., "language": "..."}
+    Transcribe audio to text via kie.ai.
+    Returns: {"text": "...", "provider": "kieai", "duration_ms": ..., "language": "..."}
     """
-    if not provider:
-        provider = await _get_setting(db, "stt_provider") or "openai"
-
     start = time.time()
-
-    if provider == "openai":
-        result = await _stt_openai(db, audio_data, audio_format, language)
-    elif provider == "minimax":
-        # MiniMax doesn't have a dedicated STT API — fallback to OpenAI
-        await syslog("info", "MiniMax STT not available, falling back to OpenAI", source="audio")
-        result = await _stt_openai(db, audio_data, audio_format, language)
-        result["provider_note"] = "MiniMax STT unavailable, used OpenAI Whisper"
-    else:
-        raise ValueError(f"Unknown STT provider: {provider}")
-
+    result = await _stt_kieai(db, audio_data, audio_format, language)
     duration_ms = int((time.time() - start) * 1000)
     result["duration_ms"] = duration_ms
-    result["provider"] = provider
-    await syslog("info", f"STT [{provider}]: {len(audio_data)} bytes → {len(result.get('text', ''))} chars ({duration_ms}ms)", source="audio")
+    result["provider"] = "kieai"
+    await syslog("info", f"STT [kieai]: {len(audio_data)} bytes → {len(result.get('text', ''))} chars ({duration_ms}ms)", source="audio")
     return result
 
 
-async def _stt_openai(
+async def _stt_kieai(
     db: AsyncIOMotorDatabase,
     audio_data: bytes,
     audio_format: str = "wav",
     language: str | None = None,
 ) -> dict:
-    api_key = await _get_setting(db, "openai_api_key")
+    """kie.ai STT (ElevenLabs proxy): https://kie.ai/elevenlabs-speech-to-text"""
+    api_key = await _get_setting(db, "kieai_api_key")
     if not api_key:
-        raise ValueError("OpenAI API key not configured. Set 'openai_api_key' in System Settings.")
+        raise ValueError("kie.ai API key not configured. Set 'kieai_api_key' in System Settings.")
 
     ext = audio_format if audio_format in ("wav", "mp3", "webm", "m4a", "ogg", "flac") else "wav"
 
     async with httpx.AsyncClient(timeout=120) as client:
-        files = {"file": (f"audio.{ext}", audio_data, f"audio/{ext}")}
-        data = {"model": "whisper-1"}
+        files = {"audio": (f"audio.{ext}", audio_data, f"audio/{ext}")}
+        data = {}
         if language:
             data["language"] = language
 
         resp = await client.post(
-            "https://api.openai.com/v1/audio/transcriptions",
+            "https://api.kie.ai/v1/audio/speech-to-text",
             headers={"Authorization": f"Bearer {api_key}"},
             files=files,
             data=data,
         )
         if resp.status_code != 200:
-            raise ValueError(f"OpenAI STT error: {resp.status_code} {resp.text[:500]}")
+            error_text = resp.text[:500]
+            raise ValueError(f"kie.ai STT error: HTTP {resp.status_code}: {error_text}")
 
         result = resp.json()
         return {"text": result.get("text", "")}
@@ -221,29 +143,23 @@ async def _stt_openai(
 
 # ── Available voices ─────────────────────────────────────────────────
 
-OPENAI_VOICES = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
-
-MINIMAX_VOICES = [
-    "male-qn-qingse",
-    "male-qn-jingying", 
-    "male-qn-badao",
-    "male-qn-daxuesheng",
-    "female-shaonv",
-    "female-yujie",
-    "female-chengshu",
-    "female-tianmei",
-    "presenter_male",
-    "presenter_female",
-    "audiobook_male_1",
-    "audiobook_male_2",
-    "audiobook_female_1",
-    "audiobook_female_2",
+KIEAI_VOICES = [
+    "Rachel",
+    "Clyde",
+    "Domi",
+    "Dave",
+    "Fin",
+    "Sarah",
+    "Laura",
+    "Charlie",
+    "George",
+    "Callum",
+    "Charlotte",
+    "Alice",
+    "Matilda",
+    "Will",
 ]
 
 
-def get_available_voices(provider: str) -> list[str]:
-    if provider == "openai":
-        return OPENAI_VOICES
-    elif provider == "minimax":
-        return MINIMAX_VOICES
-    return []
+def get_available_voices(provider: str = "kieai") -> list[str]:
+    return KIEAI_VOICES

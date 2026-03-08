@@ -1,5 +1,5 @@
 """
-Audio API: TTS (Text-to-Speech) and STT (Speech-to-Text) endpoints.
+Audio API: TTS (Text-to-Speech) and STT (Speech-to-Text) via kie.ai.
 """
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
@@ -10,7 +10,7 @@ from app.database import get_mongodb
 from app.core.dependencies import get_current_user
 from app.services.audio_service import (
     text_to_speech, speech_to_text,
-    get_available_voices, OPENAI_VOICES, MINIMAX_VOICES,
+    get_available_voices, KIEAI_VOICES,
 )
 
 router = APIRouter(prefix="/api/audio", tags=["audio"])
@@ -21,7 +21,6 @@ router = APIRouter(prefix="/api/audio", tags=["audio"])
 class TTSRequest(BaseModel):
     text: str
     voice: Optional[str] = None
-    provider: Optional[str] = None  # openai | minimax
 
 
 class TTSResponse(BaseModel):
@@ -39,8 +38,7 @@ class STTResponse(BaseModel):
 
 
 class VoicesResponse(BaseModel):
-    openai: list[str]
-    minimax: list[str]
+    voices: list[str]
 
 
 # ── Endpoints ────────────────────────────────────────────────────────
@@ -51,7 +49,7 @@ async def generate_speech(
     _user=Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_mongodb),
 ):
-    """Generate speech audio from text (TTS)."""
+    """Generate speech audio from text (TTS via kie.ai)."""
     if not body.text.strip():
         raise HTTPException(status_code=400, detail="Text cannot be empty")
     if len(body.text) > 10000:
@@ -62,7 +60,6 @@ async def generate_speech(
             db=db,
             text=body.text,
             voice=body.voice,
-            provider=body.provider,
         )
         return TTSResponse(**result)
     except ValueError as e:
@@ -74,12 +71,11 @@ async def generate_speech(
 @router.post("/stt", response_model=STTResponse)
 async def recognize_speech(
     file: UploadFile = File(...),
-    provider: Optional[str] = Form(None),
     language: Optional[str] = Form(None),
     _user=Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_mongodb),
 ):
-    """Recognize speech from audio file (STT)."""
+    """Recognize speech from audio file (STT via kie.ai)."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="No audio file provided")
 
@@ -89,7 +85,7 @@ async def recognize_speech(
     audio_data = await file.read()
     if not audio_data:
         raise HTTPException(status_code=400, detail="Empty audio file")
-    if len(audio_data) > 25 * 1024 * 1024:  # 25MB limit (OpenAI)
+    if len(audio_data) > 25 * 1024 * 1024:  # 25MB limit
         raise HTTPException(status_code=400, detail="Audio file too large (max 25MB)")
 
     try:
@@ -97,7 +93,6 @@ async def recognize_speech(
             db=db,
             audio_data=audio_data,
             audio_format=ext,
-            provider=provider,
             language=language,
         )
         return STTResponse(**result)
@@ -111,22 +106,18 @@ async def recognize_speech(
 async def list_voices(
     _user=Depends(get_current_user),
 ):
-    """List available TTS voices for each provider."""
-    return VoicesResponse(
-        openai=OPENAI_VOICES,
-        minimax=MINIMAX_VOICES,
-    )
+    """List available TTS voices (kie.ai / ElevenLabs)."""
+    return VoicesResponse(voices=KIEAI_VOICES)
 
 
 @router.post("/tts-message/{message_id}")
 async def generate_speech_for_message(
     message_id: str,
     voice: Optional[str] = None,
-    provider: Optional[str] = None,
     _user=Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_mongodb),
 ):
-    """Generate TTS audio for an existing chat message and attach it."""
+    """Generate TTS audio for an existing chat message and attach it (via kie.ai)."""
     from app.mongodb.services import ChatMessageService
     msg_svc = ChatMessageService(db)
     msg = await msg_svc.get_by_id(message_id)
@@ -137,7 +128,7 @@ async def generate_speech_for_message(
         raise HTTPException(status_code=400, detail="Message has no text content")
 
     try:
-        result = await text_to_speech(db=db, text=msg.content, voice=voice, provider=provider)
+        result = await text_to_speech(db=db, text=msg.content, voice=voice)
         # Attach audio_url to the message
         await msg_svc.update(msg.id, {"audio_url": result["audio_url"]})
         return {
