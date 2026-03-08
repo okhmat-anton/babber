@@ -90,12 +90,14 @@ GATHER_SKILLS = frozenset({
     "memory_deep_process", "speech_recognize",
     "study_material", "recall_knowledge",
     "creator_context",
+    "fact_read",
 })
 
 ACTION_SKILLS = frozenset({
     "memory_store", "file_write", "project_file_write", "shell_exec",
     "code_execute", "project_update_task", "project_task_comment",
     "project_run_code", "sound_generate",
+    "fact_save", "fact_extract",
 })
 
 # "safe" action skills that can be auto-executed without user confirmation
@@ -103,6 +105,7 @@ ACTION_SKILLS = frozenset({
 SAFE_ACTION_SKILLS = frozenset({
     "memory_store", "project_file_write", "project_update_task",
     "project_task_comment", "code_execute", "sound_generate",
+    "fact_save", "fact_extract",
 })
 
 # Dangerous skills require confirmation (never auto-execute)
@@ -267,6 +270,22 @@ def _infer_args(skill_name: str, planned_args: dict, context: dict) -> dict:
             args["query"] = query or user_input
         if "depth" not in args:
             args["depth"] = "quick"
+
+    elif skill_name == "fact_save":
+        if "content" not in args or not args["content"]:
+            args["content"] = user_input
+        if "type" not in args:
+            args["type"] = "fact"
+
+    elif skill_name == "fact_read":
+        if "query" not in args or not args["query"]:
+            args["query"] = user_input
+        if "limit" not in args:
+            args["limit"] = 20
+
+    elif skill_name == "fact_extract":
+        if "text" not in args or not args["text"]:
+            args["text"] = user_input
 
     return args
 
@@ -436,6 +455,7 @@ class StagedPipeline:
         "sound_generate", "speech_recognize",
         "study_material", "recall_knowledge",
         "creator_context",
+        "fact_save", "fact_read", "fact_extract",
     }
 
     async def _exec_skill(self, name: str, args: dict) -> dict:
@@ -483,6 +503,12 @@ class StagedPipeline:
             return await self._sys_recall_knowledge(db, agent_id, args)
         elif name == "creator_context":
             return await self._sys_creator_context(db, args)
+        elif name == "fact_save":
+            return await self._sys_fact_save(db, agent_id, args)
+        elif name == "fact_read":
+            return await self._sys_fact_read(db, agent_id, args)
+        elif name == "fact_extract":
+            return await self._sys_fact_extract(db, agent_id, args)
         return None
 
     async def _sys_memory_search(self, db, agent_id: str, args: dict) -> dict:
@@ -987,6 +1013,128 @@ class StagedPipeline:
             "result": context_str,
             "name": profile.name or "",
         }
+
+    async def _sys_fact_save(self, db, agent_id: str, args: dict) -> dict:
+        """Save a fact or hypothesis to agent's knowledge base."""
+        from app.mongodb.services import AgentFactService
+        from app.mongodb.models.agent_fact import MongoAgentFact
+
+        content = str(args.get("content", "")).strip()
+        if not content:
+            return {"error": "No content provided for fact"}
+
+        fact_type = args.get("type", "fact")
+        if fact_type not in ("fact", "hypothesis"):
+            fact_type = "fact"
+
+        fact = MongoAgentFact(
+            agent_id=agent_id,
+            type=fact_type,
+            content=content,
+            source=args.get("source", "agent"),
+            verified=bool(args.get("verified", fact_type == "fact")),
+            confidence=float(args.get("confidence", 0.8)),
+            tags=args.get("tags", []),
+            created_by="agent",
+        )
+        svc = AgentFactService(db)
+        created = await svc.create(fact)
+        return {
+            "result": {"id": created.id, "type": created.type, "stored": True},
+            "message": f"{'Fact' if fact_type == 'fact' else 'Hypothesis'} saved successfully.",
+        }
+
+    async def _sys_fact_read(self, db, agent_id: str, args: dict) -> dict:
+        """Read facts/hypotheses from agent's knowledge base."""
+        from app.mongodb.services import AgentFactService
+
+        svc = AgentFactService(db)
+        query = str(args.get("query", "")).strip()
+        fact_type = args.get("type")  # None = both
+        limit = int(args.get("limit", 20))
+
+        if query:
+            items = await svc.search_by_text(agent_id, query, limit=limit)
+        else:
+            items = await svc.get_by_agent(agent_id, fact_type=fact_type, limit=limit)
+
+        if not items:
+            return {"result": [], "message": "No facts/hypotheses found."}
+
+        results = [
+            {
+                "type": f.type,
+                "content": f.content,
+                "source": f.source,
+                "verified": f.verified,
+                "confidence": f.confidence,
+                "tags": f.tags,
+            }
+            for f in items
+        ]
+        return {"result": results}
+
+    async def _sys_fact_extract(self, db, agent_id: str, args: dict) -> dict:
+        """Extract facts from text using LLM and save them."""
+        from app.mongodb.services import AgentFactService
+        from app.mongodb.models.agent_fact import MongoAgentFact
+
+        text = str(args.get("text", "")).strip()
+        if not text:
+            return {"error": "No text provided for fact extraction"}
+
+        # Use LLM to extract facts
+        prompt = (
+            "Extract facts and hypotheses from the following text.\n"
+            "Return a JSON array where each item has:\n"
+            '  - "type": "fact" (confirmed information) or "hypothesis" (unverified assumption)\n'
+            '  - "content": the fact/hypothesis text\n'
+            '  - "confidence": float 0.0-1.0\n'
+            '  - "tags": list of relevant keywords\n'
+            "Return ONLY the JSON array, no other text.\n\n"
+            f"Text:\n{text[:3000]}"
+        )
+        try:
+            resp = await self._llm_call(
+                [{"role": "user", "content": prompt}],
+                system="You extract structured facts from text. Output only valid JSON.",
+                temperature=0.1,
+            )
+            if not resp or not resp.content:
+                return {"error": "LLM did not return extracted facts"}
+
+            extracted = self._extract_json(resp.content)
+            if not isinstance(extracted, list):
+                return {"error": "Failed to parse extracted facts as JSON array"}
+
+            svc = AgentFactService(db)
+            saved = []
+            for item in extracted:
+                if not isinstance(item, dict) or not item.get("content"):
+                    continue
+                fact_type = item.get("type", "fact")
+                if fact_type not in ("fact", "hypothesis"):
+                    fact_type = "fact"
+                fact = MongoAgentFact(
+                    agent_id=agent_id,
+                    type=fact_type,
+                    content=str(item["content"]).strip(),
+                    source=args.get("source", "extraction"),
+                    verified=False,
+                    confidence=float(item.get("confidence", 0.7)),
+                    tags=item.get("tags", []),
+                    created_by="agent",
+                )
+                await svc.create(fact)
+                saved.append({"type": fact.type, "content": fact.content})
+
+            return {
+                "result": saved,
+                "message": f"Extracted and saved {len(saved)} facts/hypotheses.",
+            }
+        except Exception as e:
+            logger.warning(f"fact_extract failed: {e}")
+            return {"error": f"Fact extraction failed: {e}"}
 
     def _build_context(self, classification: Classification, user_input: str) -> dict:
         """Build context dict for arg inference."""

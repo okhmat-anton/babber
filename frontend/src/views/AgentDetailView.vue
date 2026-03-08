@@ -93,6 +93,10 @@
         <v-tab value="info">Info</v-tab>
         <v-tab value="beliefs">Beliefs</v-tab>
         <v-tab value="aspirations">Aspirations</v-tab>
+        <v-tab value="facts">
+          Facts
+          <v-badge v-if="factsCount > 0" :content="factsCount" color="teal" inline />
+        </v-tab>
         <v-tab value="projects">Projects</v-tab>
         <v-tab value="files">Files</v-tab>
         <v-tab value="tasks">Tasks</v-tab>
@@ -510,6 +514,102 @@
             </v-card>
           </div>
           <div v-else class="text-center text-grey pa-4">No goals defined</div>
+        </div>
+
+        <!-- Facts & Hypotheses Tab -->
+        <div v-if="tab === 'facts'">
+          <!-- Filters row -->
+          <div class="d-flex align-center mb-4 flex-wrap ga-2">
+            <v-btn-toggle v-model="factFilter" density="compact" variant="outlined" mandatory>
+              <v-btn value="all" size="small">All</v-btn>
+              <v-btn value="fact" size="small">
+                <v-icon size="16" class="mr-1">mdi-check-decagram</v-icon> Facts
+              </v-btn>
+              <v-btn value="hypothesis" size="small">
+                <v-icon size="16" class="mr-1">mdi-help-circle-outline</v-icon> Hypotheses
+              </v-btn>
+            </v-btn-toggle>
+            <v-spacer />
+            <v-text-field
+              v-model="factSearch"
+              density="compact"
+              variant="outlined"
+              placeholder="Search facts..."
+              prepend-inner-icon="mdi-magnify"
+              hide-details
+              clearable
+              style="max-width: 300px;"
+              @update:model-value="debouncedLoadFacts"
+            />
+            <v-btn color="teal" size="small" variant="tonal" prepend-icon="mdi-plus" @click="openFactDialog()">Add</v-btn>
+            <v-btn size="small" variant="tonal" prepend-icon="mdi-refresh" @click="loadFacts" :loading="factsLoading">Refresh</v-btn>
+          </div>
+
+          <!-- Facts list -->
+          <div v-if="factsLoading && !facts.length" class="text-center pa-8">
+            <v-progress-circular indeterminate color="teal" />
+          </div>
+          <div v-else-if="facts.length">
+            <v-card v-for="f in facts" :key="f.id" variant="outlined" class="mb-2 pa-3">
+              <div class="d-flex align-start">
+                <!-- Type icon -->
+                <v-icon
+                  :color="f.type === 'fact' ? 'teal' : 'orange'"
+                  size="20"
+                  class="mr-2 mt-1"
+                >{{ f.type === 'fact' ? 'mdi-check-decagram' : 'mdi-help-circle-outline' }}</v-icon>
+
+                <!-- Content -->
+                <div class="flex-grow-1">
+                  <div class="text-body-1">{{ f.content }}</div>
+                  <div class="d-flex align-center mt-1 flex-wrap ga-1">
+                    <v-chip
+                      :color="f.type === 'fact' ? 'teal' : 'orange'"
+                      size="x-small" variant="flat"
+                    >{{ f.type }}</v-chip>
+                    <v-chip
+                      v-if="f.verified"
+                      color="green" size="x-small" variant="flat"
+                    >
+                      <v-icon size="12" class="mr-1">mdi-check</v-icon>verified
+                    </v-chip>
+                    <v-chip
+                      v-if="!f.verified && f.type === 'hypothesis'"
+                      color="grey" size="x-small" variant="tonal"
+                    >unverified</v-chip>
+                    <v-chip size="x-small" variant="tonal">{{ f.source }}</v-chip>
+                    <v-chip size="x-small" variant="tonal">conf: {{ (f.confidence * 100).toFixed(0) }}%</v-chip>
+                    <v-chip
+                      v-for="tag in f.tags"
+                      :key="tag"
+                      size="x-small" variant="tonal" color="blue-grey"
+                    >{{ tag }}</v-chip>
+                    <v-chip size="x-small" variant="tonal" class="ml-auto">{{ f.created_by }}</v-chip>
+                  </div>
+                </div>
+
+                <!-- Actions -->
+                <div class="d-flex ml-2">
+                  <v-btn
+                    v-if="f.type === 'hypothesis' && !f.verified"
+                    icon="mdi-check-circle"
+                    size="x-small"
+                    variant="text"
+                    color="green"
+                    title="Mark as verified"
+                    @click="verifyFact(f)"
+                  />
+                  <v-btn icon="mdi-pencil" size="x-small" variant="text" @click="editFact(f)" />
+                  <v-btn icon="mdi-delete" size="x-small" variant="text" color="error" @click="confirmDeleteFact(f)" />
+                </div>
+              </div>
+            </v-card>
+          </div>
+          <div v-else class="text-center text-grey pa-8">
+            <v-icon size="48" class="mb-2">mdi-lightbulb-question-outline</v-icon>
+            <div>No facts or hypotheses yet</div>
+            <div class="text-caption mt-1">Add facts manually or let the agent extract them from conversations</div>
+          </div>
         </div>
 
         <!-- Tasks Tab -->
@@ -1691,6 +1791,53 @@
       </v-card>
     </v-dialog>
 
+    <!-- Fact Add/Edit Dialog -->
+    <v-dialog v-model="factDialog" max-width="600">
+      <v-card>
+        <v-card-title>{{ factEditId ? 'Edit' : 'Add' }} {{ factFormType === 'fact' ? 'Fact' : 'Hypothesis' }}</v-card-title>
+        <v-card-text>
+          <v-textarea v-model="factFormContent" label="Content" rows="3" autofocus density="compact" class="mb-2" />
+          <v-row>
+            <v-col cols="4">
+              <v-select v-model="factFormType" :items="['fact', 'hypothesis']" label="Type" density="compact" />
+            </v-col>
+            <v-col cols="4">
+              <v-select v-model="factFormSource" :items="['user', 'conversation', 'web', 'analysis', 'observation']" label="Source" density="compact" />
+            </v-col>
+            <v-col cols="4">
+              <v-text-field v-model.number="factFormConfidence" label="Confidence" type="number" min="0" max="1" step="0.1" density="compact" />
+            </v-col>
+          </v-row>
+          <v-row>
+            <v-col cols="6">
+              <v-checkbox v-model="factFormVerified" label="Verified" density="compact" hide-details />
+            </v-col>
+            <v-col cols="6">
+              <v-combobox v-model="factFormTags" label="Tags" density="compact" multiple chips closable-chips small-chips hide-details />
+            </v-col>
+          </v-row>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn @click="factDialog = false">Cancel</v-btn>
+          <v-btn color="teal" @click="saveFact" :loading="factSaving">{{ factEditId ? 'Save' : 'Add' }}</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Delete Fact Dialog -->
+    <v-dialog v-model="deleteFactDialog" max-width="400">
+      <v-card>
+        <v-card-title>Delete {{ deleteFactItem?.type === 'fact' ? 'Fact' : 'Hypothesis' }}</v-card-title>
+        <v-card-text>"{{ deleteFactItem?.content }}"</v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn @click="deleteFactDialog = false">Cancel</v-btn>
+          <v-btn color="error" @click="doDeleteFact">Delete</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- New Personal Skill Dialog -->
     <v-dialog v-model="newSkillDialog" max-width="600">
       <v-card>
@@ -2040,6 +2187,25 @@ const aspirationSaving = ref(false)
 const deleteAspirationDialog = ref(false)
 const deleteAspirationItem = ref(null)
 const deleteAspirationType = ref('dreams')
+
+// Facts & hypotheses state
+const facts = ref([])
+const factsLoading = ref(false)
+const factFilter = ref('all')
+const factSearch = ref('')
+const factDialog = ref(false)
+const factEditId = ref(null)
+const factFormContent = ref('')
+const factFormType = ref('fact')
+const factFormSource = ref('user')
+const factFormVerified = ref(false)
+const factFormConfidence = ref(0.8)
+const factFormTags = ref([])
+const factSaving = ref(false)
+const deleteFactDialog = ref(false)
+const deleteFactItem = ref(null)
+
+const factsCount = computed(() => facts.value.length)
 
 const id = computed(() => route.params.id)
 
@@ -2609,6 +2775,93 @@ const doDeleteAspiration = async () => {
   } catch (e) { alert(e.response?.data?.detail || 'Failed to delete') }
 }
 
+// ===== Facts & Hypotheses =====
+let _factDebounce = null
+const debouncedLoadFacts = () => {
+  clearTimeout(_factDebounce)
+  _factDebounce = setTimeout(() => loadFacts(), 400)
+}
+
+const loadFacts = async () => {
+  factsLoading.value = true
+  try {
+    const params = { limit: 500 }
+    if (factFilter.value !== 'all') params.type = factFilter.value
+    if (factSearch.value) params.search = factSearch.value
+    const { data } = await api.get(`/agents/${id.value}/facts`, { params })
+    facts.value = data.items || []
+  } catch { facts.value = [] }
+  finally { factsLoading.value = false }
+}
+
+watch(factFilter, () => loadFacts())
+
+const openFactDialog = (existing = null) => {
+  if (existing) {
+    factEditId.value = existing.id
+    factFormContent.value = existing.content
+    factFormType.value = existing.type
+    factFormSource.value = existing.source
+    factFormVerified.value = existing.verified
+    factFormConfidence.value = existing.confidence
+    factFormTags.value = existing.tags || []
+  } else {
+    factEditId.value = null
+    factFormContent.value = ''
+    factFormType.value = 'fact'
+    factFormSource.value = 'user'
+    factFormVerified.value = false
+    factFormConfidence.value = 0.8
+    factFormTags.value = []
+  }
+  factDialog.value = true
+}
+
+const editFact = (f) => openFactDialog(f)
+
+const saveFact = async () => {
+  if (!factFormContent.value.trim()) return
+  factSaving.value = true
+  try {
+    const payload = {
+      type: factFormType.value,
+      content: factFormContent.value.trim(),
+      source: factFormSource.value,
+      verified: factFormVerified.value,
+      confidence: factFormConfidence.value,
+      tags: factFormTags.value,
+    }
+    if (factEditId.value) {
+      await api.patch(`/agents/${id.value}/facts/${factEditId.value}`, payload)
+    } else {
+      await api.post(`/agents/${id.value}/facts`, payload)
+    }
+    factDialog.value = false
+    await loadFacts()
+  } catch (e) { alert(e.response?.data?.detail || 'Failed to save fact') }
+  finally { factSaving.value = false }
+}
+
+const verifyFact = async (f) => {
+  try {
+    await api.patch(`/agents/${id.value}/facts/${f.id}`, { verified: true, type: 'fact' })
+    await loadFacts()
+  } catch (e) { alert(e.response?.data?.detail || 'Failed to verify') }
+}
+
+const confirmDeleteFact = (f) => {
+  deleteFactItem.value = f
+  deleteFactDialog.value = true
+}
+
+const doDeleteFact = async () => {
+  try {
+    await api.delete(`/agents/${id.value}/facts/${deleteFactItem.value.id}`)
+    deleteFactDialog.value = false
+    await loadFacts()
+  } catch (e) { alert(e.response?.data?.detail || 'Failed to delete fact') }
+}
+
 const doDeleteFile = async () => {
   try {
     await api.delete(`/agents/${id.value}/files/delete`, { params: { path: deleteFilePath.value } })
@@ -2631,6 +2884,7 @@ watch(tab, (val) => {
   if (val === 'files') loadFiles()
   if (val === 'beliefs') loadBeliefs()
   if (val === 'aspirations') loadAspirations()
+  if (val === 'facts') loadFacts()
 })
 
 watch(logLevel, () => { if (tab.value === 'logs') loadLogs() })

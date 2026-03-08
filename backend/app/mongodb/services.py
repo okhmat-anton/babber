@@ -26,6 +26,7 @@ from app.mongodb.models import (
     MongoCreatorProfile,
 )
 from app.mongodb.models.messenger import MongoMessengerAccount, MongoMessengerMessage, MongoMessengerLog
+from app.mongodb.models.agent_fact import MongoAgentFact
 
 
 class UserService(BaseMongoService[MongoUser]):
@@ -301,4 +302,36 @@ class CreatorProfileService(BaseMongoService[MongoCreatorProfile]):
         else:
             profile = MongoCreatorProfile(**data)
             return await self.create(profile)
+
+
+class AgentFactService(BaseMongoService[MongoAgentFact]):
+    """CRUD service for agent facts & hypotheses."""
+    def __init__(self, db: AsyncIOMotorDatabase):
+        super().__init__(db, "agent_facts", MongoAgentFact)
+
+    async def get_by_agent(self, agent_id: str, fact_type: str = None,
+                           verified: bool = None, limit: int = 200, skip: int = 0):
+        """Get facts/hypotheses for an agent with optional filters."""
+        filt = {"agent_id": agent_id}
+        if fact_type:
+            filt["type"] = fact_type
+        if verified is not None:
+            filt["verified"] = verified
+        cursor = self.collection.find(filt).sort("created_at", -1).skip(skip).limit(limit)
+        docs = await cursor.to_list(length=limit)
+        return [self.model_class.from_mongo(doc) for doc in docs]
+
+    async def search_by_text(self, agent_id: str, query: str, limit: int = 20):
+        """Simple text search on content field."""
+        filt = {
+            "agent_id": agent_id,
+            "content": {"$regex": query, "$options": "i"},
+        }
+        cursor = self.collection.find(filt).sort("created_at", -1).limit(limit)
+        docs = await cursor.to_list(length=limit)
+        return [self.model_class.from_mongo(doc) for doc in docs]
+
+    async def delete_by_agent(self, agent_id: str):
+        result = await self.collection.delete_many({"agent_id": agent_id})
+        return result.deleted_count
 

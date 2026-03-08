@@ -34,6 +34,7 @@ from app.api.skill_files import router as skill_files_router
 from app.api.agent_files import router as agent_files_router
 from app.api.agent_beliefs import router as agent_beliefs_router
 from app.api.agent_aspirations import router as agent_aspirations_router
+from app.api.agent_facts import router as agent_facts_router
 from app.api.protocols import router as protocols_router
 from app.api.thinking_logs import agent_thinking_router, session_thinking_router, chat_thinking_router
 from app.api.autonomous import router as autonomous_router
@@ -151,6 +152,7 @@ app.include_router(agents_router)
 app.include_router(agent_files_router)
 app.include_router(agent_beliefs_router)
 app.include_router(agent_aspirations_router)
+app.include_router(agent_facts_router)
 app.include_router(tasks_router)
 app.include_router(agent_task_router)
 app.include_router(skills_router)
