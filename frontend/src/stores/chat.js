@@ -289,6 +289,26 @@ export const useChatStore = defineStore('chat', {
       return this.sendMessage(newContent, null, true)
     },
 
+    async editUserMessage(msgIndex, newContent) {
+      /**
+       * Edit an already-sent user message and regenerate assistant response.
+       * Like VSCode Copilot: click pencil → edit → submit → old response replaced.
+       */
+      if (this.sending) return
+
+      const msg = this.messages[msgIndex]
+      if (!msg || msg.role !== 'user') return
+
+      // 1. Update user message content locally
+      msg.content = newContent
+
+      // 2. Remove all messages after this user message (assistant responses, errors, etc.)
+      this.messages.splice(msgIndex + 1)
+
+      // 3. Re-send with replace_last flag so backend updates DB + regenerates
+      return this.sendMessage(newContent, null, true)
+    },
+
     async autoTitle(sessionId) {
       try {
         const { data } = await api.post(`/chat/sessions/${sessionId}/auto-title`)

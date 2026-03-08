@@ -237,12 +237,51 @@
             {{ msg.role === 'user' ? 'You' : (msg.model_name || 'Assistant') }}
           </span>
           <v-spacer />
+          <!-- Edit button for user messages -->
+          <v-btn
+            v-if="msg.role === 'user' && !chatStore.sending && editingMessageIndex !== msgIndex"
+            icon
+            size="x-small"
+            variant="text"
+            class="msg-edit-btn mr-1"
+            @click="startEditMessage(msgIndex)"
+          >
+            <v-icon size="14">mdi-pencil</v-icon>
+            <v-tooltip activator="parent" location="top">Edit &amp; resend</v-tooltip>
+          </v-btn>
           <span v-if="msg.duration_ms" class="text-caption text-medium-emphasis">
             {{ (msg.duration_ms / 1000).toFixed(1) }}s
           </span>
         </div>
 
-        <div class="message-content text-body-2" v-html="renderMarkdown(msg.content)"></div>
+        <!-- Inline edit mode for user messages -->
+        <template v-if="msg.role === 'user' && editingMessageIndex === msgIndex">
+          <v-textarea
+            v-model="editingMessageContent"
+            variant="outlined"
+            density="compact"
+            rows="3"
+            max-rows="12"
+            auto-grow
+            hide-details
+            class="mb-2 edit-message-textarea"
+            @keydown.enter.exact.prevent="submitEditMessage(msgIndex)"
+            @keydown.escape="cancelEditMessage"
+            autofocus
+          />
+          <div class="d-flex ga-1">
+            <v-btn size="x-small" variant="tonal" color="primary" @click="submitEditMessage(msgIndex)" :disabled="!editingMessageContent?.trim()">
+              <v-icon size="14" start>mdi-send</v-icon>
+              Submit
+            </v-btn>
+            <v-btn size="x-small" variant="text" @click="cancelEditMessage">
+              Cancel
+            </v-btn>
+          </div>
+        </template>
+
+        <!-- Normal message content -->
+        <div v-else class="message-content text-body-2" v-html="renderMarkdown(msg.content)"></div>
 
         <!-- Audio player (when message has audio_url) -->
         <div v-if="msg.audio_url" class="mt-2 audio-player-wrapper">
@@ -555,6 +594,10 @@ const thinkingLogs = reactive({})        // logId -> full log data with steps
 const thinkingLogExpanded = reactive({}) // logId -> boolean
 const thinkingLogLoading = reactive({})  // logId -> boolean
 const thinkingStepExpanded = reactive({}) // stepId -> boolean
+
+// Message edit state
+const editingMessageIndex = ref(null)
+const editingMessageContent = ref('')
 // Restore active chat type from localStorage, default to 'user'
 const activeChatType = ref(localStorage.getItem('chat_active_tab') || 'user') // 'user', 'agent', 'project_task'
 const previousChatType = ref('user') // Remember which tab we came from
@@ -810,6 +853,30 @@ async function retryMessage(msgIndex) {
   if (!msg || msg.role !== 'user' || chatStore.sending) return
   
   await chatStore.sendMessage(msg.content)
+  scrollToBottom()
+}
+
+// ── Edit user message (like VSCode Copilot) ───────────────────────
+function startEditMessage(msgIndex) {
+  const msg = chatStore.messages[msgIndex]
+  if (!msg || msg.role !== 'user') return
+  editingMessageIndex.value = msgIndex
+  editingMessageContent.value = msg.content
+}
+
+function cancelEditMessage() {
+  editingMessageIndex.value = null
+  editingMessageContent.value = ''
+}
+
+async function submitEditMessage(msgIndex) {
+  const content = editingMessageContent.value?.trim()
+  if (!content || chatStore.sending) return
+
+  editingMessageIndex.value = null
+  editingMessageContent.value = ''
+
+  await chatStore.editUserMessage(msgIndex, content)
   scrollToBottom()
 }
 
@@ -1368,6 +1435,21 @@ watch(() => chatStore.panelOpen, (open) => {
   background: rgba(var(--v-theme-primary), 0.08);
   margin-left: auto;
   border-bottom-right-radius: 4px;
+}
+
+/* Edit button: visible on hover */
+.message-bubble.user .msg-edit-btn {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.message-bubble.user:hover .msg-edit-btn {
+  opacity: 1;
+}
+
+/* Edit textarea */
+.edit-message-textarea :deep(textarea) {
+  font-size: 13px;
+  line-height: 1.5;
 }
 .message-bubble.assistant {
   background: rgba(var(--v-theme-secondary), 0.2);
