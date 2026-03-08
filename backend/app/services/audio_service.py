@@ -88,11 +88,8 @@ async def _tts_openai(db: AsyncIOMotorDatabase, text: str, voice: str | None) ->
 
 async def _tts_minimax(db: AsyncIOMotorDatabase, text: str, voice: str | None) -> dict:
     api_key = await _get_setting(db, "minimax_api_key")
-    group_id = await _get_setting(db, "minimax_group_id")
     if not api_key:
         raise ValueError("MiniMax API key not configured. Set 'minimax_api_key' in System Settings.")
-    if not group_id:
-        raise ValueError("MiniMax Group ID not configured. Set 'minimax_group_id' in System Settings.")
 
     voice = voice or "male-qn-qingse"
     filename = f"{uuid.uuid4().hex}.mp3"
@@ -100,7 +97,7 @@ async def _tts_minimax(db: AsyncIOMotorDatabase, text: str, voice: str | None) -
 
     async with httpx.AsyncClient(timeout=60) as client:
         resp = await client.post(
-            f"https://api.minimax.chat/v1/t2a_v2?GroupId={group_id}",
+            "https://api.minimaxi.com/v1/t2a_v2",
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
