@@ -92,6 +92,84 @@
       </v-card-text>
     </v-card>
 
+    <!-- Audio & AI API Keys -->
+    <v-card class="mb-6">
+      <v-card-title>
+        <v-icon class="mr-2">mdi-volume-high</v-icon>Audio & AI API Keys
+      </v-card-title>
+      <v-card-text>
+        <v-row>
+          <v-col cols="6">
+            <v-select
+              v-model="audioSettings.tts_provider"
+              :items="['openai', 'minimax']"
+              label="TTS Provider"
+              variant="outlined"
+              density="compact"
+              hide-details
+              @update:model-value="(v) => saveAudioSetting('tts_provider', v)"
+            />
+          </v-col>
+          <v-col cols="6">
+            <v-select
+              v-model="audioSettings.stt_provider"
+              :items="['openai']"
+              label="STT Provider"
+              variant="outlined"
+              density="compact"
+              hide-details
+              @update:model-value="(v) => saveAudioSetting('stt_provider', v)"
+            />
+          </v-col>
+        </v-row>
+        <v-row class="mt-2">
+          <v-col cols="12">
+            <v-text-field
+              v-model="audioSettings.openai_api_key"
+              label="OpenAI API Key"
+              :type="showOpenaiKey ? 'text' : 'password'"
+              variant="outlined"
+              density="compact"
+              hide-details
+              placeholder="sk-..."
+              :append-inner-icon="showOpenaiKey ? 'mdi-eye-off' : 'mdi-eye'"
+              @click:append-inner="showOpenaiKey = !showOpenaiKey"
+              @blur="saveAudioSetting('openai_api_key', audioSettings.openai_api_key)"
+            />
+          </v-col>
+        </v-row>
+        <v-row class="mt-2">
+          <v-col cols="8">
+            <v-text-field
+              v-model="audioSettings.minimax_api_key"
+              label="MiniMax API Key"
+              :type="showMinimaxKey ? 'text' : 'password'"
+              variant="outlined"
+              density="compact"
+              hide-details
+              :append-inner-icon="showMinimaxKey ? 'mdi-eye-off' : 'mdi-eye'"
+              @click:append-inner="showMinimaxKey = !showMinimaxKey"
+              @blur="saveAudioSetting('minimax_api_key', audioSettings.minimax_api_key)"
+            />
+          </v-col>
+          <v-col cols="4">
+            <v-text-field
+              v-model="audioSettings.minimax_group_id"
+              label="MiniMax Group ID"
+              variant="outlined"
+              density="compact"
+              hide-details
+              @blur="saveAudioSetting('minimax_group_id', audioSettings.minimax_group_id)"
+            />
+          </v-col>
+        </v-row>
+        <v-alert type="info" variant="tonal" density="compact" class="mt-4">
+          API keys are used for TTS (Text-to-Speech) and STT (Speech-to-Text) features.
+          OpenAI key is required for Whisper STT and TTS-1. MiniMax key for MiniMax TTS.
+        </v-alert>
+      </v-card-text>
+    </v-card>
+
     <v-row>
       <v-col cols="6">
         <v-card>
@@ -170,6 +248,17 @@ const sysAccessEnabled = ref(false)
 const fsToggling = ref(false)
 const sysToggling = ref(false)
 
+// Audio settings
+const audioSettings = ref({
+  tts_provider: 'openai',
+  stt_provider: 'openai',
+  openai_api_key: '',
+  minimax_api_key: '',
+  minimax_group_id: '',
+})
+const showOpenaiKey = ref(false)
+const showMinimaxKey = ref(false)
+
 // Confirmation dialog
 const confirmDialog = ref(false)
 const confirmText = ref('')
@@ -198,10 +287,26 @@ onMounted(async () => {
     await store.fetchSystemSettings()
     fsAccessEnabled.value = store.systemSettings.filesystem_access_enabled?.value === 'true'
     sysAccessEnabled.value = store.systemSettings.system_access_enabled?.value === 'true'
+    // Load audio settings
+    const audioKeys = ['tts_provider', 'stt_provider', 'openai_api_key', 'minimax_api_key', 'minimax_group_id']
+    for (const key of audioKeys) {
+      if (store.systemSettings[key]?.value) {
+        audioSettings.value[key] = store.systemSettings[key].value
+      }
+    }
   } catch (e) {
     console.error('Failed to load system settings', e)
   }
 })
+
+const saveAudioSetting = async (key, value) => {
+  try {
+    await store.updateSystemSetting(key, value)
+    showSnackbar(`${key} saved`)
+  } catch (e) {
+    showSnackbar(e.response?.data?.detail || 'Failed to save setting', 'error')
+  }
+}
 
 const onToggle = (key, newVal, type) => {
   if (newVal) {
