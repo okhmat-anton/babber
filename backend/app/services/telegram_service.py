@@ -28,6 +28,16 @@ _active_clients: Dict[str, Dict[str, Any]] = {}
 # Pending auth flows: messenger_id -> { client, phone_code_hash }
 _pending_auth: Dict[str, Dict[str, Any]] = {}
 
+# Per-messenger lock: ensures at most ONE TelegramClient connection per account at a time
+_session_locks: Dict[str, asyncio.Lock] = {}
+
+
+def _get_session_lock(messenger_id: str) -> asyncio.Lock:
+    """Get or create an asyncio Lock for the given messenger_id."""
+    if messenger_id not in _session_locks:
+        _session_locks[messenger_id] = asyncio.Lock()
+    return _session_locks[messenger_id]
+
 
 # ── Helper: log to MongoDB ──────────────────────────────────────────────
 
@@ -94,34 +104,46 @@ def _session_path(messenger_id: str) -> str:
 
 async def start_auth_flow(messenger_id: str, api_id: int, api_hash: str, phone: str) -> dict:
     """Start Telegram auth — send code to phone. Returns phone_code_hash."""
-    session_file = _session_path(messenger_id)
+    lock = _get_session_lock(messenger_id)
+    async with lock:
+        # Disconnect active listener if running (auth takes priority)
+        existing = _active_clients.get(messenger_id)
+        if existing and existing.get("client"):
+            try:
+                existing["stop_requested"] = True
+                await existing["client"].disconnect()
+            except Exception:
+                pass
+            _active_clients.pop(messenger_id, None)
 
-    client = TelegramClient(session_file, api_id, api_hash)
-    await client.connect()
+        session_file = _session_path(messenger_id)
+        client = TelegramClient(session_file, api_id, api_hash)
+        await client.connect()
 
-    if await client.is_user_authorized():
-        me = await client.get_me()
-        _pending_auth.pop(messenger_id, None)
-        return {
-            "status": "already_authenticated",
-            "username": me.username or "",
-            "phone": me.phone or "",
-            "first_name": me.first_name or "",
+        if await client.is_user_authorized():
+            me = await client.get_me()
+            await client.disconnect()
+            _pending_auth.pop(messenger_id, None)
+            return {
+                "status": "already_authenticated",
+                "username": me.username or "",
+                "phone": me.phone or "",
+                "first_name": me.first_name or "",
+            }
+
+        result = await client.send_code_request(phone)
+
+        _pending_auth[messenger_id] = {
+            "client": client,
+            "phone": phone,
+            "phone_code_hash": result.phone_code_hash,
         }
 
-    result = await client.send_code_request(phone)
-
-    _pending_auth[messenger_id] = {
-        "client": client,
-        "phone": phone,
-        "phone_code_hash": result.phone_code_hash,
-    }
-
-    return {
-        "status": "code_sent",
-        "phone_code_hash": result.phone_code_hash,
-        "message": f"Verification code sent to {phone}",
-    }
+        return {
+            "status": "code_sent",
+            "phone_code_hash": result.phone_code_hash,
+            "message": f"Verification code sent to {phone}",
+        }
 
 
 # ── Test Connection ──────────────────────────────────────────────────────
@@ -140,61 +162,63 @@ async def test_telegram_connection(
     api_hash = creds["api_hash"]
     session_file = _session_path(messenger_id)
 
-    # Check if we already have an active client
-    existing = _active_clients.get(messenger_id)
-    client = existing["client"] if existing else TelegramClient(session_file, api_id, api_hash)
-    own_client = not existing
+    # Use session lock to prevent concurrent SQLite access
+    lock = _get_session_lock(messenger_id)
+    async with lock:
+        existing = _active_clients.get(messenger_id)
+        client = existing["client"] if existing else TelegramClient(session_file, api_id, api_hash)
+        own_client = not existing
 
-    try:
-        if own_client:
-            await client.connect()
+        try:
+            if own_client:
+                await client.connect()
 
-        if not await client.is_user_authorized():
-            raise RuntimeError("Client not authenticated. Complete auth flow first.")
+            if not await client.is_user_authorized():
+                raise RuntimeError("Client not authenticated. Complete auth flow first.")
 
-        me = await client.get_me()
+            me = await client.get_me()
 
-        # Send to specified chat or to Saved Messages (self)
-        target = int(chat_id) if chat_id else "me"
-        sent_msg = await client.send_message(target, test_message)
+            # Send to specified chat or to Saved Messages (self)
+            target = int(chat_id) if chat_id else "me"
+            sent_msg = await client.send_message(target, test_message)
 
-        # Determine recipient display name
-        sent_to = "Saved Messages"
-        if chat_id:
-            try:
-                entity = await client.get_entity(int(chat_id))
-                name = getattr(entity, 'first_name', '') or getattr(entity, 'title', '') or str(chat_id)
-                username = getattr(entity, 'username', '') or ''
-                sent_to = f"{name} (@{username})" if username else name
-            except Exception:
-                sent_to = str(chat_id)
+            # Determine recipient display name
+            sent_to = "Saved Messages"
+            if chat_id:
+                try:
+                    entity = await client.get_entity(int(chat_id))
+                    name = getattr(entity, 'first_name', '') or getattr(entity, 'title', '') or str(chat_id)
+                    username = getattr(entity, 'username', '') or ''
+                    sent_to = f"{name} (@{username})" if username else name
+                except Exception:
+                    sent_to = str(chat_id)
 
-        result = {
-            "status": "success",
-            "username": me.username or "",
-            "phone": me.phone or "",
-            "first_name": me.first_name or "",
-            "message_id": sent_msg.id,
-            "sent_to": sent_to,
-            "test_message": test_message,
-            "user_info": {
+            result = {
+                "status": "success",
                 "username": me.username or "",
-                "first_name": me.first_name or "",
                 "phone": me.phone or "",
-            },
-        }
+                "first_name": me.first_name or "",
+                "message_id": sent_msg.id,
+                "sent_to": sent_to,
+                "test_message": test_message,
+                "user_info": {
+                    "username": me.username or "",
+                    "first_name": me.first_name or "",
+                    "phone": me.phone or "",
+                },
+            }
 
-        return result
+            return result
 
-    except Exception as e:
-        logger.error(f"Test connection failed for {messenger_id}: {e}")
-        raise
-    finally:
-        if own_client:
-            try:
-                await client.disconnect()
-            except Exception:
-                pass
+        except Exception as e:
+            logger.error(f"Test connection failed for {messenger_id}: {e}")
+            raise
+        finally:
+            if own_client:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
 
 
 async def get_telegram_dialogs(
@@ -210,49 +234,51 @@ async def get_telegram_dialogs(
     api_hash = creds["api_hash"]
     session_file = _session_path(messenger_id)
 
-    existing = _active_clients.get(messenger_id)
-    client = existing["client"] if existing else TelegramClient(session_file, api_id, api_hash)
-    own_client = not existing
+    lock = _get_session_lock(messenger_id)
+    async with lock:
+        existing = _active_clients.get(messenger_id)
+        client = existing["client"] if existing else TelegramClient(session_file, api_id, api_hash)
+        own_client = not existing
 
-    try:
-        if own_client:
-            await client.connect()
+        try:
+            if own_client:
+                await client.connect()
 
-        if not await client.is_user_authorized():
-            raise RuntimeError("Client not authenticated.")
+            if not await client.is_user_authorized():
+                raise RuntimeError("Client not authenticated.")
 
-        result = []
-        async for dialog in client.iter_dialogs(limit=limit):
-            entity = dialog.entity
-            dtype = "user"
-            if dialog.is_group:
-                dtype = "group"
-            elif dialog.is_channel:
-                dtype = "channel"
+            result = []
+            async for dialog in client.iter_dialogs(limit=limit):
+                entity = dialog.entity
+                dtype = "user"
+                if dialog.is_group:
+                    dtype = "group"
+                elif dialog.is_channel:
+                    dtype = "channel"
 
-            result.append({
-                "id": str(dialog.id),
-                "name": dialog.name or "",
-                "username": getattr(entity, 'username', '') or "",
-                "type": dtype,
-                "unread_count": dialog.unread_count,
-                "is_user": dialog.is_user,
-                "is_group": dialog.is_group,
-                "is_channel": dialog.is_channel,
-                "last_message": dialog.message.text[:100] if dialog.message and dialog.message.text else "",
-            })
+                result.append({
+                    "id": str(dialog.id),
+                    "name": dialog.name or "",
+                    "username": getattr(entity, 'username', '') or "",
+                    "type": dtype,
+                    "unread_count": dialog.unread_count,
+                    "is_user": dialog.is_user,
+                    "is_group": dialog.is_group,
+                    "is_channel": dialog.is_channel,
+                    "last_message": dialog.message.text[:100] if dialog.message and dialog.message.text else "",
+                })
 
-        return result
+            return result
 
-    except Exception as e:
-        logger.error(f"Failed to get dialogs for {messenger_id}: {e}")
-        raise
-    finally:
-        if own_client:
-            try:
-                await client.disconnect()
-            except Exception:
-                pass
+        except Exception as e:
+            logger.error(f"Failed to get dialogs for {messenger_id}: {e}")
+            raise
+        finally:
+            if own_client:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
 
 
 async def send_telegram_message(
@@ -270,68 +296,70 @@ async def send_telegram_message(
     api_hash = creds["api_hash"]
     session_file = _session_path(messenger_id)
 
-    existing = _active_clients.get(messenger_id)
-    client = existing["client"] if existing else TelegramClient(session_file, api_id, api_hash)
-    own_client = not existing
+    lock = _get_session_lock(messenger_id)
+    async with lock:
+        existing = _active_clients.get(messenger_id)
+        client = existing["client"] if existing else TelegramClient(session_file, api_id, api_hash)
+        own_client = not existing
 
-    try:
-        if own_client:
-            await client.connect()
-
-        if not await client.is_user_authorized():
-            raise RuntimeError("Client not authenticated.")
-
-        # Resolve recipient
-        target = None
-        if recipient.lstrip('-').isdigit():
-            target = int(recipient)
-        elif recipient.startswith("@"):
-            target = recipient[1:]  # Remove @ for Telethon
-        elif recipient.startswith("+"):
-            target = recipient  # Phone number
-        else:
-            target = recipient  # try as-is (username without @)
-
-        # Get entity for display name
         try:
-            entity = await client.get_entity(target)
-            name = getattr(entity, 'first_name', '') or getattr(entity, 'title', '') or str(target)
-            username = getattr(entity, 'username', '') or ''
-            display = f"{name} (@{username})" if username else name
-        except Exception:
-            entity = None
-            display = str(recipient)
+            if own_client:
+                await client.connect()
 
-        # Send with typing indicator for realism
-        try:
-            if entity:
-                await client(SetTypingRequest(
-                    peer=entity,
-                    action=SendMessageTypingAction()
-                ))
-                # Brief typing delay
-                await asyncio.sleep(random.uniform(0.5, 1.5))
-        except Exception:
-            pass
+            if not await client.is_user_authorized():
+                raise RuntimeError("Client not authenticated.")
 
-        sent = await client.send_message(target, message)
+            # Resolve recipient
+            target = None
+            if recipient.lstrip('-').isdigit():
+                target = int(recipient)
+            elif recipient.startswith("@"):
+                target = recipient[1:]  # Remove @ for Telethon
+            elif recipient.startswith("+"):
+                target = recipient  # Phone number
+            else:
+                target = recipient  # try as-is (username without @)
 
-        return {
-            "status": "success",
-            "message_id": sent.id,
-            "sent_to": display,
-            "chat_id": str(sent.chat_id) if hasattr(sent, 'chat_id') else str(target),
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to send message for {messenger_id}: {e}")
-        raise
-    finally:
-        if own_client:
+            # Get entity for display name
             try:
-                await client.disconnect()
+                entity = await client.get_entity(target)
+                name = getattr(entity, 'first_name', '') or getattr(entity, 'title', '') or str(target)
+                username = getattr(entity, 'username', '') or ''
+                display = f"{name} (@{username})" if username else name
+            except Exception:
+                entity = None
+                display = str(recipient)
+
+            # Send with typing indicator for realism
+            try:
+                if entity:
+                    await client(SetTypingRequest(
+                        peer=entity,
+                        action=SendMessageTypingAction()
+                    ))
+                    # Brief typing delay
+                    await asyncio.sleep(random.uniform(0.5, 1.5))
             except Exception:
                 pass
+
+            sent = await client.send_message(target, message)
+
+            return {
+                "status": "success",
+                "message_id": sent.id,
+                "sent_to": display,
+                "chat_id": str(sent.chat_id) if hasattr(sent, 'chat_id') else str(target),
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to send message for {messenger_id}: {e}")
+            raise
+        finally:
+            if own_client:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
 
 
 async def submit_auth_code(messenger_id: str, code: str, phone_code_hash: str = None) -> dict:
@@ -399,87 +427,103 @@ async def start_telegram_listener(
         logger.info(f"Telegram listener already active for {messenger_id}")
         return
 
-    api_id = int(creds["api_id"])
-    api_hash = creds["api_hash"]
-    session_file = _session_path(messenger_id)
+    lock = _get_session_lock(messenger_id)
+    async with lock:
+        # Double-check after acquiring lock
+        if messenger_id in _active_clients:
+            logger.info(f"Telegram listener already active for {messenger_id} (after lock)")
+            return
 
-    client = TelegramClient(session_file, api_id, api_hash)
-    await client.connect()
+        # Disconnect any pending auth client for the same session
+        pending = _pending_auth.pop(messenger_id, None)
+        if pending and pending.get("client"):
+            try:
+                await pending["client"].disconnect()
+            except Exception:
+                pass
 
-    if not await client.is_user_authorized():
-        raise RuntimeError("Client not authenticated. Complete auth flow first.")
+        api_id = int(creds["api_id"])
+        api_hash = creds["api_hash"]
+        session_file = _session_path(messenger_id)
 
-    me = await client.get_me()
-    logger.info(f"Telegram listener started for {messenger_id} as @{me.username}")
+        client = TelegramClient(session_file, api_id, api_hash)
+        await client.connect()
 
-    await _log_messenger_event(
-        messenger_id, agent_id, "info", "listener_started",
-        f"Telegram listener started as @{me.username or 'unknown'}",
-        {"username": me.username, "phone": me.phone, "user_id": me.id},
-    )
+        if not await client.is_user_authorized():
+            await client.disconnect()
+            raise RuntimeError("Client not authenticated. Complete auth flow first.")
 
-    # Config
-    trusted_users = account_doc.get("trusted_users", [])
-    public_permissions = account_doc.get("public_permissions", [])
-    config = account_doc.get("config", {})
-    delay_min = config.get("response_delay_min", 2)
-    delay_max = config.get("response_delay_max", 8)
-    typing_indicator = config.get("typing_indicator", True)
-    humanize = config.get("humanize_responses", True)
-    casual = config.get("casual_tone", True)
-    respond_mentions = config.get("respond_to_mentions", True)
-    respond_groups = config.get("respond_in_groups", False)
-    max_daily = config.get("max_daily_messages", 100)
-    context_messages_limit = config.get("context_messages_limit", None)  # None = use agent default
+        me = await client.get_me()
+        logger.info(f"Telegram listener started for {messenger_id} as @{me.username}")
 
-    # Store in registry (include creds + account_doc for auto-reconnect)
-    _active_clients[messenger_id] = {
-        "client": client,
-        "agent_id": agent_id,
-        "messenger_id": messenger_id,
-        "me": me,
-        "trusted_users": trusted_users,
-        "public_permissions": public_permissions,
-        "config": config,
-        "daily_count": 0,
-        "last_count_reset": datetime.now(timezone.utc).date(),
-        "creds": creds,
-        "account_doc": account_doc,
-        "stop_requested": False,  # set True on intentional stop to prevent reconnect
-        "reconnecting": False,  # set True while _run_client is in reconnect loop
-    }
+        await _log_messenger_event(
+            messenger_id, agent_id, "info", "listener_started",
+            f"Telegram listener started as @{me.username or 'unknown'}",
+            {"username": me.username, "phone": me.phone, "user_id": me.id},
+        )
 
-    @client.on(events.NewMessage(incoming=True))
-    async def on_new_message(event):
-        """Handle incoming Telegram messages."""
-        try:
-            await _handle_incoming_message(
-                event=event,
-                messenger_id=messenger_id,
-                agent_id=agent_id,
-                client=client,
-                me=me,
-                trusted_users=trusted_users,
-                public_permissions=public_permissions,
-                delay_min=delay_min,
-                delay_max=delay_max,
-                typing_indicator=typing_indicator,
-                humanize=humanize,
-                casual=casual,
-                respond_mentions=respond_mentions,
-                respond_groups=respond_groups,
-                max_daily=max_daily,
-                context_messages_limit=context_messages_limit,
-            )
-        except Exception as e:
-            logger.error(f"Error handling Telegram message for {messenger_id}: {e}", exc_info=True)
-            await _log_messenger_error(
-                messenger_id, agent_id,
-                "messenger_handler_error", f"Error handling incoming message: {e}",
-                {"exception": str(type(e).__name__), "detail": str(e)},
-            )
+        # Config
+        trusted_users = account_doc.get("trusted_users", [])
+        public_permissions = account_doc.get("public_permissions", [])
+        config = account_doc.get("config", {})
+        delay_min = config.get("response_delay_min", 2)
+        delay_max = config.get("response_delay_max", 8)
+        typing_indicator = config.get("typing_indicator", True)
+        humanize = config.get("humanize_responses", True)
+        casual = config.get("casual_tone", True)
+        respond_mentions = config.get("respond_to_mentions", True)
+        respond_groups = config.get("respond_in_groups", False)
+        max_daily = config.get("max_daily_messages", 100)
+        context_messages_limit = config.get("context_messages_limit", None)  # None = use agent default
 
-    # Start receiving
+        # Store in registry (include creds + account_doc for auto-reconnect)
+        _active_clients[messenger_id] = {
+            "client": client,
+            "agent_id": agent_id,
+            "messenger_id": messenger_id,
+            "me": me,
+            "trusted_users": trusted_users,
+            "public_permissions": public_permissions,
+            "config": config,
+            "daily_count": 0,
+            "last_count_reset": datetime.now(timezone.utc).date(),
+            "creds": creds,
+            "account_doc": account_doc,
+            "stop_requested": False,  # set True on intentional stop to prevent reconnect
+            "reconnecting": False,  # set True while _run_client is in reconnect loop
+        }
+
+        @client.on(events.NewMessage(incoming=True))
+        async def on_new_message(event):
+            """Handle incoming Telegram messages."""
+            try:
+                await _handle_incoming_message(
+                    event=event,
+                    messenger_id=messenger_id,
+                    agent_id=agent_id,
+                    client=client,
+                    me=me,
+                    trusted_users=trusted_users,
+                    public_permissions=public_permissions,
+                    delay_min=delay_min,
+                    delay_max=delay_max,
+                    typing_indicator=typing_indicator,
+                    humanize=humanize,
+                    casual=casual,
+                    respond_mentions=respond_mentions,
+                    respond_groups=respond_groups,
+                    max_daily=max_daily,
+                    context_messages_limit=context_messages_limit,
+                )
+            except Exception as e:
+                logger.error(f"Error handling Telegram message for {messenger_id}: {e}", exc_info=True)
+                await _log_messenger_error(
+                    messenger_id, agent_id,
+                    "messenger_handler_error", f"Error handling incoming message: {e}",
+                    {"exception": str(type(e).__name__), "detail": str(e)},
+                )
+
+    # Start receiving (outside lock — _run_client manages its own lock for reconnects)
     asyncio.create_task(_run_client(client, messenger_id))
 
     # Process unread messages that arrived while offline (in background)
@@ -557,144 +601,150 @@ async def _run_client(client: TelegramClient, messenger_id: str):
             return
 
         new_client = None
-        # Attempt reconnect
-        try:
-            creds = entry.get("creds", {})
-            account_doc = entry.get("account_doc", {})
-            api_id = int(creds["api_id"])
-            api_hash = creds["api_hash"]
-            session_file = _session_path(messenger_id)
-
-            # Disconnect old client to release SQLite session lock
+        # Attempt reconnect — acquire lock to prevent concurrent session access
+        lock = _get_session_lock(messenger_id)
+        async with lock:
             try:
-                await client.disconnect()
-            except Exception:
-                pass
+                creds = entry.get("creds", {})
+                account_doc = entry.get("account_doc", {})
+                api_id = int(creds["api_id"])
+                api_hash = creds["api_hash"]
+                session_file = _session_path(messenger_id)
 
-            # Small delay to ensure SQLite lock is fully released
-            await asyncio.sleep(0.5)
-
-            # Create fresh client
-            new_client = TelegramClient(session_file, api_id, api_hash)
-            try:
-                await new_client.connect()
-            except Exception:
-                # If connect fails, make sure to clean up the partial client
+                # Disconnect old client to release SQLite session lock
                 try:
-                    await new_client.disconnect()
+                    await client.disconnect()
                 except Exception:
                     pass
-                raise
 
-            if not await new_client.is_user_authorized():
-                logger.error(f"Telegram {messenger_id}: session expired during reconnect")
+                # Small delay to ensure SQLite lock is fully released
+                await asyncio.sleep(0.5)
+
+                # Create fresh client
+                new_client = TelegramClient(session_file, api_id, api_hash)
+                try:
+                    await new_client.connect()
+                except Exception:
+                    # If connect fails, make sure to clean up the partial client
+                    try:
+                        await new_client.disconnect()
+                    except Exception:
+                        pass
+                    raise
+
+                if not await new_client.is_user_authorized():
+                    logger.error(f"Telegram {messenger_id}: session expired during reconnect")
+                    await _log_messenger_error(
+                        messenger_id, agent_id,
+                        "reconnect_auth_failed", "Session expired — re-authentication required",
+                        {"attempt": attempt},
+                    )
+                    try:
+                        await new_client.disconnect()
+                    except Exception:
+                        pass
+                    _active_clients.pop(messenger_id, None)
+                    return
+
+                me = await new_client.get_me()
+                logger.info(f"Telegram {messenger_id}: reconnected as @{me.username} (attempt {attempt})")
+
+                # Re-read config for reconnect
+                trusted_users = account_doc.get("trusted_users", [])
+                public_permissions = account_doc.get("public_permissions", [])
+                config = account_doc.get("config", {})
+                delay_min = config.get("response_delay_min", 2)
+                delay_max = config.get("response_delay_max", 8)
+                typing_indicator = config.get("typing_indicator", True)
+                humanize = config.get("humanize_responses", True)
+                casual = config.get("casual_tone", True)
+                respond_mentions = config.get("respond_to_mentions", True)
+                respond_groups = config.get("respond_in_groups", False)
+                max_daily = config.get("max_daily_messages", 100)
+                context_messages_limit = config.get("context_messages_limit", None)
+
+                # Update registry with new client
+                old_daily = entry.get("daily_count", 0)
+                old_reset = entry.get("last_count_reset")
+                _active_clients[messenger_id] = {
+                    "client": new_client,
+                    "agent_id": agent_id,
+                    "messenger_id": messenger_id,
+                    "me": me,
+                    "trusted_users": trusted_users,
+                    "public_permissions": public_permissions,
+                    "config": config,
+                    "daily_count": old_daily,
+                    "last_count_reset": old_reset,
+                    "creds": creds,
+                    "account_doc": account_doc,
+                    "stop_requested": False,
+                }
+
+                # Re-register handler
+                @new_client.on(events.NewMessage(incoming=True))
+                async def on_new_message(event):
+                    try:
+                        await _handle_incoming_message(
+                            event=event,
+                            messenger_id=messenger_id,
+                            agent_id=agent_id,
+                            client=new_client,
+                            me=me,
+                            trusted_users=trusted_users,
+                            public_permissions=public_permissions,
+                            delay_min=delay_min,
+                            delay_max=delay_max,
+                            typing_indicator=typing_indicator,
+                            humanize=humanize,
+                            casual=casual,
+                            respond_mentions=respond_mentions,
+                            respond_groups=respond_groups,
+                            max_daily=max_daily,
+                            context_messages_limit=context_messages_limit,
+                        )
+                    except Exception as e:
+                        logger.error(f"Error handling Telegram message for {messenger_id}: {e}", exc_info=True)
+
+                client = new_client  # use new client for next iteration
+                attempt = 0  # reset counter on successful reconnect
+                reconnect_delay = 5
+                entry = _active_clients.get(messenger_id, {})
+                entry["reconnecting"] = False
+
+                await _log_messenger_event(
+                    messenger_id, agent_id, "info", "reconnected",
+                    f"Successfully reconnected as @{me.username} after {attempt} attempt(s)",
+                    {"username": me.username, "attempt": attempt},
+                )
+
+                # Process unread messages that arrived while offline
+                asyncio.create_task(_process_unread_messages(
+                    client=new_client,
+                    messenger_id=messenger_id,
+                    agent_id=agent_id,
+                    me=me,
+                    trusted_users=trusted_users,
+                    public_permissions=public_permissions,
+                    config=config,
+                    context_messages_limit=context_messages_limit,
+                ))
+
+            except Exception as e:
+                # Disconnect failed new_client to release SQLite session lock
+                if new_client:
+                    try:
+                        await new_client.disconnect()
+                    except Exception:
+                        pass
+                    new_client = None
+                logger.error(f"Telegram {messenger_id}: reconnect attempt {attempt} failed: {e}")
                 await _log_messenger_error(
                     messenger_id, agent_id,
-                    "reconnect_auth_failed", "Session expired — re-authentication required",
-                    {"attempt": attempt},
+                    "reconnect_error", f"Reconnect attempt {attempt} failed: {e}",
+                    {"attempt": attempt, "exception": str(e)},
                 )
-                _active_clients.pop(messenger_id, None)
-                return
-
-            me = await new_client.get_me()
-            logger.info(f"Telegram {messenger_id}: reconnected as @{me.username} (attempt {attempt})")
-
-            # Re-read config for reconnect
-            trusted_users = account_doc.get("trusted_users", [])
-            public_permissions = account_doc.get("public_permissions", [])
-            config = account_doc.get("config", {})
-            delay_min = config.get("response_delay_min", 2)
-            delay_max = config.get("response_delay_max", 8)
-            typing_indicator = config.get("typing_indicator", True)
-            humanize = config.get("humanize_responses", True)
-            casual = config.get("casual_tone", True)
-            respond_mentions = config.get("respond_to_mentions", True)
-            respond_groups = config.get("respond_in_groups", False)
-            max_daily = config.get("max_daily_messages", 100)
-            context_messages_limit = config.get("context_messages_limit", None)
-
-            # Update registry with new client
-            old_daily = entry.get("daily_count", 0)
-            old_reset = entry.get("last_count_reset")
-            _active_clients[messenger_id] = {
-                "client": new_client,
-                "agent_id": agent_id,
-                "messenger_id": messenger_id,
-                "me": me,
-                "trusted_users": trusted_users,
-                "public_permissions": public_permissions,
-                "config": config,
-                "daily_count": old_daily,
-                "last_count_reset": old_reset,
-                "creds": creds,
-                "account_doc": account_doc,
-                "stop_requested": False,
-            }
-
-            # Re-register handler
-            @new_client.on(events.NewMessage(incoming=True))
-            async def on_new_message(event):
-                try:
-                    await _handle_incoming_message(
-                        event=event,
-                        messenger_id=messenger_id,
-                        agent_id=agent_id,
-                        client=new_client,
-                        me=me,
-                        trusted_users=trusted_users,
-                        public_permissions=public_permissions,
-                        delay_min=delay_min,
-                        delay_max=delay_max,
-                        typing_indicator=typing_indicator,
-                        humanize=humanize,
-                        casual=casual,
-                        respond_mentions=respond_mentions,
-                        respond_groups=respond_groups,
-                        max_daily=max_daily,
-                        context_messages_limit=context_messages_limit,
-                    )
-                except Exception as e:
-                    logger.error(f"Error handling Telegram message for {messenger_id}: {e}", exc_info=True)
-
-            client = new_client  # use new client for next iteration
-            attempt = 0  # reset counter on successful reconnect
-            reconnect_delay = 5
-            entry = _active_clients.get(messenger_id, {})
-            entry["reconnecting"] = False
-
-            await _log_messenger_event(
-                messenger_id, agent_id, "info", "reconnected",
-                f"Successfully reconnected as @{me.username} after {attempt} attempt(s)",
-                {"username": me.username, "attempt": attempt},
-            )
-
-            # Process unread messages that arrived while offline
-            asyncio.create_task(_process_unread_messages(
-                client=new_client,
-                messenger_id=messenger_id,
-                agent_id=agent_id,
-                me=me,
-                trusted_users=trusted_users,
-                public_permissions=public_permissions,
-                config=config,
-                context_messages_limit=context_messages_limit,
-            ))
-
-        except Exception as e:
-            # Disconnect failed new_client to release SQLite session lock
-            if new_client:
-                try:
-                    await new_client.disconnect()
-                except Exception:
-                    pass
-                new_client = None
-            logger.error(f"Telegram {messenger_id}: reconnect attempt {attempt} failed: {e}")
-            await _log_messenger_error(
-                messenger_id, agent_id,
-                "reconnect_error", f"Reconnect attempt {attempt} failed: {e}",
-                {"attempt": attempt, "exception": str(e)},
-            )
-            # Will loop back and try again after increasing delay
+                # Will loop back and try again after increasing delay
 
 
 async def stop_telegram_client(messenger_id: str):
