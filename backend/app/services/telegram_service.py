@@ -979,6 +979,12 @@ async def _handle_incoming_message(
         {"chat_id": str(event.chat_id), "user_id": sender_id_str, "is_trusted": is_trusted, "length": len(message_text)},
     )
 
+    # --- Mark messages as read BEFORE starting to type (natural human behavior) ---
+    try:
+        await client.send_read_acknowledge(event.chat_id, event.message)
+    except Exception as e:
+        logger.debug(f"Failed to mark messages as read for {messenger_id}: {e}")
+
     # --- Start typing indicator IMMEDIATELY (within 3 sec of receiving message) ---
     typing_task = None
     if typing_indicator:
