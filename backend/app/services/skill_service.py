@@ -685,6 +685,20 @@ SYSTEM_SKILLS = [
             "required": ["query"],
         },
     },
+    {
+        "name": "creator_context",
+        "display_name": "Creator Context",
+        "description": "Get information about the creator/owner who manages the bots.",
+        "description_for_agent": (
+            "Get information about the creator/owner — the person who manages and configures the bots. "
+            "Returns their name, goals, dreams, skills, current situation, principles, successes, "
+            "failures, action history, and ideas. No parameters needed. "
+            "Use this when the user asks about themselves, their goals, or when you need personal context."
+        ),
+        "category": "general",
+        "code": "# Creator context — executed by pipeline handler",
+        "input_schema": {"type": "object", "properties": {}},
+    },
 ]
 
 

@@ -10,6 +10,7 @@ from app.mongodb.models.system_setting import MongoSystemSetting
 from app.mongodb.models.skill import MongoSkill, MongoAgentSkill
 from app.mongodb.models.log import MongoAgentLog
 from app.mongodb.models.memory import MongoMemory, MongoMemoryLink
+from app.mongodb.models.creator_profile import MongoCreatorProfile
 
 __all__ = [
     "MongoUser",
@@ -33,4 +34,5 @@ __all__ = [
     "MongoAgentLog",
     "MongoMemory",
     "MongoMemoryLink",
+    "MongoCreatorProfile",
 ]

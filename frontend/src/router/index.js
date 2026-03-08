@@ -37,6 +37,7 @@ const routes = [
       { path: 'projects', name: 'Projects', component: () => import('../views/ProjectsView.vue') },
       { path: 'projects/:slug', name: 'ProjectDetail', component: () => import('../views/ProjectDetailView.vue') },
       { path: 'agent-errors', name: 'AgentErrors', component: () => import('../views/AgentErrorsView.vue') },
+      { path: 'creator', name: 'Creator', component: () => import('../views/CreatorView.vue') },
     ],
   },
 ]

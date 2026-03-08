@@ -153,6 +153,7 @@ onBeforeUnmount(() => {
 
 const navItems = [
   { path: '/', icon: 'mdi-view-dashboard', title: 'Dashboard' },
+  { path: '/creator', icon: 'mdi-account-heart', title: 'Creator' },
   { path: '/agents', icon: 'mdi-robot', title: 'Agents' },
   { path: '/protocols', icon: 'mdi-head-cog', title: 'Protocols' },
   { path: '/tasks', icon: 'mdi-clipboard-list', title: 'Tasks' },

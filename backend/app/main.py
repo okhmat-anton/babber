@@ -41,6 +41,7 @@ from app.api.projects import router as projects_router
 from app.api.agent_errors import agent_error_router, all_errors_router
 from app.api.messengers import router as messengers_router
 from app.api.audio import router as audio_router
+from app.api.creator import router as creator_router
 
 from app.services.ollama_watchdog import start_watchdog, stop_watchdog
 
@@ -165,6 +166,7 @@ app.include_router(agent_error_router)
 app.include_router(all_errors_router)
 app.include_router(messengers_router)
 app.include_router(audio_router)
+app.include_router(creator_router)
 
 # Serve uploaded files (avatars, etc.) from data/agents/ directory
 _uploads_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "agents")

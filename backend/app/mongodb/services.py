@@ -23,6 +23,7 @@ from app.mongodb.models import (
     MongoAgentLog,
     MongoMemory,
     MongoMemoryLink,
+    MongoCreatorProfile,
 )
 from app.mongodb.models.messenger import MongoMessengerAccount, MongoMessengerMessage, MongoMessengerLog
 
@@ -278,4 +279,26 @@ class MemoryLinkService(BaseMongoService[MongoMemoryLink]):
     async def delete_by_agent(self, agent_id: str):
         result = await self.collection.delete_many({"agent_id": agent_id})
         return result.deleted_count
+
+
+class CreatorProfileService(BaseMongoService[MongoCreatorProfile]):
+    """Singleton creator profile — one document per system."""
+    def __init__(self, db: AsyncIOMotorDatabase):
+        super().__init__(db, "creator_profile", MongoCreatorProfile)
+
+    async def get_profile(self) -> MongoCreatorProfile | None:
+        """Get the single creator profile (or None)."""
+        docs = await self.get_all(limit=1)
+        return docs[0] if docs else None
+
+    async def upsert(self, data: dict) -> MongoCreatorProfile:
+        """Create or update the creator profile."""
+        from datetime import datetime
+        existing = await self.get_profile()
+        if existing:
+            data["updated_at"] = datetime.utcnow().isoformat()
+            return await self.update(existing.id, data)
+        else:
+            profile = MongoCreatorProfile(**data)
+            return await self.create(profile)
 

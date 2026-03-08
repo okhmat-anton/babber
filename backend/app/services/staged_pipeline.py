@@ -89,6 +89,7 @@ GATHER_SKILLS = frozenset({
     "task_context_build", "json_parse", "text_summarize",
     "memory_deep_process", "speech_recognize",
     "study_material", "recall_knowledge",
+    "creator_context",
 })
 
 ACTION_SKILLS = frozenset({
@@ -434,6 +435,7 @@ class StagedPipeline:
         "text_summarize", "code_execute", "web_scrape", "web_fetch",
         "sound_generate", "speech_recognize",
         "study_material", "recall_knowledge",
+        "creator_context",
     }
 
     async def _exec_skill(self, name: str, args: dict) -> dict:
@@ -479,6 +481,8 @@ class StagedPipeline:
             return await self._sys_study_material(db, agent_id, args)
         elif name == "recall_knowledge":
             return await self._sys_recall_knowledge(db, agent_id, args)
+        elif name == "creator_context":
+            return await self._sys_creator_context(db, args)
         return None
 
     async def _sys_memory_search(self, db, agent_id: str, args: dict) -> dict:
@@ -969,6 +973,21 @@ class StagedPipeline:
 
         return {"result": results, "total_knowledge": len(knowledge), "matched": len(scored)}
 
+    async def _sys_creator_context(self, db, args: dict) -> dict:
+        """Return creator/owner profile as context for the agent."""
+        from app.mongodb.services import CreatorProfileService
+        svc = CreatorProfileService(db)
+        profile = await svc.get_profile()
+        if not profile:
+            return {"result": "", "message": "Creator profile not configured yet."}
+        context_str = profile.to_context_string()
+        if not context_str:
+            return {"result": "", "message": "Creator profile is empty."}
+        return {
+            "result": context_str,
+            "name": profile.name or "",
+        }
+
     def _build_context(self, classification: Classification, user_input: str) -> dict:
         """Build context dict for arg inference."""
         return {
@@ -1235,6 +1254,9 @@ Rules:
             needs_skills.add("task_context_build")
         if not classification.is_greeting and classification.complexity != "simple" and "memory_search" in available:
             needs_skills.add("memory_search")
+        # Always include creator context when available (not greetings)
+        if not classification.is_greeting and "creator_context" in available:
+            needs_skills.add("creator_context")
 
         # Filter to gather-only skills
         needs_skills = needs_skills.intersection(available).intersection(GATHER_SKILLS)
@@ -1596,6 +1618,10 @@ JSON only:
                 elif skill == "task_context_build":
                     ctx_text = json.dumps(data, ensure_ascii=False, default=str)[:4000]
                     gathered_sections.append(f"**Task context:**\n{ctx_text}")
+                elif skill == "creator_context":
+                    creator_text = data.get("result", "")
+                    if creator_text:
+                        gathered_sections.insert(0, f"**About your creator/owner (the person you work for):**\n{creator_text}")
                 else:
                     ctx_text = json.dumps(data, ensure_ascii=False, default=str)[:2000]
                     gathered_sections.append(f"**{skill} result:**\n{ctx_text}")
