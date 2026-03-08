@@ -880,6 +880,12 @@ class AgentChatEngine:
 
             return result
 
+        except asyncio.CancelledError:
+            # asyncio.CancelledError does NOT inherit from Exception in Python 3.9+
+            # — must catch explicitly so the thinking log doesn't stay "started" forever.
+            if tracker:
+                await tracker.fail("Task cancelled (client disconnected or timeout)")
+            raise
         except Exception as e:
             if tracker:
                 await tracker.fail(str(e))

@@ -31,7 +31,10 @@ from app.llm.base import GenerationParams
 
 # Hard timeout for SYNTHESIZE stage (LLM call) in seconds.
 # If exceeded, pipeline returns a partial/error response instead of hanging.
-SYNTHESIZE_TIMEOUT_SECONDS = 120
+# Set to 300s to match httpx timeout — with Ollama semaphore serialisation,
+# the LLM call itself shouldn't take this long, but we keep a generous
+# upper bound for large context windows.
+SYNTHESIZE_TIMEOUT_SECONDS = 300
 
 logger = logging.getLogger(__name__)
 

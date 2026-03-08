@@ -15,6 +15,7 @@ Usage within chat.py:
 """
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from datetime import datetime, timezone
@@ -141,6 +142,30 @@ class ThinkingTracker:
         }
         self.log = await ThinkingLogService(self.db).update(self.log.id, update_data)
         return self.log
+
+
+async def cleanup_stale_thinking_logs(db) -> int:
+    """Mark all 'started' thinking logs as stale (server restart cleanup).
+
+    Called on startup to close any thinking logs that were left in 'started'
+    status from a previous run (e.g. due to server crash or task cancellation).
+    Returns the number of cleaned-up logs.
+    """
+    from app.mongodb.services import ThinkingLogService as TLS
+    svc = TLS(db)
+    collection = svc.collection
+    result = await collection.update_many(
+        {"status": "started"},
+        {"$set": {
+            "status": "error",
+            "error_message": "Stale: cleaned up on server restart",
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+    count = result.modified_count
+    if count:
+        logging.getLogger(__name__).info(f"Cleaned up {count} stale thinking log(s)")
+    return count
 
 
 def _safe_jsonb(data: dict | None) -> dict | None:

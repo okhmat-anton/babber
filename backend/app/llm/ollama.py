@@ -1,7 +1,19 @@
+import asyncio
+import logging
 import httpx
 from typing import AsyncIterator
 from app.llm.base import LLMProvider, Message, GenerationParams, LLMResponse, ModelInfo
 import json
+
+logger = logging.getLogger(__name__)
+
+# Global semaphore: Ollama processes requests sequentially, so sending
+# multiple concurrent requests only builds a queue.  A semaphore of 1
+# serialises our calls, prevents cascading timeouts (where Ollama is
+# still processing a previous timed-out request) and keeps the behaviour
+# predictable.  The value can be increased when running Ollama with
+# OLLAMA_NUM_PARALLEL > 1.
+_ollama_semaphore = asyncio.Semaphore(1)
 
 
 class OllamaProvider:
@@ -27,10 +39,12 @@ class OllamaProvider:
         if params.stop:
             payload["options"]["stop"] = params.stop
 
-        async with httpx.AsyncClient(timeout=300) as client:
-            resp = await client.post(f"{self.base_url}/api/chat", json=payload)
-            resp.raise_for_status()
-            data = resp.json()
+        async with _ollama_semaphore:
+            logger.debug(f"Ollama chat: model={model}, messages={len(messages)}")
+            async with httpx.AsyncClient(timeout=300) as client:
+                resp = await client.post(f"{self.base_url}/api/chat", json=payload)
+                resp.raise_for_status()
+                data = resp.json()
 
         return LLMResponse(
             content=data.get("message", {}).get("content", ""),

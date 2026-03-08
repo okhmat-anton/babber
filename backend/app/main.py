@@ -81,6 +81,12 @@ async def lifespan(app: FastAPI):
         await syslog_bg("warning", f"Cleaned up {orphaned} orphaned autonomous run(s)",
                         source="autonomous", metadata={"orphaned_count": orphaned})
 
+    # Clean up stale thinking logs (left in 'started' status from previous run)
+    from app.services.thinking_log_service import cleanup_stale_thinking_logs
+    stale = await cleanup_stale_thinking_logs(mongodb)
+    if stale:
+        await syslog_bg("info", f"Cleaned up {stale} stale thinking log(s)", source="system")
+
     await syslog_bg("info", "Server started", source="system", metadata={"version": settings.APP_VERSION})
 
     # Start Ollama watchdog (auto-recovery, monitoring)
