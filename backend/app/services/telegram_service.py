@@ -1199,3 +1199,191 @@ async def _generate_agent_response(
             {"exception": type(e).__name__, "detail": str(e)},
         )
         return None
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Startup Restore & Health-Check Watchdog
+# ═══════════════════════════════════════════════════════════════════════
+
+_telegram_watchdog_task: Optional[asyncio.Task] = None
+TELEGRAM_WATCHDOG_INTERVAL = 15  # seconds — Telegram tolerates reconnects every 10-20s
+
+
+async def restore_active_clients():
+    """
+    On server startup: find all messenger accounts with is_active=True
+    and is_authenticated=True, and start their Telegram listeners.
+    """
+    try:
+        from app.database import get_mongodb
+        from app.core.encryption import decrypt_dict
+        from app.mongodb.services import MessengerAccountService
+
+        db = get_mongodb()
+        svc = MessengerAccountService(db)
+        active_accounts = await svc.get_active(platform="telegram")
+
+        if not active_accounts:
+            logger.info("No active Telegram accounts to restore")
+            return 0
+
+        restored = 0
+        for acc in active_accounts:
+            messenger_id = acc.id
+            agent_id = acc.agent_id
+
+            # Skip if already running
+            if messenger_id in _active_clients:
+                continue
+
+            # Get raw doc for encrypted creds
+            raw_doc = await svc.collection.find_one({"_id": messenger_id})
+            if not raw_doc:
+                continue
+
+            encrypted = raw_doc.get("credentials_encrypted", "")
+            if not encrypted:
+                logger.warning(f"Restore skip {messenger_id}: no encrypted creds")
+                continue
+
+            try:
+                creds = decrypt_dict(encrypted)
+            except Exception as e:
+                logger.warning(f"Restore skip {messenger_id}: decrypt failed: {e}")
+                continue
+
+            try:
+                await start_telegram_listener(messenger_id, agent_id, creds, raw_doc)
+                restored += 1
+                logger.info(f"Restored Telegram listener for {messenger_id}")
+            except Exception as e:
+                logger.error(f"Failed to restore Telegram listener {messenger_id}: {e}")
+                await _log_messenger_error(
+                    messenger_id, agent_id,
+                    "restore_failed", f"Failed to restore listener on startup: {e}",
+                    {"exception": type(e).__name__, "detail": str(e)},
+                )
+
+        if restored:
+            from app.services.log_service import syslog_bg
+            await syslog_bg(
+                "info",
+                f"Restored {restored} Telegram listener(s) on startup",
+                source="telegram",
+                metadata={"restored": restored, "total_active": len(active_accounts)},
+            )
+        return restored
+
+    except Exception as e:
+        logger.error(f"Failed to restore Telegram clients: {e}", exc_info=True)
+        return 0
+
+
+async def _telegram_watchdog_loop():
+    """
+    Periodic health check: every 15s, verify that all accounts marked as
+    is_active=True in DB actually have a running client.  If not — restart.
+    """
+    await asyncio.sleep(10)  # initial grace period after startup
+
+    while True:
+        try:
+            await asyncio.sleep(TELEGRAM_WATCHDOG_INTERVAL)
+            await _check_telegram_health()
+        except asyncio.CancelledError:
+            logger.info("Telegram watchdog cancelled")
+            return
+        except Exception as e:
+            logger.error(f"Telegram watchdog error: {e}", exc_info=True)
+            await asyncio.sleep(5)
+
+
+async def _check_telegram_health():
+    """Single health-check iteration."""
+    from app.database import get_mongodb
+    from app.core.encryption import decrypt_dict
+    from app.mongodb.services import MessengerAccountService
+
+    db = get_mongodb()
+    svc = MessengerAccountService(db)
+    active_accounts = await svc.get_active(platform="telegram")
+
+    for acc in active_accounts:
+        messenger_id = acc.id
+        agent_id = acc.agent_id
+
+        entry = _active_clients.get(messenger_id)
+
+        # Case 1: No entry at all — client dropped completely
+        if not entry:
+            logger.warning(f"Watchdog: {messenger_id} marked active but no client — restoring")
+            raw_doc = await svc.collection.find_one({"_id": messenger_id})
+            if not raw_doc:
+                continue
+
+            encrypted = raw_doc.get("credentials_encrypted", "")
+            if not encrypted:
+                continue
+
+            try:
+                creds = decrypt_dict(encrypted)
+                await start_telegram_listener(messenger_id, agent_id, creds, raw_doc)
+                logger.info(f"Watchdog: restored listener for {messenger_id}")
+                await _log_messenger_event(
+                    messenger_id, agent_id, "info", "watchdog_restored",
+                    "Telegram listener restored by health-check watchdog",
+                )
+            except Exception as e:
+                logger.error(f"Watchdog: failed to restore {messenger_id}: {e}")
+                await _log_messenger_error(
+                    messenger_id, agent_id,
+                    "watchdog_restore_failed",
+                    f"Health-check watchdog failed to restore: {e}",
+                    {"exception": type(e).__name__},
+                )
+            continue
+
+        # Case 2: Entry exists but client is disconnected
+        client = entry.get("client")
+        if client and not client.is_connected():
+            logger.warning(f"Watchdog: {messenger_id} client exists but disconnected — will let _run_client handle it")
+            # _run_client loop should handle reconnection
+            # Only intervene if the entry has no running task (shouldn't happen normally)
+
+    # Also check for orphaned active_clients that are no longer in DB
+    for messenger_id in list(_active_clients.keys()):
+        found = any(acc.id == messenger_id for acc in active_accounts)
+        if not found:
+            entry = _active_clients.get(messenger_id, {})
+            if not entry.get("stop_requested"):
+                logger.info(f"Watchdog: {messenger_id} active in memory but not in DB — stopping")
+                entry["stop_requested"] = True
+                try:
+                    client = entry.get("client")
+                    if client:
+                        await client.disconnect()
+                except Exception:
+                    pass
+                _active_clients.pop(messenger_id, None)
+
+
+async def start_telegram_watchdog():
+    """Start the Telegram health-check watchdog."""
+    global _telegram_watchdog_task
+    if _telegram_watchdog_task and not _telegram_watchdog_task.done():
+        return
+    _telegram_watchdog_task = asyncio.create_task(_telegram_watchdog_loop())
+    logger.info("Telegram watchdog started (interval=%ds)", TELEGRAM_WATCHDOG_INTERVAL)
+
+
+async def stop_telegram_watchdog():
+    """Stop the Telegram health-check watchdog."""
+    global _telegram_watchdog_task
+    if _telegram_watchdog_task and not _telegram_watchdog_task.done():
+        _telegram_watchdog_task.cancel()
+        try:
+            await _telegram_watchdog_task
+        except asyncio.CancelledError:
+            pass
+    _telegram_watchdog_task = None
+    logger.info("Telegram watchdog stopped")

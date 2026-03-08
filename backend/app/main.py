@@ -85,11 +85,20 @@ async def lifespan(app: FastAPI):
     # Start Ollama watchdog (auto-recovery, monitoring)
     await start_watchdog()
 
+    # Restore active Telegram connections and start health-check watchdog
+    from app.services.telegram_service import (
+        restore_active_clients, start_telegram_watchdog, stop_telegram_watchdog, stop_all_clients,
+    )
+    restored = await restore_active_clients()
+    if restored:
+        await syslog_bg("info", f"Restored {restored} Telegram connection(s)", source="telegram")
+    await start_telegram_watchdog()
+
     yield
 
     # Shutdown
     await stop_watchdog()
-    from app.services.telegram_service import stop_all_clients
+    await stop_telegram_watchdog()
     await stop_all_clients()
     await syslog_bg("info", "Server shutting down", source="system")
 
