@@ -292,6 +292,56 @@
           </v-btn>
         </div>
 
+        <!-- Thinking Log (collapsible, like VSCode) -->
+        <div v-if="msg.metadata?.thinking_log_id" class="mt-2 thinking-log-widget">
+          <div
+            class="thinking-log-header d-flex align-center ga-1"
+            style="cursor: pointer"
+            @click="toggleThinkingLog(msg.metadata.thinking_log_id)"
+          >
+            <v-icon size="14" color="cyan">mdi-brain</v-icon>
+            <span class="text-caption font-weight-bold text-cyan">Thinking</span>
+            <v-chip v-if="thinkingLogs[msg.metadata.thinking_log_id]" size="x-small" variant="tonal" color="cyan">
+              {{ thinkingLogs[msg.metadata.thinking_log_id].steps?.length || 0 }} steps
+              · {{ (thinkingLogs[msg.metadata.thinking_log_id].total_duration_ms / 1000).toFixed(1) }}s
+            </v-chip>
+            <v-progress-circular v-if="thinkingLogLoading[msg.metadata.thinking_log_id]" size="12" width="2" indeterminate color="cyan" class="ml-1" />
+            <v-spacer />
+            <v-icon size="14">{{ thinkingLogExpanded[msg.metadata.thinking_log_id] ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
+          </div>
+          <v-expand-transition>
+            <div v-if="thinkingLogExpanded[msg.metadata.thinking_log_id] && thinkingLogs[msg.metadata.thinking_log_id]" class="thinking-log-steps mt-1">
+              <div
+                v-for="step in thinkingLogs[msg.metadata.thinking_log_id].steps"
+                :key="step.id"
+                class="thinking-step"
+              >
+                <div class="d-flex align-center ga-1" style="cursor: pointer" @click="toggleThinkingStep(step.id)">
+                  <v-icon size="12" :color="thinkingStepColor(step.status)">{{ thinkingStepIcon(step.step_type) }}</v-icon>
+                  <span class="text-caption flex-grow-1">{{ step.step_name }}</span>
+                  <span class="text-caption text-medium-emphasis">{{ step.duration_ms }}ms</span>
+                  <v-icon size="12">{{ thinkingStepExpanded[step.id] ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
+                </div>
+                <v-expand-transition>
+                  <div v-if="thinkingStepExpanded[step.id]" class="thinking-step-detail mt-1 pl-4">
+                    <div v-if="step.input_data" class="text-caption text-medium-emphasis mb-1">
+                      <strong>Input:</strong>
+                      <pre class="thinking-step-json">{{ formatStepData(step.input_data) }}</pre>
+                    </div>
+                    <div v-if="step.output_data" class="text-caption text-medium-emphasis">
+                      <strong>Output:</strong>
+                      <pre class="thinking-step-json">{{ formatStepData(step.output_data) }}</pre>
+                    </div>
+                    <div v-if="step.error_message" class="text-caption text-error">
+                      <strong>Error:</strong> {{ step.error_message }}
+                    </div>
+                  </div>
+                </v-expand-transition>
+              </div>
+            </div>
+          </v-expand-transition>
+        </div>
+
         <!-- Protocol metadata: Todo list -->
         <div v-if="msg.metadata?.todo_list?.length" class="mt-2 protocol-todo-widget">
           <div class="d-flex align-center ga-1 mb-1">
@@ -499,6 +549,12 @@ const sessionSearch = ref('')
 const sessionsExpanded = ref(true)
 const expandedResponses = reactive({})
 const ttsLoading = reactive({})
+
+// Thinking log state
+const thinkingLogs = reactive({})        // logId -> full log data with steps
+const thinkingLogExpanded = reactive({}) // logId -> boolean
+const thinkingLogLoading = reactive({})  // logId -> boolean
+const thinkingStepExpanded = reactive({}) // stepId -> boolean
 // Restore active chat type from localStorage, default to 'user'
 const activeChatType = ref(localStorage.getItem('chat_active_tab') || 'user') // 'user', 'agent', 'project_task'
 const previousChatType = ref('user') // Remember which tab we came from
@@ -793,6 +849,67 @@ function todoStatusIcon(status) {
 }
 function todoStatusColor(status) {
   return { pending: 'grey', in_progress: 'orange', done: 'success', skipped: 'grey-darken-1' }[status] || 'grey'
+}
+
+// ── Thinking Log helpers ──────────────────────────────────────────
+async function toggleThinkingLog(logId) {
+  thinkingLogExpanded[logId] = !thinkingLogExpanded[logId]
+  // Lazy-load thinking log data on first expand
+  if (thinkingLogExpanded[logId] && !thinkingLogs[logId]) {
+    thinkingLogLoading[logId] = true
+    try {
+      const { data } = await api.get(`/chat/thinking-logs/${logId}`)
+      thinkingLogs[logId] = data
+    } catch (e) {
+      console.error('Failed to load thinking log:', e)
+      thinkingLogExpanded[logId] = false
+    } finally {
+      thinkingLogLoading[logId] = false
+    }
+  }
+}
+
+function toggleThinkingStep(stepId) {
+  thinkingStepExpanded[stepId] = !thinkingStepExpanded[stepId]
+}
+
+function thinkingStepIcon(stepType) {
+  const icons = {
+    config_load: 'mdi-cog',
+    prompt_build: 'mdi-text-box',
+    history_build: 'mdi-history',
+    llm_call: 'mdi-brain',
+    response_parse: 'mdi-code-braces',
+    protocol_update: 'mdi-update',
+    stage_classify: 'mdi-tag',
+    stage_understand: 'mdi-magnify',
+    stage_gather: 'mdi-database-search',
+    stage_plan: 'mdi-map',
+    stage_execute: 'mdi-play',
+    stage_synthesize: 'mdi-creation',
+    project_task_context: 'mdi-folder',
+    context_load: 'mdi-folder-open',
+    skill_exec: 'mdi-lightning-bolt',
+  }
+  return icons[stepType] || 'mdi-circle-small'
+}
+
+function thinkingStepColor(status) {
+  return { completed: 'success', error: 'error', timeout: 'warning', skipped: 'grey' }[status] || 'grey'
+}
+
+function formatStepData(data) {
+  if (!data) return ''
+  try {
+    // Truncate large values for display
+    const truncated = JSON.parse(JSON.stringify(data, (key, val) => {
+      if (typeof val === 'string' && val.length > 500) return val.substring(0, 500) + '…'
+      return val
+    }))
+    return JSON.stringify(truncated, null, 2)
+  } catch {
+    return String(data)
+  }
 }
 
 function formatDate(dateStr) {
@@ -1370,5 +1487,46 @@ watch(() => chatStore.panelOpen, (open) => {
 }
 .skill-result-item {
   padding: 2px 0;
+}
+
+/* ── Thinking Log widget ── */
+.thinking-log-widget {
+  background: rgba(0, 188, 212, 0.06);
+  border: 1px solid rgba(0, 188, 212, 0.15);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.thinking-log-header:hover {
+  opacity: 0.85;
+}
+.thinking-log-steps {
+  border-top: 1px solid rgba(0, 188, 212, 0.1);
+  padding-top: 6px;
+}
+.thinking-step {
+  padding: 3px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.thinking-step:last-child {
+  border-bottom: none;
+}
+.thinking-step:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+.thinking-step-detail {
+  border-left: 2px solid rgba(0, 188, 212, 0.2);
+}
+.thinking-step-json {
+  font-family: monospace;
+  font-size: 11px;
+  line-height: 1.3;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 4px 6px;
+  border-radius: 4px;
+  margin-top: 2px;
 }
 </style>

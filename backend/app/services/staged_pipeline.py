@@ -19,6 +19,7 @@ Key principles:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -27,6 +28,10 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from app.llm.base import GenerationParams
+
+# Hard timeout for SYNTHESIZE stage (LLM call) in seconds.
+# If exceeded, pipeline returns a partial/error response instead of hanging.
+SYNTHESIZE_TIMEOUT_SECONDS = 120
 
 logger = logging.getLogger(__name__)
 
@@ -1712,9 +1717,35 @@ JSON only:
         else:
             messages.append({"role": "user", "content": user_input})
 
+        timed_out = False
         try:
-            resp = await self._llm(messages)
+            resp = await asyncio.wait_for(
+                self._llm(messages),
+                timeout=SYNTHESIZE_TIMEOUT_SECONDS,
+            )
             content = (resp.content or "").strip()
+        except asyncio.TimeoutError:
+            timed_out = True
+            logger.error(
+                f"SYNTHESIZE stage timed out after {SYNTHESIZE_TIMEOUT_SECONDS}s"
+            )
+            # Build a partial response from gathered data so user gets something
+            partial_parts = []
+            for section in gathered_sections:
+                partial_parts.append(section)
+            if partial_parts:
+                content = (
+                    "⚠️ **Response generation timed out** "
+                    f"(>{SYNTHESIZE_TIMEOUT_SECONDS}s). "
+                    "Here is the data I gathered:\n\n"
+                    + "\n\n".join(partial_parts)
+                )
+            else:
+                content = (
+                    "⚠️ **Response generation timed out** "
+                    f"(>{SYNTHESIZE_TIMEOUT_SECONDS}s). "
+                    "Please try again or simplify your request."
+                )
         except Exception as e:
             logger.error(f"SYNTHESIZE stage LLM failed: {e}")
             content = f"Error generating response: {e}"
@@ -1733,11 +1764,13 @@ JSON only:
                 output_data={
                     "response_length": len(content),
                     "response": content,
+                    "timed_out": timed_out,
                 },
+                status="timeout" if timed_out else "completed",
                 duration_ms=duration_ms,
             )
 
-        return StageResult("synthesize", {"response": content}, content,
+        return StageResult("synthesize", {"response": content, "timed_out": timed_out}, content,
                            tokens_used=self._total_tokens, duration_ms=duration_ms)
 
     # ═════════════════════════════════════════════════════════════════

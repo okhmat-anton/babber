@@ -5,6 +5,7 @@ Endpoints:
   GET  /api/agents/{agent_id}/thinking-logs           — list thinking logs for an agent
   GET  /api/agents/{agent_id}/thinking-logs/{log_id}  — get single thinking log with all steps
   GET  /api/chat/sessions/{session_id}/thinking-logs   — list thinking logs for a chat session
+  GET  /api/chat/thinking-logs/{log_id}                — get thinking log by ID with all steps
   DELETE /api/agents/{agent_id}/thinking-logs          — clear all thinking logs for an agent
 """
 from uuid import UUID
@@ -142,3 +143,28 @@ async def list_session_thinking_logs(
         summary.steps_count = len(steps)
         summaries.append(summary)
     return summaries
+
+
+# --- Direct thinking log access by ID (used by chat messages with thinking_log_id) ---
+chat_thinking_router = APIRouter(prefix="/api/chat/thinking-logs", tags=["thinking-logs"])
+
+
+@chat_thinking_router.get("/{log_id}", response_model=ThinkingLogResponse)
+async def get_thinking_log_by_id(
+    log_id: UUID,
+    _user: MongoUser = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Get a thinking log with all steps by log ID. Used by chat UI to load thinking details."""
+    thinking_log_service = ThinkingLogService(db)
+    thinking_step_service = ThinkingStepService(db)
+
+    log = await thinking_log_service.get_by_id(str(log_id))
+    if not log:
+        raise HTTPException(status_code=404, detail="Thinking log not found")
+
+    steps = await thinking_step_service.get_all(filter={"thinking_log_id": log.id}, limit=1000)
+    steps.sort(key=lambda s: s.step_order)
+    log_dict = log.model_dump()
+    log_dict["steps"] = [s.model_dump() for s in steps]
+    return log_dict

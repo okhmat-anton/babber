@@ -1209,6 +1209,12 @@ async def send_message(
             else:
                 display_model_name = agent_display
 
+        # Save thinking_log_id reference in message metadata so frontend can load it
+        if tracker and tracker.log:
+            if not msg_metadata:
+                msg_metadata = {}
+            msg_metadata["thinking_log_id"] = tracker.log.id
+
         assistant_msg = MongoChatMessage(
             session_id=session.id,
             role="assistant",
