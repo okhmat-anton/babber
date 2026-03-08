@@ -136,9 +136,9 @@
               <v-col cols="12" md="4">
                 <v-select
                   v-model="entry.model_config_id"
-                  :items="models"
-                  item-title="name"
-                  item-value="id"
+                  :items="modelChoices"
+                  item-title="title"
+                  item-value="value"
                   label="Model"
                   density="compact"
                   hide-details
@@ -146,7 +146,12 @@
                 >
                   <template #item="{ item, props }">
                     <v-list-item v-bind="props">
-                      <v-list-item-subtitle>{{ item.raw.model_id }}</v-list-item-subtitle>
+                      <template #prepend>
+                        <v-icon size="18" :color="item.raw.isRole ? 'amber' : 'blue-grey'">
+                          {{ item.raw.isRole ? 'mdi-tag-multiple' : 'mdi-cube-outline' }}
+                        </v-icon>
+                      </template>
+                      <v-list-item-subtitle>{{ item.raw.subtitle }}</v-list-item-subtitle>
                     </v-list-item>
                   </template>
                 </v-select>
@@ -258,6 +263,7 @@ const agentsStore = useAgentsStore()
 const settingsStore = useSettingsStore()
 const saving = ref(false)
 const protocolsList = ref([])
+const modelRoles = ref([])  // { role, label } from API
 
 // Avatar state
 const avatarInput = ref(null)
@@ -287,6 +293,23 @@ const removeAvatar = () => {
 
 const isEdit = computed(() => !!route.params.id)
 const models = computed(() => settingsStore.models)
+
+// Combined list: roles first, then specific models
+const modelChoices = computed(() => {
+  const roleItems = modelRoles.value.map(r => ({
+    title: `🎭 ${r.label}`,
+    value: `role:${r.role}`,
+    subtitle: `Role — uses whatever model is assigned to "${r.role}"`,
+    isRole: true,
+  }))
+  const modelItems = models.value.map(m => ({
+    title: m.name || m.model_id,
+    value: m.id,
+    subtitle: m.model_id,
+    isRole: false,
+  }))
+  return [...roleItems, ...modelItems]
+})
 const protocolItems = computed(() => protocolsList.value)
 const mainProtocolItems = computed(() =>
   protocolsList.value.filter(p => form.value.protocol_ids.includes(p.id))
@@ -315,8 +338,9 @@ const form = ref({
 })
 
 const addModel = () => {
+  const defaultValue = modelChoices.value.length ? modelChoices.value[0].value : null
   form.value.models.push({
-    model_config_id: models.value.length ? models.value[0].id : null,
+    model_config_id: defaultValue,
     task_type: 'general',
     tags: [],
     priority: form.value.models.length,
@@ -329,6 +353,11 @@ const removeModel = (idx) => {
 
 onMounted(async () => {
   await settingsStore.fetchModels()
+  // Load model roles
+  try {
+    const { data } = await api.get('/settings/model-roles/available')
+    modelRoles.value = data
+  } catch { modelRoles.value = [] }
   // Load protocols
   try {
     const { data } = await api.get('/protocols')
@@ -365,7 +394,7 @@ onMounted(async () => {
     }
   }
   // If no models yet, auto-add first available
-  if (!form.value.models.length && models.value.length) {
+  if (!form.value.models.length && modelChoices.value.length) {
     addModel()
   }
 })

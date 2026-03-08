@@ -215,11 +215,25 @@ def _message_to_response(msg: MongoChatMessage) -> dict:
 
 
 async def _resolve_model(model_id_str: str, db: AsyncIOMotorDatabase) -> tuple[str, str, str, str | None]:
-    """Resolve a model_id string to (provider, base_url, model_name, api_key)."""
+    """Resolve a model_id string to (provider, base_url, model_name, api_key).
+    Supports: UUID, "ollama:<name>", "role:<role_name>".
+    """
     if model_id_str.startswith("ollama:"):
         model_name = model_id_str[7:]
         settings = get_settings()
         return ("ollama", settings.OLLAMA_BASE_URL, model_name, None)
+
+    # Role-based resolution
+    if model_id_str.startswith("role:"):
+        role = model_id_str[5:]
+        from app.services.model_role_service import resolve_model_for_role
+        mc = await resolve_model_for_role(db, role)
+        if not mc:
+            raise HTTPException(status_code=404, detail=f"No model assigned for role '{role}'")
+        settings = get_settings()
+        if mc.provider == "ollama":
+            return (mc.provider, settings.OLLAMA_BASE_URL, mc.model_id, mc.api_key)
+        return (mc.provider, mc.base_url, mc.model_id, mc.api_key)
 
     try:
         uid = str(uuid.UUID(model_id_str))
@@ -244,7 +258,7 @@ async def _resolve_model(model_id_str: str, db: AsyncIOMotorDatabase) -> tuple[s
 
 async def _remap_model_id(model_id_str: str, db: AsyncIOMotorDatabase) -> str | None:
     """Try to remap a stale model_id to a valid one."""
-    if model_id_str.startswith("ollama:") or model_id_str.startswith("agent:"):
+    if model_id_str.startswith("ollama:") or model_id_str.startswith("agent:") or model_id_str.startswith("role:"):
         return None
 
     try:
@@ -272,7 +286,7 @@ async def _validate_and_remap_model_ids(model_ids: list[str], db: AsyncIOMotorDa
     new_ids = []
     changed = False
     for mid in model_ids:
-        if mid.startswith("agent:"):
+        if mid.startswith("agent:") or mid.startswith("role:"):
             new_ids.append(mid)
             continue
         remapped = await _remap_model_id(mid, db)
@@ -678,6 +692,18 @@ async def send_message(
                 model_name = mid[7:]
                 if model_name in running_ollama_names:
                     filtered_model_ids.append(mid)
+            elif mid.startswith("role:"):
+                # Role-based: resolve and check if underlying model is running
+                role_name = mid[5:]
+                mc = await resolve_model_for_role(db, role_name)
+                if mc:
+                    if mc.provider == "ollama":
+                        if mc.model_id in running_ollama_names:
+                            filtered_model_ids.append(mid)
+                    else:
+                        filtered_model_ids.append(mid)
+                else:
+                    filtered_model_ids.append(mid)  # keep to let _resolve_model raise proper error
             else:
                 try:
                     uid = str(uuid.UUID(mid))

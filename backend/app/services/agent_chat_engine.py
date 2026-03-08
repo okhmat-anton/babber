@@ -166,7 +166,14 @@ class AgentChatEngine:
         agent_models = await agent_model_svc.get_by_agent(str(agent.id))
         if agent_models:
             best = sorted(agent_models, key=lambda x: x.priority)[0]
-            model_cfg = await mc_svc.get_by_id(str(best.model_config_id))
+            mid = str(best.model_config_id)
+            if mid.startswith("role:"):
+                # Resolve role to actual model
+                role_name = mid[5:]
+                from app.services.model_role_service import resolve_model_for_role
+                model_cfg = await resolve_model_for_role(self.db, role_name)
+            else:
+                model_cfg = await mc_svc.get_by_id(mid)
 
         # 2) Agent's own model_id / model_name (legacy)
         if not model_cfg and (getattr(agent, "model_name", None) or getattr(agent, "model_id", None)):

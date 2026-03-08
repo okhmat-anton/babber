@@ -1,21 +1,43 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from uuid import UUID
 from datetime import datetime
+
+from app.mongodb.models.model_config import MODEL_ROLES
 
 
 # ---------- Agent Model sub-schemas ----------
 
 class AgentModelEntry(BaseModel):
-    """One model assignment for an agent."""
-    model_config_id: UUID
+    """One model assignment for an agent.
+    model_config_id can be:
+      - A UUID string (specific model config)
+      - "role:<role_name>" (e.g. "role:base", "role:dialog", "role:creative")
+    """
+    model_config_id: str
     task_type: str = "general"  # e.g. "code generation", "text analysis"
     tags: list[str] = []       # e.g. ["code", "fast", "large-context"]
     priority: int = 0          # 0 = primary / default
 
+    @field_validator("model_config_id")
+    @classmethod
+    def validate_model_config_id(cls, v: str) -> str:
+        v = str(v).strip()
+        if v.startswith("role:"):
+            role = v[5:]
+            if role not in MODEL_ROLES:
+                raise ValueError(f"Unknown model role: '{role}'. Valid roles: {MODEL_ROLES}")
+            return v
+        # Otherwise must be a valid UUID
+        try:
+            UUID(v)
+        except ValueError:
+            raise ValueError(f"model_config_id must be a valid UUID or 'role:<role_name>', got: '{v}'")
+        return v
+
 
 class AgentModelResponse(BaseModel):
-    id: UUID
-    model_config_id: UUID
+    id: str
+    model_config_id: str
     model_name: str | None = None  # resolved from relationship
     model_display_name: str | None = None
     task_type: str

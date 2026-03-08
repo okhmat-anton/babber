@@ -99,17 +99,32 @@ async def _build_agent_response(
     agent_models = await am_svc.get_by_agent(agent.id)
     agent_models_out = []
     for am in agent_models:
-        mcr = await mc_svc.get_by_id(am.model_config_id)
-        agent_models_out.append(AgentModelResponse(
-            id=UUID(am.id),
-            model_config_id=UUID(am.model_config_id),
-            model_name=mcr.model_id if mcr else None,
-            model_display_name=mcr.name if mcr else None,
-            task_type=am.task_type,
-            tags=am.tags or [],
-            priority=am.priority,
-            created_at=am.created_at,
-        ))
+        mid = am.model_config_id
+        if mid.startswith("role:"):
+            from app.models.model_role import MODEL_ROLE_LABELS
+            role_name = mid[5:]
+            agent_models_out.append(AgentModelResponse(
+                id=am.id,
+                model_config_id=mid,
+                model_name=mid,
+                model_display_name=f"🎭 {MODEL_ROLE_LABELS.get(role_name, role_name)}",
+                task_type=am.task_type,
+                tags=am.tags or [],
+                priority=am.priority,
+                created_at=am.created_at,
+            ))
+        else:
+            mcr = await mc_svc.get_by_id(mid)
+            agent_models_out.append(AgentModelResponse(
+                id=am.id,
+                model_config_id=mid,
+                model_name=mcr.model_id if mcr else None,
+                model_display_name=mcr.name if mcr else None,
+                task_type=am.task_type,
+                tags=am.tags or [],
+                priority=am.priority,
+                created_at=am.created_at,
+            ))
     data["agent_models"] = agent_models_out
     return data
 
