@@ -91,13 +91,18 @@ async def _tts_minimax(db: AsyncIOMotorDatabase, text: str, voice: str | None) -
     if not api_key:
         raise ValueError("MiniMax API key not configured. Set 'minimax_api_key' in System Settings.")
 
+    group_id = await _get_setting(db, "minimax_group_id")
+    if not group_id:
+        raise ValueError("MiniMax Group ID not configured. Set 'minimax_group_id' in System Settings.")
+
     voice = voice or "male-qn-qingse"
     filename = f"{uuid.uuid4().hex}.mp3"
     filepath = AUDIO_DIR / filename
 
+    url = f"https://api.minimaxi.com/v1/t2a_v2?GroupId={group_id}"
     async with httpx.AsyncClient(timeout=60) as client:
         resp = await client.post(
-            "https://api.minimaxi.com/v1/t2a_v2",
+            url,
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
@@ -119,11 +124,21 @@ async def _tts_minimax(db: AsyncIOMotorDatabase, text: str, voice: str | None) -
             },
         )
         if resp.status_code != 200:
-            raise ValueError(f"MiniMax TTS error: {resp.status_code} {resp.text[:500]}")
+            raise ValueError(f"MiniMax TTS HTTP error: {resp.status_code} {resp.text[:500]}")
 
         data = resp.json()
-        if data.get("base_resp", {}).get("status_code", 0) != 0:
-            raise ValueError(f"MiniMax TTS error: {data.get('base_resp', {})}")
+        base_resp = data.get("base_resp", {})
+        status_code = base_resp.get("status_code", 0)
+        if status_code != 0:
+            status_msg = base_resp.get("status_msg", "unknown error")
+            if status_code == 2049 or "invalid api key" in status_msg.lower():
+                raise ValueError(
+                    f"MiniMax API key is invalid. Please check your API key in Settings → Audio & AI API Keys. "
+                    f"(MiniMax error: {status_msg})"
+                )
+            elif status_code == 1004:
+                raise ValueError(f"MiniMax authentication failed: {status_msg}")
+            raise ValueError(f"MiniMax TTS error ({status_code}): {status_msg}")
 
         # MiniMax returns audio data in hex-encoded format or base64
         audio_hex = data.get("data", {}).get("audio", "")

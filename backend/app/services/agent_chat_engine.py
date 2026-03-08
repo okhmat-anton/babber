@@ -120,6 +120,7 @@ class AgentChatEngine:
 
         Supports:
           - 'ollama:modelname' -> direct Ollama
+          - 'role:rolename' -> model role resolution
           - UUID string -> ModelConfig lookup
           - fallback to first active model
         """
@@ -128,6 +129,16 @@ class AgentChatEngine:
         if model_id_str.startswith("ollama:"):
             model_name = model_id_str[7:]
             return ("ollama", settings.OLLAMA_BASE_URL, model_name, None)
+
+        if model_id_str.startswith("role:"):
+            role_name = model_id_str[5:]
+            from app.services.model_role_service import resolve_model_for_role
+            mc = await resolve_model_for_role(self.db, role_name)
+            if not mc:
+                raise ValueError(f"No model assigned for role '{role_name}'")
+            if mc.provider == "ollama":
+                return (mc.provider, settings.OLLAMA_BASE_URL, mc.model_id, mc.api_key)
+            return (mc.provider, mc.base_url or "https://api.openai.com/v1", mc.model_id, mc.api_key or "")
 
         try:
             uid = str(uuid.UUID(model_id_str))
