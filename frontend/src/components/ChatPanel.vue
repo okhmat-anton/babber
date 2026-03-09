@@ -222,6 +222,61 @@
         </v-btn>
       </div>
 
+      <!-- Sticky Todo Tracker (AIS-10) -->
+      <div v-if="currentTodoList?.length" class="sticky-todo-panel">
+        <div class="sticky-todo-header" @click="todoExpanded = !todoExpanded">
+          <div class="d-flex align-center ga-2">
+            <v-icon size="16" color="light-green-accent-3">mdi-format-list-checks</v-icon>
+            <span class="text-caption font-weight-bold">Task List</span>
+            <v-chip size="x-small" variant="tonal" :color="todoProgress?.percent === 100 ? 'success' : 'light-green'">
+              {{ todoProgress?.done || 0 }}/{{ todoProgress?.total || 0 }}
+            </v-chip>
+            <v-spacer />
+            <v-icon size="14" class="todo-chevron" :class="{ 'todo-chevron-collapsed': !todoExpanded }">
+              mdi-chevron-down
+            </v-icon>
+          </div>
+          <!-- Progress bar -->
+          <div class="todo-progress-bar mt-1">
+            <div
+              class="todo-progress-fill"
+              :class="{ 'todo-progress-complete': todoProgress?.percent === 100 }"
+              :style="{ width: (todoProgress?.percent || 0) + '%' }"
+            ></div>
+          </div>
+        </div>
+        <v-expand-transition>
+          <div v-if="todoExpanded" class="sticky-todo-body">
+            <div
+              v-for="item in currentTodoList"
+              :key="item.id"
+              class="sticky-todo-item d-flex align-center"
+            >
+              <v-icon
+                size="16"
+                :color="todoStatusColor(item.status)"
+                class="mr-2 flex-shrink-0"
+              >{{ todoStatusIcon(item.status) }}</v-icon>
+              <span
+                class="text-caption flex-grow-1"
+                :class="{
+                  'text-decoration-line-through text-medium-emphasis': item.status === 'done',
+                  'text-medium-emphasis': item.status === 'skipped',
+                  'font-weight-medium': item.status === 'in_progress'
+                }"
+              >{{ item.task }}</span>
+              <v-chip
+                v-if="item.status === 'in_progress'"
+                size="x-small"
+                variant="tonal"
+                color="orange"
+                class="ml-1 flex-shrink-0"
+              >active</v-chip>
+            </div>
+          </div>
+        </v-expand-transition>
+      </div>
+
       <!-- Messages -->
       <div
         v-for="(msg, msgIndex) in chatStore.messages"
@@ -611,9 +666,36 @@ const summaryInfo = ref(null)
 const summaryExpanded = ref(false)
 const summarizing = ref(false)
 
+// Todo tracker state (AIS-10)
+const todoExpanded = ref(true)
+
 let titleTimeout = null
 
 const modelItems = computed(() => chatStore.availableModels || [])
+
+// ── Todo tracker computed properties (AIS-10) ──
+const currentTodoList = computed(() => {
+  // Walk messages backwards to find the latest todo_list
+  const msgs = chatStore.messages
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].metadata?.todo_list?.length) {
+      return msgs[i].metadata.todo_list
+    }
+  }
+  // Fallback to session-level protocol state
+  return chatStore.currentSession?.protocol_state?.todo_list || null
+})
+
+const todoProgress = computed(() => {
+  const list = currentTodoList.value
+  if (!list?.length) return null
+  const total = list.length
+  const done = list.filter(t => t.status === 'done').length
+  const inProgress = list.filter(t => t.status === 'in_progress').length
+  const skipped = list.filter(t => t.status === 'skipped').length
+  const percent = Math.round(((done + skipped) / total) * 100)
+  return { total, done, inProgress, skipped, percent }
+})
 
 const modelNamesDisplay = computed(() => {
   if (!chatStore.currentSession) return ''
@@ -1610,5 +1692,62 @@ watch(() => chatStore.panelOpen, (open) => {
   padding: 4px 6px;
   border-radius: 4px;
   margin-top: 2px;
+}
+
+/* ── Sticky Todo Tracker (AIS-10) ── */
+.sticky-todo-panel {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #1a2332;
+  border: 1px solid rgba(139, 195, 74, 0.2);
+  border-radius: 8px;
+  margin: 4px 8px 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+.sticky-todo-header {
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+  user-select: none;
+}
+.sticky-todo-header:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.todo-chevron {
+  transition: transform 0.2s ease;
+}
+.todo-chevron-collapsed {
+  transform: rotate(-90deg);
+}
+.todo-progress-bar {
+  height: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.todo-progress-fill {
+  height: 100%;
+  background: #8bc34a;
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+.todo-progress-complete {
+  background: #4caf50;
+}
+.sticky-todo-body {
+  border-top: 1px solid rgba(139, 195, 74, 0.1);
+  padding: 4px 12px 8px;
+  max-height: 250px;
+  overflow-y: auto;
+}
+.sticky-todo-item {
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  line-height: 1.4;
+}
+.sticky-todo-item:last-child {
+  border-bottom: none;
 }
 </style>
