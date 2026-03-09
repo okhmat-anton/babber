@@ -21,6 +21,7 @@ MODEL_ROLES = [
     "sound_generation",    # Sound generation
     "speech_recognition",  # Speech recognition (speech-to-text)
     "translation",         # Translation
+    "task_decomposition",  # Deep task decomposition
     "dialog",              # Simple dialog
     "base",                # Base model (fallback)
 ]
@@ -40,6 +41,7 @@ MODEL_ROLE_LABELS = {
     "sound_generation": "Sound Generation",
     "speech_recognition": "Speech Recognition",
     "translation": "Translation",
+    "task_decomposition": "Deep Task Decomposition",
     "dialog": "Simple Dialog",
     "base": "Base Model",
 }

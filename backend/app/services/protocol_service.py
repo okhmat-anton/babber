@@ -326,6 +326,158 @@ DEFAULT_PROTOCOLS = [
         ],
     },
 
+    {
+        "name": "Deep Task Decomposition",
+        "description": "Break down complex tasks into atomic sub-tasks — eat the elephant piece by piece. Recursively decomposes until every item is a simple, concrete action.",
+        "type": "standard",
+        "is_default": False,
+        "steps": [
+            {
+                "id": "dtd_0_understand",
+                "type": "action",
+                "name": "Understand the Goal",
+                "category": "analysis",
+                "model_role": "task_decomposition",
+                "instruction": (
+                    "Analyze the task at a high level:\n"
+                    "1. **What** is the end goal? What does 'done' look like?\n"
+                    "2. **Why** is this needed? Understanding purpose helps decompose correctly.\n"
+                    "3. **Scope** — What is included and what is explicitly out of scope?\n"
+                    "4. **Constraints** — Time, technology, dependencies, prerequisites.\n"
+                    "5. **Inputs available** — What do we already have to work with?\n"
+                    "6. **Risks** — What could go wrong? What unknowns exist?\n"
+                    "\n"
+                    "Complexity assessment:\n"
+                    "  - **Trivial** → No decomposition needed, just do it.\n"
+                    "  - **Simple** → 2-5 clear steps, light decomposition.\n"
+                    "  - **Medium** → Multiple components, needs structured breakdown.\n"
+                    "  - **Complex** → Multiple layers, cross-cutting concerns, deep decomposition required."
+                ),
+            },
+            {
+                "id": "dtd_1_first_level",
+                "type": "action",
+                "name": "First Level Breakdown",
+                "category": "planning",
+                "model_role": "task_decomposition",
+                "instruction": (
+                    "Break the task into major components or phases (3-7 top-level items).\n"
+                    "Each component should represent a distinct, meaningful chunk of work.\n"
+                    "\n"
+                    "For each component identify:\n"
+                    "- **Name** — Short, descriptive label\n"
+                    "- **Purpose** — What this component achieves\n"
+                    "- **Dependencies** — What must be done before this\n"
+                    "- **Estimated complexity** — Trivial / Simple / Medium / Complex\n"
+                    "\n"
+                    "Order components by dependency (things that need to happen first go first).\n"
+                    "This is the skeleton — we will decompose each component further."
+                ),
+            },
+            {
+                "id": "dtd_2_deep_loop",
+                "type": "loop",
+                "name": "Deep Decomposition",
+                "category": "planning",
+                "instruction": "For each component marked as Medium or Complex, recursively break it down further until every sub-task is atomic.",
+                "max_iterations": 5,
+                "exit_condition": "Every item in the task list is an atomic action (can be done in 1-2 simple steps with no ambiguity)",
+                "steps": [
+                    {
+                        "id": "dtd_2_0_decompose",
+                        "type": "action",
+                        "name": "Decompose Next Component",
+                        "model_role": "task_decomposition",
+                        "instruction": (
+                            "Take the next non-atomic component and break it into smaller sub-tasks.\n"
+                            "\n"
+                            "**Atomic task criteria** — a task is atomic when:\n"
+                            "- It can be completed in one sitting (minutes, not hours)\n"
+                            "- It has a single, clear action (create, read, write, configure, test, etc.)\n"
+                            "- The expected output is obvious and verifiable\n"
+                            "- No further decisions are needed to execute it\n"
+                            "- A junior developer or a focused AI could do it without asking questions\n"
+                            "\n"
+                            "**Decomposition rules:**\n"
+                            "- Each sub-task should be 1 concrete action (not 'implement feature X' but 'create file Y with function Z')\n"
+                            "- Include verification steps (e.g., 'run tests', 'check output', 'verify file exists')\n"
+                            "- Name tasks as imperative verbs: Create, Write, Add, Configure, Test, Verify, Update\n"
+                            "- Preserve dependency order within the component\n"
+                            "- If a sub-task is still complex, mark it for further decomposition"
+                        ),
+                    },
+                    {
+                        "id": "dtd_2_1_check",
+                        "type": "decision",
+                        "name": "All Tasks Atomic?",
+                        "instruction": "Review the full task list. Are there any remaining items that are not atomic (still too vague, too large, or require further decisions)?",
+                        "exit_condition": "If ALL tasks are atomic → exit loop. If any tasks are still complex → continue decomposing.",
+                    },
+                ],
+            },
+            {
+                "id": "dtd_3_build_plan",
+                "type": "todo",
+                "name": "Build Execution Plan",
+                "category": "planning",
+                "instruction": (
+                    "Convert the fully decomposed task tree into a flat, ordered execution plan.\n"
+                    "\n"
+                    "Ordering rules:\n"
+                    "- Respect dependencies (prerequisites first)\n"
+                    "- Group related tasks together\n"
+                    "- Place verification/test steps right after the thing they verify\n"
+                    "- Number every task sequentially\n"
+                    "\n"
+                    "Each task in the todo list should be:\n"
+                    "- A single atomic action\n"
+                    "- Phrased as an imperative (e.g., 'Create utils.py with helper functions')\n"
+                    "- Self-contained — readable without needing surrounding context"
+                ),
+            },
+            {
+                "id": "dtd_4_execute",
+                "type": "loop",
+                "name": "Execute Tasks",
+                "category": "execution",
+                "instruction": "Work through the todo list task by task. Mark each as done when complete. If a task reveals unexpected complexity, decompose it further before continuing.",
+                "max_iterations": 20,
+                "exit_condition": "All tasks in the todo list are done or skipped",
+                "steps": [
+                    {
+                        "id": "dtd_4_0_do",
+                        "type": "action",
+                        "name": "Execute Next Task",
+                        "instruction": "Pick the next pending task from the todo list. Execute it. Mark it as done. Update the todo list. If the task is blocked, skip it and note why.",
+                    },
+                    {
+                        "id": "dtd_4_1_verify",
+                        "type": "decision",
+                        "name": "Check Progress",
+                        "instruction": "Is the todo list complete? Are there any blocked or failed tasks that need replanning?",
+                        "exit_condition": "If all done → exit. If blocked tasks remain → add decomposed alternatives and continue.",
+                    },
+                ],
+            },
+            {
+                "id": "dtd_5_summary",
+                "type": "action",
+                "name": "Deliver Results",
+                "category": "output",
+                "instruction": (
+                    "Present the final results:\n"
+                    "1. **Summary** — What was accomplished\n"
+                    "2. **Task breakdown** — The decomposition tree (for reference)\n"
+                    "3. **Deliverables** — Files created, code written, actions taken\n"
+                    "4. **Issues encountered** — Anything that was harder than expected\n"
+                    "5. **Remaining items** — Skipped/blocked tasks, if any\n"
+                    "\n"
+                    "Signal completion: <<<DELEGATE_DONE:Task decomposition and execution complete>>>"
+                ),
+            },
+        ],
+    },
+
     # ═══════════════════════════════════════════════════════════
     # MID-LEVEL ORCHESTRATORS
     # ═══════════════════════════════════════════════════════════
@@ -482,6 +634,7 @@ DEFAULT_PROTOCOLS = [
                     "**Protocol selection guide:**\n"
                     "- Coding task → `Development Orchestrator` (complex) or `Programmer` (simple)\n"
                     "- Bug fixing → `Programmer` + optionally `Tester`\n"
+                    "- Complex multi-step task → `Deep Task Decomposition`\n"
                     "- Research question → `Research & Analysis`\n"
                     "- General problem → `Standard Problem Solving`\n"
                     "- Creative writing → `Creative Writer`\n"
@@ -551,13 +704,18 @@ DEFAULT_PROTOCOLS = [
 
 
 async def create_default_protocols(db: AsyncIOMotorDatabase):
-    """Create default thinking protocols if they don't exist."""
+    """Create default thinking protocols if they don't exist.
+    Also adds any new default protocols that were added after initial setup.
+    """
     svc = ThinkingProtocolService(db)
     count = await svc.count()
-    if count > 0:
-        return  # Protocols already exist
 
-    # First pass: create all protocols
+    if count > 0:
+        # Existing installation — check for missing default protocols and add them
+        await _ensure_new_default_protocols(db)
+        return
+
+    # First-time setup: create all protocols
     proto_map = {}  # name -> MongoThinkingProtocol instance
     for proto_data in DEFAULT_PROTOCOLS:
         proto = MongoThinkingProtocol(
@@ -613,6 +771,45 @@ async def create_default_protocols(db: AsyncIOMotorDatabase):
             if step.get("type") == "delegate":
                 step["protocol_ids"] = all_standard_ids
         await svc.update(adaptive.id, {"steps": steps})
+
+
+async def _ensure_new_default_protocols(db: AsyncIOMotorDatabase):
+    """Add any default protocols that are missing from an existing installation.
+    This allows new protocol templates to be auto-created on server restart
+    without overwriting user-modified protocols.
+    """
+    svc = ThinkingProtocolService(db)
+    existing = await svc.get_all(limit=500)
+    existing_names = {p.name for p in existing}
+
+    created = []
+    for proto_data in DEFAULT_PROTOCOLS:
+        if proto_data["name"] not in existing_names:
+            proto = MongoThinkingProtocol(
+                name=proto_data["name"],
+                description=proto_data["description"],
+                type=proto_data.get("type", "standard"),
+                steps=proto_data["steps"],
+                is_default=proto_data.get("is_default", False),
+            )
+            proto = await svc.create(proto)
+            created.append(proto)
+
+    if created:
+        names = ", ".join(p.name for p in created)
+        print(f"[PROTOCOLS] Added {len(created)} new default protocol(s): {names}")
+
+        # Wire new protocols into existing orchestrators' delegate steps
+        all_protos = await svc.get_all(limit=500)
+        all_non_master_ids = [str(p.id) for p in all_protos if p.name != "Master Orchestrator"]
+
+        master = next((p for p in all_protos if p.name == "Master Orchestrator"), None)
+        if master:
+            steps = list(master.steps)
+            for step in steps:
+                if step.get("type") == "delegate":
+                    step["protocol_ids"] = all_non_master_ids
+            await svc.update(master.id, {"steps": steps})
 
 
 async def deduplicate_protocols(db: AsyncIOMotorDatabase):
