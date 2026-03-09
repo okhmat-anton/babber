@@ -7,41 +7,41 @@ from pydantic import BaseModel, Field
 
 # All available model roles
 MODEL_ROLES = [
-    "understanding",       # Понимание запроса
-    "planning",            # Планирование действий
-    "code_generation",     # Генерация кода
-    "text_documents",      # Работа с текстом и документами
-    "data_analysis",       # Анализ данных
-    "embedding",           # Поиск (эмбеддинг модель)
-    "json_output",         # Структурированный вывод json
-    "creative",            # Креативная генерация
-    "validation",          # Валидация и проверка качества
-    "photo_analysis",      # Анализ фото
-    "video_analysis",      # Анализ видео
-    "sound_generation",    # Генерация звука
-    "speech_recognition",  # Распознавание звука (перевод в текст)
-    "translation",         # Перевод
-    "dialog",              # Простой диалог
-    "base",                # Базовая модель (fallback)
+    "understanding",       # Query understanding
+    "planning",            # Action planning
+    "code_generation",     # Code generation
+    "text_documents",      # Text and document processing
+    "data_analysis",       # Data analysis
+    "embedding",           # Search (embedding model)
+    "json_output",         # Structured JSON output
+    "creative",            # Creative generation
+    "validation",          # Validation and quality check
+    "photo_analysis",      # Photo analysis
+    "video_analysis",      # Video analysis
+    "sound_generation",    # Sound generation
+    "speech_recognition",  # Speech recognition (speech-to-text)
+    "translation",         # Translation
+    "dialog",              # Simple dialog
+    "base",                # Base model (fallback)
 ]
 
 MODEL_ROLE_LABELS = {
-    "understanding": "Понимание запроса",
-    "planning": "Планирование действий",
-    "code_generation": "Генерация кода",
-    "text_documents": "Работа с текстом и документами",
-    "data_analysis": "Анализ данных",
-    "embedding": "Поиск (эмбеддинг)",
-    "json_output": "Структурированный вывод JSON",
-    "creative": "Креативная генерация",
-    "validation": "Валидация и проверка качества",
-    "photo_analysis": "Анализ фото",
-    "video_analysis": "Анализ видео",
-    "sound_generation": "Генерация звука",
-    "speech_recognition": "Распознавание звука",
-    "translation": "Перевод",
-    "dialog": "Простой диалог",
-    "base": "Базовая модель",
+    "understanding": "Query Understanding",
+    "planning": "Action Planning",
+    "code_generation": "Code Generation",
+    "text_documents": "Text & Documents",
+    "data_analysis": "Data Analysis",
+    "embedding": "Search (Embedding)",
+    "json_output": "Structured JSON Output",
+    "creative": "Creative Generation",
+    "validation": "Validation & QA",
+    "photo_analysis": "Photo Analysis",
+    "video_analysis": "Video Analysis",
+    "sound_generation": "Sound Generation",
+    "speech_recognition": "Speech Recognition",
+    "translation": "Translation",
+    "dialog": "Simple Dialog",
+    "base": "Base Model",
 }
 
 

@@ -271,7 +271,7 @@
           <div v-if="agent.mission" class="mt-4">
             <div class="text-subtitle-2 mb-1">
               <v-icon size="16" class="mr-1">mdi-flag-checkered</v-icon>
-              Моя основная миссия
+              My Core Mission
             </div>
             <v-sheet rounded class="pa-3 bg-grey-darken-4" style="white-space: pre-wrap; font-size: 14px;">{{ agent.mission }}</v-sheet>
           </div>
@@ -1981,7 +1981,7 @@ const previewVoice = async (voice) => {
   voicePreviewing.value = true
   try {
     if (previewAudio) { previewAudio.pause(); previewAudio = null }
-    const { data } = await api.post('/audio/tts', { text: 'Hello! This is a voice demo. Привет, это демонстрация голоса.', voice })
+    const { data } = await api.post('/audio/tts', { text: 'Hello! This is a voice demo. Testing text-to-speech synthesis.', voice })
     // Download and cache as data URL in localStorage
     const resp = await fetch(data.audio_url)
     const blob = await resp.blob()

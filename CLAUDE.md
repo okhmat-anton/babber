@@ -1,5 +1,11 @@
 # CLAUDE.md — Project Context for AI Agents Server
 
+## Language Policy
+
+**All code, comments, prompts, commit messages, UI labels, and documentation in this project MUST be written in American English.** No Russian or other non-English text in string literals, comments, log messages, or user-facing labels. The only exceptions are:
+- Regex patterns that match Russian user input (e.g., `SEARCH_KEYWORDS_RU`, `GREETING_RU`) — these are functional and must remain bilingual
+- Russian question words used for intent detection (e.g., `'как ', 'что '`) — functional input matchers
+
 ## Project Overview
 
 AI Agents Server — full-stack platform for managing AI agents with LLM integration (Ollama, OpenAI-compatible). Python FastAPI backend + Vue 3 / Vuetify 3 frontend. All infrastructure runs in Docker, backend and frontend can run locally for dev.

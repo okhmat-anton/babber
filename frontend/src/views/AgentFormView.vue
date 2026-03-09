@@ -47,7 +47,7 @@
               <v-textarea v-model="form.description" label="Description" rows="2" />
             </v-col>
             <v-col cols="12">
-              <v-textarea v-model="form.mission" label="Моя основная миссия" rows="3" hint="Это задаётся пользователем и не может быть изменено агентом" persistent-hint />
+              <v-textarea v-model="form.mission" label="My Core Mission" rows="3" hint="This is set by the user and cannot be changed by the agent" persistent-hint />
             </v-col>
             <v-col cols="12">
               <v-textarea v-model="form.system_prompt" label="System Prompt" rows="4" />
@@ -368,7 +368,7 @@ const previewVoice = async (voice) => {
   voicePreviewing.value = true
   try {
     if (previewAudio) { previewAudio.pause(); previewAudio = null }
-    const { data } = await api.post('/audio/tts', { text: 'Hello! This is a voice demo. Привет, это демонстрация голоса.', voice })
+    const { data } = await api.post('/audio/tts', { text: 'Hello! This is a voice demo. Testing text-to-speech synthesis.', voice })
     // Download and cache as data URL in localStorage
     const resp = await fetch(data.audio_url)
     const blob = await resp.blob()

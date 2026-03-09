@@ -1157,18 +1157,18 @@ async def _handle_incoming_message(
                         {"chat_id": str(event.chat_id), "text_preview": transcribed[:200]},
                     )
                 elif not message_text.strip():
-                    message_text = "[Пользователь отправил голосовое сообщение, но распознать его не удалось. Попросите повторить текстом.]"
+                    message_text = "[User sent a voice message, but it could not be recognized. Please ask them to repeat in text.]"
 
             # Photo → describe
             elif media_type == "photo":
                 if not message_text.strip():
-                    message_text = "[Фотография]"
+                    message_text = "[Photo]"
                 else:
-                    message_text = f"[Фотография] {message_text}"
+                    message_text = f"[Photo] {message_text}"
 
             # Video / video_note
             elif media_type in ("video", "video_note"):
-                label = "Видео" if media_type == "video" else "Видеосообщение"
+                label = "Video" if media_type == "video" else "Video Message"
                 if not message_text.strip():
                     message_text = f"[{label}]"
                 else:
@@ -1177,15 +1177,15 @@ async def _handle_incoming_message(
             # Sticker
             elif media_type == "sticker":
                 if not message_text.strip():
-                    message_text = "[Стикер]"
+                    message_text = "[Sticker]"
 
             # Document
             elif media_type == "document":
                 name_part = f": {media_filename}" if media_filename else ""
                 if not message_text.strip():
-                    message_text = f"[Документ{name_part}]"
+                    message_text = f"[Document{name_part}]"
                 else:
-                    message_text = f"[Документ{name_part}] {message_text}"
+                    message_text = f"[Document{name_part}] {message_text}"
 
         except Exception as e:
             logger.error(f"Error downloading media for {messenger_id}: {e}")
@@ -1195,7 +1195,7 @@ async def _handle_incoming_message(
                 {"chat_id": str(event.chat_id), "error": str(e)},
             )
             if not message_text.strip():
-                message_text = f"[{media_type} — ошибка загрузки]"
+                message_text = f"[{media_type} — download error]"
 
     # Skip completely empty messages (no text AND no media)
     if not message_text.strip():

@@ -198,7 +198,7 @@ def _infer_args(skill_name: str, planned_args: dict, context: dict) -> dict:
                 args["path"] = path_match.group(1)
         # Extract content from user input (quoted or after keywords)
         if "content" not in args or not args["content"]:
-            # Try 'содержимым "X"' or 'content "X"' patterns
+            # Try 'содержимым "X"' / 'content "X"' patterns (RU + EN)
             content_match = re.search(
                 r"(?:содержим(?:ое|ым)\s+|content\s+)['\"](.+?)['\"]",
                 user_input, re.I,
@@ -206,7 +206,7 @@ def _infer_args(skill_name: str, planned_args: dict, context: dict) -> dict:
             if content_match:
                 args["content"] = content_match.group(1)
             else:
-                # Try 'с текстом "X"' pattern
+                # Try 'с текстом "X"' / 'with text "X"' pattern (RU + EN)
                 content_match2 = re.search(
                     r"(?:с\s+текстом\s+|with\s+text\s+)['\"](.+?)['\"]",
                     user_input, re.I,
@@ -1883,12 +1883,12 @@ JSON only:
             gathered_text = "\n\n".join(gathered_sections)
             messages.append({"role": "user", "content": user_input})
             messages.append({"role": "assistant", "content": (
-                "Я выполнил поиск и получил следующие данные:\n\n"
+                "I performed a search and obtained the following data:\n\n"
                 + gathered_text
-                + "\n\nДавай обработаю эту информацию для тебя."
+                + "\n\nLet me process this information for you."
             )})
             messages.append({"role": "user", "content": (
-                "Отлично, теперь на основе этих данных дай мне полный ответ на мой вопрос: "
+                "Great, now based on this data give me a complete answer to my question: "
                 + user_input
             )})
         else:

@@ -10,8 +10,8 @@ class GoalItem(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     title: str = ""
     description: str = ""
-    target_date: Optional[str] = None          # желаемая дата (ISO или произвольный текст)
-    children: List["GoalItem"] = Field(default_factory=list)  # подцели
+    target_date: Optional[str] = None          # target date (ISO or free-form text)
+    children: List["GoalItem"] = Field(default_factory=list)  # sub-goals
 
 
 class DreamItem(BaseModel):
@@ -32,16 +32,16 @@ class MongoCreatorProfile(BaseModel):
     """Creator profile — info about the person who manages the bots."""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: Optional[str] = None
-    who: Optional[str] = None            # кто он
-    goals: List[GoalItem] = Field(default_factory=list)          # цели
-    dreams: List[DreamItem] = Field(default_factory=list)        # мечты
-    skills_and_abilities: Optional[str] = None  # умения и навыки
-    current_situation: Optional[str] = None     # текущая ситуация
-    principles: Optional[str] = None     # принципы
-    successes: Optional[str] = None      # успехи
-    failures: Optional[str] = None       # неудачи
-    action_history: Optional[str] = None # история попыток действий
-    ideas: List[IdeaItem] = Field(default_factory=list)          # идеи
+    who: Optional[str] = None            # who they are
+    goals: List[GoalItem] = Field(default_factory=list)          # goals
+    dreams: List[DreamItem] = Field(default_factory=list)        # dreams
+    skills_and_abilities: Optional[str] = None  # skills and abilities
+    current_situation: Optional[str] = None     # current situation
+    principles: Optional[str] = None     # principles
+    successes: Optional[str] = None      # successes
+    failures: Optional[str] = None       # failures
+    action_history: Optional[str] = None # action attempt history
+    ideas: List[IdeaItem] = Field(default_factory=list)          # ideas
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
