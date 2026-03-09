@@ -46,7 +46,7 @@
             <template #item.provider="{ item }">
               <v-chip
                 size="small" variant="tonal"
-                :color="item.provider === 'ollama' ? 'green' : item.provider === 'openai_compatible' ? 'blue' : 'grey'"
+                :color="item.provider === 'ollama' ? 'green' : item.provider === 'anthropic' ? 'deep-purple' : item.provider === 'openai_compatible' ? 'blue' : 'grey'"
               >{{ item.provider }}</v-chip>
             </template>
             <template #item.roles="{ item }">
@@ -290,11 +290,24 @@
         <v-card-title>{{ editItem ? 'Edit Model' : 'Add Model' }}</v-card-title>
         <v-card-text>
           <v-text-field v-model="form.name" label="Display Name" hint="e.g. My Ollama Coder" class="mb-2" />
-          <v-text-field v-model="form.model_id" label="Model ID" hint="e.g. qwen2.5-coder:14b" class="mb-2" />
-          <v-select v-model="form.provider" :items="['ollama','openai_compatible','custom']" label="Provider" class="mb-2" />
-          <v-text-field v-model="form.base_url" label="Base URL" class="mb-2" />
-          <v-text-field v-model="form.api_key" label="API Key (optional)" class="mb-2" />
+          <v-select v-model="form.provider" :items="providerOptions" item-title="label" item-value="value" label="Provider" class="mb-2" @update:model-value="onProviderChange" />
+          <v-select
+            v-if="form.provider === 'anthropic'"
+            v-model="form.model_id"
+            :items="anthropicModelOptions"
+            item-title="label"
+            item-value="value"
+            label="Claude Model"
+            class="mb-2"
+            :loading="loadingAnthropicModels"
+          />
+          <v-text-field v-else v-model="form.model_id" label="Model ID" hint="e.g. qwen2.5-coder:14b" class="mb-2" />
+          <v-text-field v-model="form.base_url" label="Base URL" class="mb-2" :disabled="form.provider === 'anthropic'" />
+          <v-text-field v-model="form.api_key" label="API Key (optional)" class="mb-2" :hint="form.provider === 'anthropic' ? 'Leave empty to use key from Settings' : ''" />
           <v-checkbox v-model="form.is_active" label="Active" />
+          <v-alert v-if="form.provider === 'anthropic' && !anthropicKeyConfigured && !form.api_key" type="warning" variant="tonal" density="compact" class="mt-1">
+            No Anthropic API key found. Set it in <router-link to="/settings" class="text-primary font-weight-medium">Settings</router-link> or enter one above.
+          </v-alert>
         </v-card-text>
         <v-card-actions>
           <v-spacer />
@@ -570,6 +583,47 @@ const modelHeaders = [
 
 const defaultForm = () => ({ name: '', model_id: '', provider: 'ollama', base_url: 'http://host.docker.internal:11434', api_key: '', is_active: true })
 const form = ref(defaultForm())
+
+// Provider options
+const providerOptions = [
+  { value: 'ollama', label: 'Ollama' },
+  { value: 'anthropic', label: 'Anthropic (Claude)' },
+  { value: 'openai_compatible', label: 'OpenAI Compatible' },
+  { value: 'custom', label: 'Custom' },
+]
+
+// Anthropic models
+const anthropicModels = ref([])
+const anthropicKeyConfigured = ref(false)
+const loadingAnthropicModels = ref(false)
+
+const anthropicModelOptions = computed(() =>
+  anthropicModels.value.map(m => ({ value: m.id, label: `${m.name} (${m.id})` }))
+)
+
+const fetchAnthropicModels = async () => {
+  loadingAnthropicModels.value = true
+  try {
+    const { data } = await api.get('/settings/anthropic/models')
+    anthropicModels.value = data.models || []
+    anthropicKeyConfigured.value = data.configured
+  } catch { anthropicModels.value = [] }
+  finally { loadingAnthropicModels.value = false }
+}
+
+const onProviderChange = (provider) => {
+  if (provider === 'anthropic') {
+    form.value.base_url = 'https://api.anthropic.com'
+    if (!form.value.model_id || !form.value.model_id.startsWith('claude')) {
+      form.value.model_id = anthropicModels.value.length ? anthropicModels.value[0].id : 'claude-sonnet-4-20250514'
+    }
+    if (!form.value.name) form.value.name = 'Claude'
+  } else if (provider === 'ollama') {
+    form.value.base_url = 'http://host.docker.internal:11434'
+  } else {
+    form.value.base_url = ''
+  }
+}
 
 const showDialog = (item = null) => {
   editItem.value = item
@@ -1101,6 +1155,7 @@ const sendChat = async () => {
 onMounted(async () => {
   settingsStore.fetchModels()
   fetchRoles()
+  fetchAnthropicModels()
   await fetchOllamaStatus()
   await Promise.all([fetchOllamaModels(), fetchOllamaRunning()])
 })

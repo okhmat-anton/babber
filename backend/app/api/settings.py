@@ -122,10 +122,14 @@ async def test_model(
 
     from app.llm.ollama import OllamaProvider
     from app.llm.openai_compatible import OpenAICompatibleProvider
+    from app.llm.anthropic import AnthropicProvider
 
     try:
         if model.provider == "ollama":
             provider = OllamaProvider(model.base_url)
+        elif model.provider == "anthropic":
+            api_key = model.api_key or await get_setting_value(db, "anthropic_api_key")
+            provider = AnthropicProvider(api_key=api_key, base_url=model.base_url or "https://api.anthropic.com")
         else:
             provider = OpenAICompatibleProvider(model.base_url, model.api_key)
         connected = await provider.check_connection()
@@ -149,16 +153,52 @@ async def list_available_models(
 
     from app.llm.ollama import OllamaProvider
     from app.llm.openai_compatible import OpenAICompatibleProvider
+    from app.llm.anthropic import AnthropicProvider
 
     try:
         if model.provider == "ollama":
             provider = OllamaProvider(model.base_url)
+        elif model.provider == "anthropic":
+            api_key = model.api_key or await get_setting_value(db, "anthropic_api_key")
+            provider = AnthropicProvider(api_key=api_key, base_url=model.base_url or "https://api.anthropic.com")
         else:
             provider = OpenAICompatibleProvider(model.base_url, model.api_key)
         models = await provider.list_models()
         return {"models": models}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# --- Anthropic ---
+@router.get("/anthropic/models")
+async def get_anthropic_models(
+    _user: MongoUser = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Return available Anthropic models and whether the key is configured."""
+    from app.llm.anthropic import ANTHROPIC_MODELS
+    api_key = await get_setting_value(db, "anthropic_api_key")
+    return {
+        "configured": bool(api_key),
+        "models": ANTHROPIC_MODELS,
+    }
+
+
+@router.post("/anthropic/test")
+async def test_anthropic_connection(
+    _user: MongoUser = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Test Anthropic API connection using stored key."""
+    api_key = await get_setting_value(db, "anthropic_api_key")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Anthropic API key not configured")
+    from app.llm.anthropic import AnthropicProvider
+    provider = AnthropicProvider(api_key=api_key)
+    connected = await provider.check_connection()
+    if connected:
+        return {"status": "ok", "message": "Anthropic API connection successful"}
+    raise HTTPException(status_code=400, detail="Connection failed — check your API key")
 
 
 # --- Model Roles ---
@@ -292,6 +332,8 @@ _DEFAULT_SETTINGS = {
     # Audio / TTS / STT via kie.ai
     "kieai_api_key": {"value": "", "description": "kie.ai API key for TTS/STT (ElevenLabs proxy)"},
     "tts_timeout": {"value": "120", "description": "Maximum time (seconds) to wait for TTS audio generation. kie.ai processes async, so longer texts need more time."},
+    # Anthropic
+    "anthropic_api_key": {"value": "", "description": "Anthropic API key for Claude models (claude-sonnet-4, claude-opus-4, etc.)"},
 }
 
 

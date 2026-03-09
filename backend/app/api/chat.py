@@ -29,6 +29,7 @@ from app.mongodb.services import (
 from app.llm.base import Message, GenerationParams, LLMResponse
 from app.llm.ollama import OllamaProvider
 from app.llm.openai_compatible import OpenAICompatibleProvider
+from app.llm.anthropic import AnthropicProvider
 from app.api.agent_files import read_agent_config, read_agent_settings
 from app.api.agent_beliefs import read_beliefs
 from app.services.protocol_executor import (
@@ -237,6 +238,10 @@ async def _resolve_model(model_id_str: str, db: AsyncIOMotorDatabase) -> tuple[s
         settings = get_settings()
         if mc.provider == "ollama":
             return (mc.provider, settings.OLLAMA_BASE_URL, mc.model_id, mc.api_key)
+        if mc.provider == "anthropic" and not mc.api_key:
+            from app.api.settings import get_setting_value
+            anthropic_key = await get_setting_value(db, "anthropic_api_key")
+            return (mc.provider, mc.base_url or "https://api.anthropic.com", mc.model_id, anthropic_key)
         return (mc.provider, mc.base_url, mc.model_id, mc.api_key)
 
     try:
@@ -256,6 +261,12 @@ async def _resolve_model(model_id_str: str, db: AsyncIOMotorDatabase) -> tuple[s
     if mc.provider == "ollama":
         settings = get_settings()
         return (mc.provider, settings.OLLAMA_BASE_URL, mc.model_id, mc.api_key)
+
+    # For Anthropic: resolve api_key from system settings if not stored on model
+    if mc.provider == "anthropic" and not mc.api_key:
+        from app.api.settings import get_setting_value
+        anthropic_key = await get_setting_value(db, "anthropic_api_key")
+        return (mc.provider, mc.base_url or "https://api.anthropic.com", mc.model_id, anthropic_key)
 
     return (mc.provider, mc.base_url, mc.model_id, mc.api_key)
 
@@ -326,6 +337,8 @@ async def _chat_with_model(
 
     if provider == "ollama":
         llm = OllamaProvider(base_url)
+    elif provider == "anthropic":
+        llm = AnthropicProvider(api_key=api_key, base_url=base_url)
     else:
         llm = OpenAICompatibleProvider(base_url, api_key)
 

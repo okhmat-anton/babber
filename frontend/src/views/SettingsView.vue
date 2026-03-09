@@ -147,6 +147,66 @@
       </v-card-text>
     </v-card>
 
+    <!-- Anthropic (Claude) API -->
+    <v-card class="mb-6">
+      <v-card-title>
+        <v-icon class="mr-2" color="deep-purple">mdi-creation</v-icon>Anthropic (Claude)
+      </v-card-title>
+      <v-card-text>
+        <v-row>
+          <v-col cols="12" md="8">
+            <v-text-field
+              v-model="anthropicSettings.anthropic_api_key"
+              label="Anthropic API Key"
+              :type="showAnthropicKey ? 'text' : 'password'"
+              variant="outlined"
+              density="compact"
+              hide-details
+              placeholder="sk-ant-..."
+              :append-inner-icon="showAnthropicKey ? 'mdi-eye-off' : 'mdi-eye'"
+              @click:append-inner="showAnthropicKey = !showAnthropicKey"
+            />
+          </v-col>
+          <v-col cols="12" md="4" class="d-flex align-center ga-2">
+            <v-btn
+              color="primary"
+              :disabled="!anthropicSettingsChanged"
+              :loading="savingAnthropic"
+              @click="saveAnthropicSettings"
+            >
+              <v-icon start>mdi-content-save</v-icon>
+              Save
+            </v-btn>
+            <v-btn
+              variant="tonal"
+              color="info"
+              :loading="testingAnthropic"
+              :disabled="!anthropicSettings.anthropic_api_key"
+              @click="testAnthropicConnection"
+            >
+              <v-icon start>mdi-connection</v-icon>
+              Test
+            </v-btn>
+          </v-col>
+        </v-row>
+        <v-alert
+          v-if="anthropicTestResult"
+          :type="anthropicTestResult.type"
+          variant="tonal"
+          density="compact"
+          class="mt-3"
+          closable
+          @click:close="anthropicTestResult = null"
+        >
+          {{ anthropicTestResult.message }}
+        </v-alert>
+        <v-alert type="info" variant="tonal" density="compact" class="mt-3">
+          Get your API key at <a href="https://console.anthropic.com/settings/keys" target="_blank" class="text-primary">console.anthropic.com</a>.
+          After saving the key, select "anthropic" as provider when adding a model in <strong>Models</strong>.
+        </v-alert>
+      </v-card-text>
+    </v-card>
+
     <v-row>
       <v-col cols="6">
         <v-card>
@@ -210,6 +270,7 @@
 <script setup>
 import { ref, inject, onMounted, computed } from 'vue'
 import { useSettingsStore } from '../stores/settings'
+import api from '../api'
 
 const store = useSettingsStore()
 const showSnackbar = inject('showSnackbar')
@@ -240,6 +301,18 @@ const savingAudio = ref(false)
 const audioSettingsChanged = computed(() => {
   return audioSettings.value.kieai_api_key !== originalAudioSettings.value.kieai_api_key
     || String(audioSettings.value.tts_timeout) !== String(originalAudioSettings.value.tts_timeout)
+})
+
+// Anthropic settings
+const anthropicSettings = ref({ anthropic_api_key: '' })
+const originalAnthropicSettings = ref({ anthropic_api_key: '' })
+const showAnthropicKey = ref(false)
+const savingAnthropic = ref(false)
+const testingAnthropic = ref(false)
+const anthropicTestResult = ref(null)
+
+const anthropicSettingsChanged = computed(() => {
+  return anthropicSettings.value.anthropic_api_key !== originalAnthropicSettings.value.anthropic_api_key
 })
 
 // Confirmation dialog
@@ -279,10 +352,46 @@ onMounted(async () => {
         originalAudioSettings.value[key] = val
       }
     }
+    // Load Anthropic settings
+    if (store.systemSettings.anthropic_api_key?.value) {
+      anthropicSettings.value.anthropic_api_key = store.systemSettings.anthropic_api_key.value
+      originalAnthropicSettings.value.anthropic_api_key = store.systemSettings.anthropic_api_key.value
+    }
   } catch (e) {
     console.error('Failed to load system settings', e)
   }
 })
+
+const saveAnthropicSettings = async () => {
+  savingAnthropic.value = true
+  try {
+    await store.updateSystemSetting('anthropic_api_key', anthropicSettings.value.anthropic_api_key)
+    originalAnthropicSettings.value.anthropic_api_key = anthropicSettings.value.anthropic_api_key
+    showSnackbar('Anthropic API key saved')
+  } catch (e) {
+    showSnackbar(e.response?.data?.detail || 'Failed to save Anthropic key', 'error')
+  } finally {
+    savingAnthropic.value = false
+  }
+}
+
+const testAnthropicConnection = async () => {
+  testingAnthropic.value = true
+  anthropicTestResult.value = null
+  try {
+    // Save first if changed
+    if (anthropicSettingsChanged.value) {
+      await store.updateSystemSetting('anthropic_api_key', anthropicSettings.value.anthropic_api_key)
+      originalAnthropicSettings.value.anthropic_api_key = anthropicSettings.value.anthropic_api_key
+    }
+    const { data } = await api.post('/settings/anthropic/test')
+    anthropicTestResult.value = { type: 'success', message: data.message }
+  } catch (e) {
+    anthropicTestResult.value = { type: 'error', message: e.response?.data?.detail || 'Connection failed' }
+  } finally {
+    testingAnthropic.value = false
+  }
+}
 
 const saveAudioSettings = async () => {
   savingAudio.value = true
