@@ -1853,6 +1853,15 @@ Rules:
         duration_ms = int((time.monotonic() - start) * 1000)
 
         if self.tracker:
+            # Build truncated results for logging
+            skill_results_summary = {}
+            for sk_name, sk_result in gather_results.items():
+                try:
+                    result_str = json.dumps(sk_result, ensure_ascii=False, default=str)
+                    skill_results_summary[sk_name] = result_str[:2000] + ("…" if len(result_str) > 2000 else "")
+                except Exception:
+                    skill_results_summary[sk_name] = str(sk_result)[:2000]
+
             self.tracker.start_step_timer()
             await self.tracker.step(
                 "stage_gather", "Stage 2: Gather information",
@@ -1866,6 +1875,7 @@ Rules:
                     "memory_found": "memory_search" in gather_results,
                     "urls_fetched": sum(1 for k in gather_results if k in ("web_fetch", "web_scrape")),
                     "project_context": "project_context_build" in gather_results,
+                    "skill_results": skill_results_summary,
                 },
                 duration_ms=duration_ms,
             )
@@ -2353,11 +2363,17 @@ JSON only:
                     "gathered_sections_count": len(gathered_sections),
                     "messages_count": len(messages),
                     "plan_steps": len(plan_steps),
+                    "messages_sent": [
+                        {"role": m["role"], "content": m["content"][:3000]}
+                        for m in messages
+                    ],
                 },
                 output_data={
                     "response_length": len(content),
                     "response": content,
                     "timed_out": timed_out,
+                    "tokens": self._total_tokens,
+                    "model": self._model_name,
                 },
                 status="timeout" if timed_out else "completed",
                 duration_ms=duration_ms,

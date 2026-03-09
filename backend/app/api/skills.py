@@ -169,6 +169,25 @@ async def unshare_skill(
     return updated
 
 
+@router.post("/{skill_id}/toggle", response_model=SkillResponse)
+async def toggle_skill_enabled(
+    skill_id: UUID,
+    _user: MongoUser = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Toggle skill enabled/disabled globally."""
+    skill_service = SkillService(db)
+    skill = await skill_service.get_by_id(str(skill_id))
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    if skill.is_system:
+        raise HTTPException(status_code=403, detail="Cannot disable system skill")
+
+    new_enabled = not getattr(skill, "enabled", True)
+    updated = await skill_service.update(str(skill_id), {"enabled": new_enabled})
+    return updated
+
+
 @router.post("/{skill_id}/duplicate", response_model=SkillResponse, status_code=201)
 async def duplicate_skill(
     skill_id: UUID,

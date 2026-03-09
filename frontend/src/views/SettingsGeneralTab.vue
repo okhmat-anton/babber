@@ -93,8 +93,23 @@
 
     <!-- Audio & AI API Keys -->
     <v-card class="mb-6">
-      <v-card-title>
-        <v-icon class="mr-2">mdi-volume-high</v-icon>Kie.ai Settings (audio, gpt, gemini, <a href="https://kie.ai/market" target="_blank">models market</a>) <a href="https://kie.ai/api-key" target="_blank" class="text-primary font-weight-medium">API Key</a>
+      <v-card-title class="d-flex align-center flex-wrap">
+        <div>
+          <v-icon class="mr-2">mdi-volume-high</v-icon>Kie.ai Settings (audio, gpt, gemini, <a href="https://kie.ai/market" target="_blank">models market</a>) <a href="https://kie.ai/api-key" target="_blank" class="text-primary font-weight-medium">API Key</a>
+        </div>
+        <v-spacer />
+        <v-btn
+          variant="tonal"
+          color="amber"
+          size="small"
+          :loading="checkingKieaiBalance"
+          :disabled="!audioSettings.kieai_api_key"
+          @click="checkKieaiBalance"
+          class="ml-2"
+        >
+          <v-icon start size="16">mdi-wallet-outline</v-icon>
+          {{ kieaiBalance !== null ? kieaiBalance : 'Balance' }}
+        </v-btn>
       </v-card-title>
       <v-card-text>
         <v-row>
@@ -171,6 +186,17 @@
         >
           {{ kieaiTestResult.message }}
         </v-alert>
+        <v-alert
+          v-if="kieaiBalanceResult"
+          :type="kieaiBalanceResult.type"
+          variant="tonal"
+          density="compact"
+          class="mt-3"
+          closable
+          @click:close="kieaiBalanceResult = null"
+        >
+          <span v-html="kieaiBalanceResult.message"></span>
+        </v-alert>
         <v-alert type="info" variant="tonal" density="compact" class="mt-4">
           kie.ai API key is used for TTS (Text-to-Speech), STT (Speech-to-Text), and LLM models (GPT-5.2, Gemini 3.1 Pro, Gemini 3 Pro).
         </v-alert>
@@ -179,8 +205,23 @@
 
     <!-- Anthropic (Claude) API -->
     <v-card class="mb-6">
-      <v-card-title>
-        <v-icon class="mr-2" color="deep-purple">mdi-creation</v-icon>Anthropic (Claude) <a href="https://platform.claude.com/settings/keys" target="_blank" class="text-primary font-weight-medium">API Key</a>
+      <v-card-title class="d-flex align-center flex-wrap">
+        <div>
+          <v-icon class="mr-2" color="deep-purple">mdi-creation</v-icon>Anthropic (Claude) <a href="https://platform.claude.com/settings/keys" target="_blank" class="text-primary font-weight-medium">API Key</a>
+        </div>
+        <v-spacer />
+        <v-btn
+          variant="tonal"
+          color="deep-purple"
+          size="small"
+          :loading="checkingAnthropicBalance"
+          :disabled="!anthropicSettings.anthropic_api_key"
+          @click="checkAnthropicBalance"
+          class="ml-2"
+        >
+          <v-icon start size="16">mdi-wallet-outline</v-icon>
+          {{ anthropicBalance !== null ? anthropicBalance : 'Balance' }}
+        </v-btn>
       </v-card-title>
       <v-card-text>
         <v-row>
@@ -229,6 +270,17 @@
           @click:close="anthropicTestResult = null"
         >
           {{ anthropicTestResult.message }}
+        </v-alert>
+        <v-alert
+          v-if="anthropicBalanceResult"
+          :type="anthropicBalanceResult.type"
+          variant="tonal"
+          density="compact"
+          class="mt-3"
+          closable
+          @click:close="anthropicBalanceResult = null"
+        >
+          <span v-html="anthropicBalanceResult.message"></span>
         </v-alert>
         <v-alert type="info" variant="tonal" density="compact" class="mt-3">
           Get your API key at <a href="https://console.anthropic.com/settings/keys" target="_blank" class="text-primary">console.anthropic.com</a>.
@@ -376,6 +428,9 @@ const audioSettingsChanged = computed(() => {
 // kie.ai test
 const testingKieai = ref(null)     // 'gpt' | 'gemini' | null
 const kieaiTestResult = ref(null)
+const checkingKieaiBalance = ref(false)
+const kieaiBalance = ref(null)         // display string or null
+const kieaiBalanceResult = ref(null)   // { type, message }
 
 // Anthropic settings
 const anthropicSettings = ref({ anthropic_api_key: '' })
@@ -384,6 +439,9 @@ const showAnthropicKey = ref(false)
 const savingAnthropic = ref(false)
 const testingAnthropic = ref(false)
 const anthropicTestResult = ref(null)
+const checkingAnthropicBalance = ref(false)
+const anthropicBalance = ref(null)         // display string or null
+const anthropicBalanceResult = ref(null)   // { type, message }
 
 const anthropicSettingsChanged = computed(() => {
   return anthropicSettings.value.anthropic_api_key !== originalAnthropicSettings.value.anthropic_api_key
@@ -525,6 +583,56 @@ const testKieaiModel = async (modelId, label) => {
     kieaiTestResult.value = { type: 'error', message: e.response?.data?.detail || 'Connection failed' }
   } finally {
     testingKieai.value = null
+  }
+}
+
+const checkKieaiBalance = async () => {
+  checkingKieaiBalance.value = true
+  kieaiBalanceResult.value = null
+  try {
+    // Save key first if changed
+    if (audioSettingsChanged.value) {
+      await store.updateSystemSetting('kieai_api_key', audioSettings.value.kieai_api_key)
+      originalAudioSettings.value.kieai_api_key = audioSettings.value.kieai_api_key
+    }
+    const { data } = await api.get('/settings/kieai/balance')
+    if (data.available && data.balance != null) {
+      kieaiBalance.value = `$${data.balance}`
+      kieaiBalanceResult.value = { type: 'success', message: `Balance: <strong>$${data.balance}</strong>` }
+    } else {
+      // No balance API — open billing page directly
+      kieaiBalance.value = data.key_valid ? '✓ Key OK' : '✗'
+      window.open(data.url || 'https://kie.ai/market', '_blank')
+    }
+  } catch (e) {
+    kieaiBalanceResult.value = { type: 'error', message: e.response?.data?.detail || 'Failed to check balance' }
+  } finally {
+    checkingKieaiBalance.value = false
+  }
+}
+
+const checkAnthropicBalance = async () => {
+  checkingAnthropicBalance.value = true
+  anthropicBalanceResult.value = null
+  try {
+    // Save key first if changed
+    if (anthropicSettingsChanged.value) {
+      await store.updateSystemSetting('anthropic_api_key', anthropicSettings.value.anthropic_api_key)
+      originalAnthropicSettings.value.anthropic_api_key = anthropicSettings.value.anthropic_api_key
+    }
+    const { data } = await api.get('/settings/anthropic/balance')
+    if (data.available && data.balance != null) {
+      anthropicBalance.value = `$${data.balance}`
+      anthropicBalanceResult.value = { type: 'success', message: `Balance: <strong>$${data.balance}</strong>${data.name ? ' (' + data.name + ')' : ''}` }
+    } else {
+      // No balance API — open billing page directly
+      anthropicBalance.value = data.key_valid ? '✓ Key OK' : '✗'
+      window.open(data.url || 'https://console.anthropic.com/settings/billing', '_blank')
+    }
+  } catch (e) {
+    anthropicBalanceResult.value = { type: 'error', message: e.response?.data?.detail || 'Failed to check balance' }
+  } finally {
+    checkingAnthropicBalance.value = false
   }
 }
 

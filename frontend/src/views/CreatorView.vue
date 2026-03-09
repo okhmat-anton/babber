@@ -229,10 +229,18 @@
             >
               <template #item="{ element: goal, index: gi }">
                 <div class="mb-4">
-                  <v-card variant="flat" class="section-card goal-card">
+                  <v-card variant="flat" class="section-card goal-card" :class="{ 'item-completed': goal.completed, 'item-no-context': goal.in_context === false }">
                     <div class="card-accent card-accent--amber" />
                     <v-card-text class="pa-5 pl-7">
                       <div class="d-flex align-start">
+                        <v-checkbox
+                          v-model="goal.completed"
+                          density="compact"
+                          hide-details
+                          color="success"
+                          class="mr-1 mt-1 flex-shrink-0"
+                          title="Mark as completed"
+                        />
                         <div class="drag-handle mr-2 mt-2" title="Drag to reorder">
                           <v-icon size="18" color="grey">mdi-drag-vertical</v-icon>
                         </div>
@@ -281,6 +289,9 @@
                           </v-row>
                         </div>
                         <div class="d-flex flex-column ml-3 ga-1 mt-1">
+                          <v-btn icon size="x-small" variant="tonal" :color="goal.in_context !== false ? 'info' : 'grey'" @click="goal.in_context = !goal.in_context" :title="goal.in_context !== false ? 'In context — click to exclude' : 'Excluded from context — click to include'">
+                            <v-icon size="14">{{ goal.in_context !== false ? 'mdi-brain' : 'mdi-brain-off' }}</v-icon>
+                          </v-btn>
                           <v-btn icon size="x-small" variant="tonal" color="primary" @click="addSubGoal(gi)" title="Add sub-goal">
                             <v-icon size="14">mdi-plus</v-icon>
                           </v-btn>
@@ -388,10 +399,18 @@
             >
               <template #item="{ element: dream, index: di }">
                 <div class="mb-4">
-                  <v-card variant="flat" class="section-card goal-card">
+                  <v-card variant="flat" class="section-card goal-card" :class="{ 'item-completed': dream.completed, 'item-no-context': dream.in_context === false }">
                     <div class="card-accent card-accent--purple" />
                     <v-card-text class="pa-5 pl-7">
                       <div class="d-flex align-start">
+                        <v-checkbox
+                          v-model="dream.completed"
+                          density="compact"
+                          hide-details
+                          color="success"
+                          class="mr-1 mt-1 flex-shrink-0"
+                          title="Mark as completed"
+                        />
                         <div class="drag-handle mr-2 mt-2" title="Drag to reorder">
                           <v-icon size="18" color="grey">mdi-drag-vertical</v-icon>
                         </div>
@@ -425,9 +444,14 @@
                             placeholder="Describe your dream..."
                           />
                         </div>
-                        <v-btn icon size="x-small" variant="text" color="grey" class="ml-3 mt-1" @click="removeDream(di)">
-                          <v-icon size="14">mdi-close</v-icon>
-                        </v-btn>
+                        <div class="d-flex flex-column ml-3 ga-1 mt-1">
+                          <v-btn icon size="x-small" variant="tonal" :color="dream.in_context !== false ? 'info' : 'grey'" @click="dream.in_context = !dream.in_context" :title="dream.in_context !== false ? 'In context — click to exclude' : 'Excluded from context — click to include'">
+                            <v-icon size="14">{{ dream.in_context !== false ? 'mdi-brain' : 'mdi-brain-off' }}</v-icon>
+                          </v-btn>
+                          <v-btn icon size="x-small" variant="text" color="grey" @click="removeDream(di)">
+                            <v-icon size="14">mdi-close</v-icon>
+                          </v-btn>
+                        </div>
                       </div>
                     </v-card-text>
                   </v-card>
@@ -467,10 +491,18 @@
             >
               <template #item="{ element: idea, index: ii }">
                 <div class="mb-4">
-                  <v-card variant="flat" class="section-card goal-card">
+                  <v-card variant="flat" class="section-card goal-card" :class="{ 'item-completed': idea.completed, 'item-no-context': idea.in_context === false }">
                     <div class="card-accent card-accent--yellow" />
                     <v-card-text class="pa-5 pl-7">
                       <div class="d-flex align-start">
+                        <v-checkbox
+                          v-model="idea.completed"
+                          density="compact"
+                          hide-details
+                          color="success"
+                          class="mr-1 mt-1 flex-shrink-0"
+                          title="Mark as completed"
+                        />
                         <div class="drag-handle mr-2 mt-2" title="Drag to reorder">
                           <v-icon size="18" color="grey">mdi-drag-vertical</v-icon>
                         </div>
@@ -504,9 +536,14 @@
                             placeholder="Describe your idea..."
                           />
                         </div>
-                        <v-btn icon size="x-small" variant="text" color="grey" class="ml-3 mt-1" @click="removeIdea(ii)">
-                          <v-icon size="14">mdi-close</v-icon>
-                        </v-btn>
+                        <div class="d-flex flex-column ml-3 ga-1 mt-1">
+                          <v-btn icon size="x-small" variant="tonal" :color="idea.in_context !== false ? 'info' : 'grey'" @click="idea.in_context = !idea.in_context" :title="idea.in_context !== false ? 'In context — click to exclude' : 'Excluded from context — click to include'">
+                            <v-icon size="14">{{ idea.in_context !== false ? 'mdi-brain' : 'mdi-brain-off' }}</v-icon>
+                          </v-btn>
+                          <v-btn icon size="x-small" variant="text" color="grey" @click="removeIdea(ii)">
+                            <v-icon size="14">mdi-close</v-icon>
+                          </v-btn>
+                        </div>
                       </div>
                     </v-card-text>
                   </v-card>
@@ -538,10 +575,18 @@
             </div>
 
             <div v-for="(note, ni) in form.notes" :key="note.id" class="mb-4">
-              <v-card variant="flat" class="section-card goal-card">
+              <v-card variant="flat" class="section-card goal-card" :class="{ 'item-completed': note.completed, 'item-no-context': note.in_context === false }">
                 <div class="card-accent card-accent--teal" />
                 <v-card-text class="pa-5 pl-7">
                   <div class="d-flex align-start">
+                    <v-checkbox
+                      v-model="note.completed"
+                      density="compact"
+                      hide-details
+                      color="success"
+                      class="mr-1 mt-1 flex-shrink-0"
+                      title="Mark as completed"
+                    />
                     <div class="flex-grow-1">
                       <v-text-field
                         v-model="note.title"
@@ -561,9 +606,14 @@
                         placeholder="Write your note..."
                       />
                     </div>
-                    <v-btn icon size="x-small" variant="text" color="grey" class="ml-3 mt-1" @click="removeNote(ni)">
-                      <v-icon size="14">mdi-close</v-icon>
-                    </v-btn>
+                    <div class="d-flex flex-column ml-3 ga-1 mt-1">
+                      <v-btn icon size="x-small" variant="tonal" :color="note.in_context !== false ? 'info' : 'grey'" @click="note.in_context = !note.in_context" :title="note.in_context !== false ? 'In context — click to exclude' : 'Excluded from context — click to include'">
+                        <v-icon size="14">{{ note.in_context !== false ? 'mdi-brain' : 'mdi-brain-off' }}</v-icon>
+                      </v-btn>
+                      <v-btn icon size="x-small" variant="text" color="grey" @click="removeNote(ni)" title="Remove">
+                        <v-icon size="14">mdi-close</v-icon>
+                      </v-btn>
+                    </div>
                   </div>
                 </v-card-text>
               </v-card>
@@ -883,5 +933,22 @@ onMounted(load)
   min-width: 56px;
   justify-content: center;
   flex-shrink: 0;
+}
+
+/* Completed / Context states */
+.item-completed {
+  opacity: 0.5;
+}
+
+.item-completed .goal-title-field :deep(input) {
+  text-decoration: line-through;
+}
+
+.item-no-context {
+  border-left: 2px dashed rgba(var(--v-theme-on-surface), 0.15) !important;
+}
+
+.item-no-context .card-accent {
+  opacity: 0.25;
 }
 </style>

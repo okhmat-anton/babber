@@ -14,7 +14,19 @@
 
     <v-card>
       <v-card-text class="pa-0">
-        <v-data-table :headers="headers" :items="skills" :loading="loading" hover>
+        <v-data-table :headers="headers" :items="skills" :loading="loading" :items-per-page="100" hover>
+          <template #item.enabled="{ item }">
+            <v-switch
+              :model-value="item.enabled !== false"
+              @update:model-value="toggleEnabled(item)"
+              density="compact"
+              hide-details
+              color="success"
+              :loading="togglingId === item.id"
+              :disabled="item.is_system"
+              style="margin: 0"
+            />
+          </template>
           <template #item.is_system="{ item }">
             <v-chip v-if="item.is_system" color="primary" size="x-small" variant="flat">System</v-chip>
           </template>
@@ -55,8 +67,10 @@ const loading = ref(false)
 const filterCategory = ref('all')
 const deleteDialog = ref(false)
 const deleteTarget = ref(null)
+const togglingId = ref(null)
 
 const headers = [
+  { title: 'On', key: 'enabled', width: 70, sortable: false },
   { title: 'Name', key: 'display_name' },
   { title: 'Category', key: 'category', width: 100 },
   { title: 'System', key: 'is_system', width: 80 },
@@ -83,6 +97,15 @@ onMounted(load)
 const share = async (s) => { await api.post(`/skills/${s.id}/share`); load() }
 const unshare = async (s) => { await api.post(`/skills/${s.id}/unshare`); load() }
 const duplicate = async (s) => { await api.post(`/skills/${s.id}/duplicate`); load() }
+const toggleEnabled = async (item) => {
+  togglingId.value = item.id
+  try {
+    const { data } = await api.post(`/skills/${item.id}/toggle`)
+    item.enabled = data.enabled
+  } finally {
+    togglingId.value = null
+  }
+}
 const handleDelete = (s) => {
   deleteTarget.value = s
   deleteDialog.value = true

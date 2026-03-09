@@ -415,6 +415,9 @@ class AgentChatEngine:
         for s in all_skills:
             if str(s.id) in disabled_ids:
                 continue
+            # Skip globally disabled skills
+            if not getattr(s, "enabled", True):
+                continue
             if s.name in FS_SKILLS and not effective_fs:
                 continue
             if s.name in SYS_SKILLS and not effective_sys:

@@ -1,4 +1,5 @@
 from uuid import UUID
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.database import get_mongodb
@@ -209,6 +210,65 @@ async def test_anthropic_connection(
     raise HTTPException(status_code=400, detail="Connection failed — check your API key")
 
 
+@router.get("/anthropic/balance")
+async def get_anthropic_balance(
+    _user: MongoUser = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Try to fetch Anthropic billing/balance info.
+
+    Works with Admin API keys (sk-ant-admin...).  Regular API keys
+    cannot access the billing API.
+    """
+    api_key = await get_setting_value(db, "anthropic_api_key")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Anthropic API key not configured")
+
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+    base = "https://api.anthropic.com"
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        # 1. Try Admin API — list organizations to get the org id
+        try:
+            r = await client.get(f"{base}/v1/organizations", headers=headers)
+            if r.status_code == 200:
+                data = r.json()
+                orgs = data if isinstance(data, list) else data.get("data", [])
+                if orgs:
+                    org = orgs[0]
+                    return {
+                        "available": True,
+                        "balance": org.get("balance") or org.get("credit_balance"),
+                        "name": org.get("name", ""),
+                        "raw": org,
+                    }
+        except Exception:
+            pass
+
+        # 2. Fallback: verify key works with count_tokens
+        try:
+            r = await client.post(
+                f"{base}/v1/messages/count_tokens",
+                json={"model": "claude-3-haiku-20240307", "messages": [{"role": "user", "content": "hi"}]},
+                headers=headers,
+            )
+            key_valid = r.status_code == 200
+        except Exception:
+            key_valid = False
+
+    # Admin API not accessible — key is regular, not admin
+    return {
+        "available": False,
+        "key_valid": key_valid,
+        "message": "Balance unavailable — use an Admin API key (sk-ant-admin…) or check console.anthropic.com/settings/billing",
+        "url": "https://console.anthropic.com/settings/billing",
+    }
+
+
 # --- kie.ai ---
 @router.get("/kieai/models")
 async def get_kieai_models(
@@ -243,6 +303,51 @@ async def test_kieai_connection(
     if connected:
         return {"status": "ok", "message": f"{model_label} — connection successful"}
     raise HTTPException(status_code=400, detail=f"{model_label} — connection failed, check your API key")
+
+
+@router.get("/kieai/balance")
+async def get_kieai_balance(
+    _user: MongoUser = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Try to fetch kie.ai balance / credits info."""
+    api_key = await get_setting_value(db, "kieai_api_key")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="kie.ai API key not configured")
+
+    headers = {"Authorization": f"Bearer {api_key}"}
+    tried_urls = [
+        "https://api.kie.ai/v1/balance",
+        "https://api.kie.ai/v1/me",
+        "https://api.kie.ai/v1/credits",
+        "https://api.kie.ai/v1/dashboard/billing/credit_grants",
+    ]
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        for url in tried_urls:
+            try:
+                r = await client.get(url, headers=headers)
+                if r.status_code == 200:
+                    data = r.json()
+                    return {
+                        "available": True,
+                        "balance": data.get("balance") or data.get("credits") or data.get("total_granted"),
+                        "raw": data,
+                    }
+            except Exception:
+                continue
+
+        # Verify key works with a minimal request
+        from app.llm.kieai import KieAIProvider
+        provider = KieAIProvider(api_key=api_key)
+        key_valid = await provider.check_connection("gemini-3-pro")
+
+    return {
+        "available": False,
+        "key_valid": key_valid,
+        "message": "Balance unavailable via API — check kie.ai/market",
+        "url": "https://kie.ai/market",
+    }
 
 
 # --- Model Roles ---

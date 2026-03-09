@@ -27,6 +27,7 @@ class SkillUpdate(BaseModel):
     input_schema: dict | None = None
     output_schema: dict | None = None
     is_shared: bool | None = None
+    enabled: bool | None = None
 
 
 class SkillResponse(BaseModel):
@@ -42,6 +43,7 @@ class SkillResponse(BaseModel):
     output_schema: dict
     is_system: bool
     is_shared: bool
+    enabled: bool = True
     author_agent_id: UUID | None
     created_at: datetime
     updated_at: datetime

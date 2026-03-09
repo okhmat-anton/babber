@@ -380,6 +380,18 @@
             <v-icon size="14" start>mdi-play-circle</v-icon>
             Play
           </v-btn>
+
+          <!-- Save to Notes button -->
+          <v-btn
+            size="x-small"
+            variant="text"
+            :loading="savingToNotes[msg.id] === true"
+            :color="savingToNotes[msg.id] === 'done' ? 'success' : undefined"
+            @click="saveMessageToNotes(msg)"
+          >
+            <v-icon size="14" start>{{ savingToNotes[msg.id] === 'done' ? 'mdi-check' : 'mdi-notebook-plus-outline' }}</v-icon>
+            {{ savingToNotes[msg.id] === 'done' ? 'Saved!' : 'Save to Notes' }}
+          </v-btn>
         </div>
 
         <!-- Retry button for unanswered user messages -->
@@ -422,21 +434,255 @@
               >
                 <div class="d-flex align-center ga-1" style="cursor: pointer" @click="toggleThinkingStep(step.id)">
                   <v-icon size="12" :color="thinkingStepColor(step.status)">{{ thinkingStepIcon(step.step_type) }}</v-icon>
-                  <span class="text-caption flex-grow-1">{{ step.step_name }}</span>
+                  <span class="text-caption flex-grow-1">
+                    {{ step.step_name }}
+                    <span v-if="stepSummaryChips(step).length" class="ml-1">
+                      <v-chip v-for="(chip, ci) in stepSummaryChips(step)" :key="ci" size="x-small" :color="chip.color" variant="tonal" class="mr-1" style="height:16px;font-size:10px">{{ chip.text }}</v-chip>
+                    </span>
+                  </span>
                   <span class="text-caption text-medium-emphasis">{{ step.duration_ms }}ms</span>
                   <v-icon size="12">{{ thinkingStepExpanded[step.id] ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
                 </div>
                 <v-expand-transition>
                   <div v-if="thinkingStepExpanded[step.id]" class="thinking-step-detail mt-1 pl-4">
-                    <div v-if="step.input_data" class="text-caption text-medium-emphasis mb-1">
-                      <strong>Input:</strong>
-                      <pre class="thinking-step-json">{{ formatStepData(step.input_data) }}</pre>
+
+                    <!-- Config Load -->
+                    <template v-if="step.step_type === 'config_load' && step.output_data">
+                      <div class="tl-info-grid">
+                        <span class="tl-label">Skills:</span>
+                        <span>{{ step.output_data.skills_count }} — <span class="text-cyan">{{ (step.output_data.skills || []).join(', ') }}</span></span>
+                        <span class="tl-label">Protocols:</span>
+                        <span>{{ step.output_data.protocols_count }} — {{ (step.output_data.protocols || []).join(', ') }}</span>
+                        <span class="tl-label">Params:</span>
+                        <span v-if="step.output_data.gen_params">T={{ step.output_data.gen_params.temperature }} top_p={{ step.output_data.gen_params.top_p }} max_tokens={{ step.output_data.gen_params.max_tokens }}</span>
+                      </div>
+                    </template>
+
+                    <!-- Prompt Build — show full system prompt -->
+                    <template v-else-if="step.step_type === 'prompt_build' && step.output_data">
+                      <div class="d-flex align-center ga-2 mb-1">
+                        <span class="tl-label">Prompt length:</span>
+                        <span>{{ step.output_data.system_prompt_length }} chars</span>
+                        <v-btn size="x-small" variant="text" color="cyan" @click="toggleStepSubSection(step.id, 'prompt')">
+                          {{ stepSubSections[step.id + '_prompt'] ? 'Hide' : 'Show Full Prompt' }}
+                        </v-btn>
+                      </div>
+                      <v-expand-transition>
+                        <pre v-if="stepSubSections[step.id + '_prompt']" class="thinking-step-prompt">{{ step.output_data.system_prompt }}</pre>
+                      </v-expand-transition>
+                    </template>
+
+                    <!-- History Build — show message summary -->
+                    <template v-else-if="step.step_type === 'history_build' && step.output_data">
+                      <div class="tl-info-grid">
+                        <span class="tl-label">Messages:</span>
+                        <span>{{ step.output_data.history_messages }} ({{ step.output_data.total_chars }} chars)</span>
+                        <span class="tl-label">Summary:</span>
+                        <span>{{ step.output_data.has_summary ? 'Yes' : 'No' }}</span>
+                      </div>
+                      <div v-if="step.output_data.messages" class="mt-1">
+                        <v-btn size="x-small" variant="text" color="cyan" @click="toggleStepSubSection(step.id, 'messages')">
+                          {{ stepSubSections[step.id + '_messages'] ? 'Hide Messages' : 'Show All Messages' }}
+                        </v-btn>
+                        <v-expand-transition>
+                          <div v-if="stepSubSections[step.id + '_messages']">
+                            <div v-for="(m, mi) in step.output_data.messages" :key="mi" class="tl-message-item" :class="'tl-role-' + m.role">
+                              <div class="d-flex align-center ga-1">
+                                <v-chip size="x-small" :color="m.role === 'system' ? 'deep-purple' : m.role === 'user' ? 'blue' : 'green'" variant="flat" style="height:14px;font-size:9px">{{ m.role }}</v-chip>
+                                <span class="text-caption text-medium-emphasis">{{ m.content_length }} chars</span>
+                              </div>
+                              <pre class="thinking-step-prompt mt-1" style="max-height:300px">{{ m.content }}</pre>
+                            </div>
+                          </div>
+                        </v-expand-transition>
+                      </div>
+                    </template>
+
+                    <!-- Classify -->
+                    <template v-else-if="step.step_type === 'stage_classify' && step.output_data">
+                      <div class="d-flex flex-wrap ga-1">
+                        <v-chip size="x-small" color="blue" variant="flat">intent: {{ step.output_data.intent }}</v-chip>
+                        <v-chip size="x-small" color="amber" variant="flat">{{ step.output_data.complexity }}</v-chip>
+                        <v-chip v-if="step.output_data.needs_web_search" size="x-small" color="orange" variant="flat">needs web search</v-chip>
+                        <v-chip v-if="step.output_data.is_greeting" size="x-small" color="green" variant="flat">greeting</v-chip>
+                        <v-chip v-if="step.output_data.skip_understand" size="x-small" color="grey" variant="flat">skip understand</v-chip>
+                        <v-chip v-if="step.output_data.skip_plan" size="x-small" color="grey" variant="flat">skip plan</v-chip>
+                        <v-chip v-if="step.output_data.detected_urls?.length" size="x-small" color="cyan" variant="tonal">URLs: {{ step.output_data.detected_urls.join(', ') }}</v-chip>
+                        <v-chip v-if="step.output_data.detected_project" size="x-small" color="teal" variant="tonal">project: {{ step.output_data.detected_project }}</v-chip>
+                      </div>
+                    </template>
+
+                    <!-- Understand -->
+                    <template v-else-if="step.step_type === 'stage_understand' && step.output_data">
+                      <div v-if="step.output_data.analysis" class="tl-info-grid">
+                        <span class="tl-label">Intent:</span><span>{{ step.output_data.analysis.intent }}</span>
+                        <span class="tl-label">Complexity:</span><span>{{ step.output_data.analysis.complexity }}</span>
+                        <span class="tl-label">Summary:</span><span>{{ step.output_data.analysis.summary }}</span>
+                        <span class="tl-label">Needs skills:</span>
+                        <span>
+                          <v-chip v-for="sk in (step.output_data.analysis.needs_skills || [])" :key="sk" size="x-small" color="cyan" variant="tonal" class="mr-1">{{ sk }}</v-chip>
+                          <span v-if="!(step.output_data.analysis.needs_skills || []).length" class="text-medium-emphasis">none</span>
+                        </span>
+                        <span class="tl-label">Direct answer:</span><span>{{ step.output_data.analysis.can_answer_directly ? 'Yes' : 'No' }}</span>
+                      </div>
+                      <div v-if="step.output_data.raw_llm_response" class="mt-1">
+                        <v-btn size="x-small" variant="text" color="cyan" @click="toggleStepSubSection(step.id, 'raw')">
+                          {{ stepSubSections[step.id + '_raw'] ? 'Hide' : 'Raw LLM Response' }}
+                        </v-btn>
+                        <v-expand-transition>
+                          <pre v-if="stepSubSections[step.id + '_raw']" class="thinking-step-json">{{ step.output_data.raw_llm_response }}</pre>
+                        </v-expand-transition>
+                      </div>
+                    </template>
+
+                    <!-- Gather — show which skills ran and what they returned -->
+                    <template v-else-if="step.step_type === 'stage_gather'">
+                      <div v-if="step.input_data?.requested_skills?.length" class="mb-1">
+                        <span class="tl-label">Requested:</span>
+                        <v-chip v-for="sk in step.input_data.requested_skills" :key="sk" size="x-small" color="amber" variant="tonal" class="mr-1">{{ sk }}</v-chip>
+                      </div>
+                      <div v-if="step.output_data?.gathered?.length" class="mb-1">
+                        <span class="tl-label">Collected:</span>
+                        <v-chip v-for="sk in step.output_data.gathered" :key="sk" size="x-small" color="green" variant="flat" class="mr-1">✓ {{ sk }}</v-chip>
+                      </div>
+                      <div v-if="step.input_data?.detected_urls?.length" class="mb-1">
+                        <span class="tl-label">URLs:</span>
+                        <span class="text-cyan text-caption">{{ step.input_data.detected_urls.join(', ') }}</span>
+                      </div>
+                      <!-- Show collected skill results -->
+                      <div v-if="step.output_data?.skill_results && Object.keys(step.output_data.skill_results).length" class="mt-1">
+                        <v-btn size="x-small" variant="text" color="cyan" @click="toggleStepSubSection(step.id, 'results')">
+                          {{ stepSubSections[step.id + '_results'] ? 'Hide Skill Results' : 'Show Skill Results' }}
+                        </v-btn>
+                        <v-expand-transition>
+                          <div v-if="stepSubSections[step.id + '_results']">
+                            <div v-for="(result, skillName) in step.output_data.skill_results" :key="skillName" class="tl-message-item mt-1">
+                              <div class="d-flex align-center ga-1 mb-1">
+                                <v-icon size="12" color="cyan">mdi-lightning-bolt</v-icon>
+                                <v-chip size="x-small" color="cyan" variant="flat">{{ skillName }}</v-chip>
+                              </div>
+                              <pre class="thinking-step-json" style="max-height:300px">{{ result }}</pre>
+                            </div>
+                          </div>
+                        </v-expand-transition>
+                      </div>
+                    </template>
+
+                    <!-- Plan — show steps in list -->
+                    <template v-else-if="step.step_type === 'stage_plan' && step.output_data?.plan">
+                      <div class="mb-1"><span class="tl-label">Approach:</span> {{ step.output_data.plan.approach }}</div>
+                      <div v-for="ps in (step.output_data.plan.steps || [])" :key="ps.id" class="d-flex align-center ga-1 tl-plan-step">
+                        <span class="text-caption text-medium-emphasis">{{ ps.id }}.</span>
+                        <span class="text-caption">{{ ps.action }}</span>
+                        <v-chip v-if="ps.skill" size="x-small" color="cyan" variant="tonal">{{ ps.skill }}</v-chip>
+                        <v-chip v-if="ps._already_gathered" size="x-small" color="green" variant="tonal">gathered</v-chip>
+                        <span v-if="ps.args && Object.keys(ps.args).length" class="text-caption text-medium-emphasis">
+                          ({{ Object.entries(ps.args).map(([k,v]) => k + '=' + String(v).substring(0, 50)).join(', ') }})
+                        </span>
+                      </div>
+                      <div v-if="step.output_data.plan.missing_skills?.length" class="mt-1">
+                        <span class="tl-label text-warning">Missing skills:</span>
+                        <span v-for="ms in step.output_data.plan.missing_skills" :key="ms.name || ms" class="text-caption text-warning">{{ ms.name || ms }}{{ ms.description ? ': ' + ms.description : '' }}; </span>
+                      </div>
+                      <div v-if="step.output_data.raw_llm_response" class="mt-1">
+                        <v-btn size="x-small" variant="text" color="cyan" @click="toggleStepSubSection(step.id, 'raw')">
+                          {{ stepSubSections[step.id + '_raw'] ? 'Hide' : 'Raw LLM Response' }}
+                        </v-btn>
+                        <v-expand-transition>
+                          <pre v-if="stepSubSections[step.id + '_raw']" class="thinking-step-json">{{ step.output_data.raw_llm_response }}</pre>
+                        </v-expand-transition>
+                      </div>
+                    </template>
+
+                    <!-- Execute step — show skill call detail -->
+                    <template v-else-if="step.step_type === 'execute_step'">
+                      <div v-if="step.input_data" class="mb-1">
+                        <span class="tl-label">Skill:</span>
+                        <v-chip size="x-small" color="cyan" variant="flat" class="mr-1">{{ step.input_data.skill }}</v-chip>
+                        <span v-if="step.input_data.args && Object.keys(step.input_data.args).length" class="text-caption">
+                          <span v-for="(v, k) in step.input_data.args" :key="k" class="mr-2">
+                            <span class="text-medium-emphasis">{{ k }}:</span> {{ String(v).substring(0, 100) }}{{ String(v).length > 100 ? '…' : '' }}
+                          </span>
+                        </span>
+                      </div>
+                      <div v-if="step.output_data">
+                        <v-chip size="x-small" :color="step.output_data.success ? 'green' : 'red'" variant="flat" class="mr-1">{{ step.output_data.success ? 'success' : 'failed' }}</v-chip>
+                        <v-btn size="x-small" variant="text" color="cyan" @click="toggleStepSubSection(step.id, 'result')">
+                          {{ stepSubSections[step.id + '_result'] ? 'Hide Result' : 'Show Result' }}
+                        </v-btn>
+                        <v-expand-transition>
+                          <pre v-if="stepSubSections[step.id + '_result']" class="thinking-step-json">{{ formatStepData(step.output_data.result || step.output_data) }}</pre>
+                        </v-expand-transition>
+                      </div>
+                    </template>
+
+                    <!-- Execute summary -->
+                    <template v-else-if="step.step_type === 'stage_execute' && step.output_data">
+                      <div class="d-flex flex-wrap ga-1">
+                        <v-chip v-if="step.output_data.skipped" size="x-small" color="grey" variant="flat">skipped (direct response)</v-chip>
+                        <v-chip v-if="step.output_data.total_skills_run" size="x-small" color="cyan" variant="tonal">{{ step.output_data.total_skills_run }} skills executed</v-chip>
+                        <v-chip v-if="step.output_data.gather_count" size="x-small" color="green" variant="tonal">{{ step.output_data.gather_count }} gathered</v-chip>
+                      </div>
+                    </template>
+
+                    <!-- Synthesize -->
+                    <template v-else-if="step.step_type === 'stage_synthesize'">
+                      <div class="tl-info-grid">
+                        <template v-if="step.output_data?.tokens"><span class="tl-label">Tokens:</span><span>{{ step.output_data.tokens }}</span></template>
+                        <template v-if="step.output_data?.model"><span class="tl-label">Model:</span><span>{{ step.output_data.model }}</span></template>
+                        <template v-if="step.output_data?.response_length"><span class="tl-label">Response:</span><span>{{ step.output_data.response_length }} chars</span></template>
+                        <template v-if="step.input_data?.gathered_sections_count"><span class="tl-label">Context sections:</span><span>{{ step.input_data.gathered_sections_count }}</span></template>
+                      </div>
+                      <div v-if="step.input_data?.messages_sent?.length" class="mt-1">
+                        <v-btn size="x-small" variant="text" color="cyan" @click="toggleStepSubSection(step.id, 'messages')">
+                          {{ stepSubSections[step.id + '_messages'] ? 'Hide' : 'Show Messages Sent to LLM (' + step.input_data.messages_sent.length + ')' }}
+                        </v-btn>
+                        <v-expand-transition>
+                          <div v-if="stepSubSections[step.id + '_messages']">
+                            <div v-for="(m, mi) in step.input_data.messages_sent" :key="mi" class="tl-message-item" :class="'tl-role-' + m.role">
+                              <div class="d-flex align-center ga-1">
+                                <v-chip size="x-small" :color="m.role === 'system' ? 'deep-purple' : m.role === 'user' ? 'blue' : 'green'" variant="flat" style="height:14px;font-size:9px">{{ m.role }}</v-chip>
+                                <span class="text-caption text-medium-emphasis">{{ (m.content || '').length }} chars</span>
+                              </div>
+                              <pre class="thinking-step-prompt mt-1" style="max-height:300px">{{ m.content }}</pre>
+                            </div>
+                          </div>
+                        </v-expand-transition>
+                      </div>
+                    </template>
+
+                    <!-- Generic fallback — raw JSON -->
+                    <template v-else>
+                      <div v-if="step.input_data" class="text-caption text-medium-emphasis mb-1">
+                        <strong>Input:</strong>
+                        <pre class="thinking-step-json">{{ formatStepData(step.input_data) }}</pre>
+                      </div>
+                      <div v-if="step.output_data" class="text-caption text-medium-emphasis">
+                        <strong>Output:</strong>
+                        <pre class="thinking-step-json">{{ formatStepData(step.output_data) }}</pre>
+                      </div>
+                    </template>
+
+                    <!-- Always show raw JSON toggle for all step types -->
+                    <div class="mt-1">
+                      <v-btn size="x-small" variant="text" color="grey" @click="toggleStepSubSection(step.id, 'json')">
+                        {{ stepSubSections[step.id + '_json'] ? 'Hide JSON' : 'Raw JSON' }}
+                      </v-btn>
+                      <v-expand-transition>
+                        <div v-if="stepSubSections[step.id + '_json']">
+                          <div v-if="step.input_data" class="text-caption text-medium-emphasis mb-1">
+                            <strong>Input:</strong>
+                            <pre class="thinking-step-json">{{ formatStepData(step.input_data) }}</pre>
+                          </div>
+                          <div v-if="step.output_data" class="text-caption text-medium-emphasis">
+                            <strong>Output:</strong>
+                            <pre class="thinking-step-json">{{ formatStepData(step.output_data) }}</pre>
+                          </div>
+                        </div>
+                      </v-expand-transition>
                     </div>
-                    <div v-if="step.output_data" class="text-caption text-medium-emphasis">
-                      <strong>Output:</strong>
-                      <pre class="thinking-step-json">{{ formatStepData(step.output_data) }}</pre>
-                    </div>
-                    <div v-if="step.error_message" class="text-caption text-error">
+
+                    <div v-if="step.error_message" class="text-caption text-error mt-1">
                       <strong>Error:</strong> {{ step.error_message }}
                     </div>
                   </div>
@@ -513,6 +759,15 @@
         </div>
       </div>
     </div>
+
+    <!-- Text selection popup (Comet-style) -->
+    <TextSelectionPopup
+      ref="selectionPopupRef"
+      :container-el="messagesContainer"
+      :agents="enabledAgentsList"
+      @save="handleSelectionSave"
+    />
+
     </template>
 
     <!-- ═══ Input Area (bottom, shown when: user chats always OR agent/project chats when chat is open) ═══ -->
@@ -635,6 +890,7 @@ import { markedHighlight } from 'marked-highlight'
 import DOMPurify from 'dompurify'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
+import TextSelectionPopup from './TextSelectionPopup.vue'
 
 const chatStore = useChatStore()
 const agentsStore = useAgentsStore()
@@ -653,12 +909,15 @@ const sessionSearch = ref('')
 const sessionsExpanded = ref(true)
 const expandedResponses = reactive({})
 const ttsLoading = reactive({})
+const savingToNotes = reactive({})  // msgId -> loading state
+const selectionPopupRef = ref(null) // TextSelectionPopup ref
 
 // Thinking log state
 const thinkingLogs = reactive({})        // logId -> full log data with steps
 const thinkingLogExpanded = reactive({}) // logId -> boolean
 const thinkingLogLoading = reactive({})  // logId -> boolean
 const thinkingStepExpanded = reactive({}) // stepId -> boolean
+const stepSubSections = reactive({})     // stepId_section -> boolean
 
 // Message edit state
 const editingMessageIndex = ref(null)
@@ -871,6 +1130,11 @@ const isCurrentAgentDisabled = computed(() => {
   return false
 })
 
+// Enabled agents list for selection popup
+const enabledAgentsList = computed(() => {
+  return (agentsStore.agents || []).filter(a => a.enabled !== false).map(a => ({ id: a.id, name: a.name }))
+})
+
 const canSend = computed(() => {
   if (isCurrentAgentDisabled.value) return false
   if (!messageInput.value?.trim()) return false
@@ -946,6 +1210,94 @@ async function retryMessage(msgIndex) {
   
   await chatStore.sendMessage(msg.content)
   scrollToBottom()
+}
+
+// ── Save assistant message to Creator Notes ───────────────────────
+async function saveMessageToNotes(msg) {
+  if (!msg?.content || savingToNotes[msg.id]) return
+  savingToNotes[msg.id] = true
+  try {
+    const title = msg.content.substring(0, 80).replace(/[#*`\n]/g, '').trim() + (msg.content.length > 80 ? '…' : '')
+    await api.post('/api/creator/append-item', {
+      target: 'notes',
+      title,
+      content: msg.content,
+    })
+    // Brief visual feedback — turn button into a check
+    savingToNotes[msg.id] = 'done'
+    setTimeout(() => { delete savingToNotes[msg.id] }, 1500)
+  } catch (e) {
+    console.error('Failed to save note:', e)
+    delete savingToNotes[msg.id]
+  }
+}
+
+// ── Save selected text to Creator / Agent ─────────────────────────
+async function saveSelectedTextTo(target, text, extra = {}) {
+  /**
+   * target: 'notes' | 'goals' | 'ideas' | 'dreams'
+   *       | 'agent_fact' | 'agent_belief' | 'agent_aspiration' | 'agent_event' | 'agent_task'
+   * text: the selected text
+   * extra: { agentId } for agent_* targets
+   */
+  if (!text?.trim()) return
+  const trimmed = text.trim()
+  const titleSnippet = trimmed.substring(0, 80).replace(/[#*`\n]/g, '').trim() + (trimmed.length > 80 ? '…' : '')
+
+  // ── Agent targets ──
+  if (target.startsWith('agent_') && extra.agentId) {
+    const aid = extra.agentId
+    switch (target) {
+      case 'agent_fact':
+        await api.post(`/api/agents/${aid}/facts`, {
+          type: 'fact', content: trimmed, source: 'chat_selection',
+        })
+        return
+      case 'agent_belief':
+        await api.post(`/api/agents/${aid}/beliefs/core`, {
+          text: trimmed, category: 'other',
+        })
+        return
+      case 'agent_aspiration':
+        await api.post(`/api/agents/${aid}/aspirations/goals`, {
+          text: trimmed, priority: 'medium', locked: true,
+        })
+        return
+      case 'agent_event':
+        await api.post(`/api/agents/${aid}/events`, {
+          event_type: 'observation', title: titleSnippet, description: trimmed,
+          source: 'chat_selection', importance: 'medium',
+        })
+        return
+      case 'agent_task':
+        await api.post(`/api/agents/${aid}/tasks`, {
+          title: titleSnippet, description: trimmed,
+        })
+        return
+    }
+  }
+
+  // ── Creator items ──
+  await api.post('/api/creator/append-item', {
+    target,
+    title: titleSnippet,
+    content: trimmed,
+  })
+}
+
+// ── Handle text selection popup save ──────────────────────────────
+async function handleSelectionSave(target, extra = {}) {
+  const text = selectionPopupRef.value?.getSelectedText()
+  if (!text) return
+  try {
+    await saveSelectedTextTo(target, text, extra)
+    selectionPopupRef.value?.showStatus('Saved!', 'success')
+    // Clear browser selection after save
+    window.getSelection()?.removeAllRanges()
+  } catch (e) {
+    console.error('Selection save failed:', e)
+    selectionPopupRef.value?.showStatus('Error', 'error')
+  }
 }
 
 // ── Edit user message (like VSCode Copilot) ───────────────────────
@@ -1032,6 +1384,43 @@ function toggleThinkingStep(stepId) {
   thinkingStepExpanded[stepId] = !thinkingStepExpanded[stepId]
 }
 
+function toggleStepSubSection(stepId, section) {
+  const key = stepId + '_' + section
+  stepSubSections[key] = !stepSubSections[key]
+}
+
+function stepSummaryChips(step) {
+  const chips = []
+  const out = step.output_data || {}
+  const inp = step.input_data || {}
+  switch (step.step_type) {
+    case 'config_load':
+      if (out.skills_count) chips.push({ text: `${out.skills_count} skills`, color: 'cyan' })
+      if (out.protocols_count) chips.push({ text: `${out.protocols_count} protocols`, color: 'teal' })
+      break
+    case 'stage_classify':
+      if (out.intent) chips.push({ text: out.intent, color: 'blue' })
+      if (out.complexity) chips.push({ text: out.complexity, color: 'amber' })
+      if (out.needs_web_search) chips.push({ text: 'web', color: 'orange' })
+      break
+    case 'stage_gather':
+      if (out.gathered?.length) chips.push({ text: `${out.gathered.length} collected`, color: 'green' })
+      break
+    case 'stage_plan':
+      if (out.plan?.steps?.length) chips.push({ text: `${out.plan.steps.length} steps`, color: 'teal' })
+      break
+    case 'execute_step':
+      if (inp.skill) chips.push({ text: inp.skill, color: 'cyan' })
+      if (out.success === true) chips.push({ text: '✓', color: 'green' })
+      else if (out.success === false) chips.push({ text: '✗', color: 'red' })
+      break
+    case 'stage_synthesize':
+      if (out.tokens) chips.push({ text: `${out.tokens} tok`, color: 'deep-purple' })
+      break
+  }
+  return chips
+}
+
 function thinkingStepIcon(stepType) {
   const icons = {
     config_load: 'mdi-cog',
@@ -1045,6 +1434,7 @@ function thinkingStepIcon(stepType) {
     stage_gather: 'mdi-database-search',
     stage_plan: 'mdi-map',
     stage_execute: 'mdi-play',
+    execute_step: 'mdi-lightning-bolt',
     stage_synthesize: 'mdi-creation',
     project_task_context: 'mdi-folder',
     context_load: 'mdi-folder-open',
@@ -1713,6 +2103,46 @@ watch(() => chatStore.panelOpen, (open) => {
   border-radius: 4px;
   margin-top: 2px;
 }
+.thinking-step-prompt {
+  font-family: monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  max-height: 400px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(0, 188, 212, 0.12);
+  padding: 8px;
+  border-radius: 4px;
+  margin-top: 4px;
+}
+.tl-info-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.tl-label {
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 500;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.tl-plan-step {
+  padding: 1px 0;
+  font-size: 12px;
+}
+.tl-message-item {
+  margin: 6px 0;
+  padding: 4px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.1);
+}
+.tl-role-system { border-left: 2px solid rgba(103, 58, 183, 0.4); }
+.tl-role-user { border-left: 2px solid rgba(33, 150, 243, 0.4); }
+.tl-role-assistant { border-left: 2px solid rgba(76, 175, 80, 0.4); }
 
 /* ── Sticky Todo Tracker (AIS-10) ── */
 .sticky-todo-panel {

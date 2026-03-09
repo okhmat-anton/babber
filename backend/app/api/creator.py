@@ -1,9 +1,12 @@
 """
 Creator Profile API — manage info about the bot owner/creator.
 """
-from fastapi import APIRouter, Depends
+import uuid
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Literal
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.database import get_mongodb
@@ -69,3 +72,59 @@ async def update_creator_profile(
     data = body.model_dump(exclude_none=False)
     profile = await svc.upsert(data)
     return CreatorProfileResponse(**profile.model_dump(exclude={"created_at", "updated_at"}))
+
+
+# ── Append single item to a list field ──────────────────
+
+class AppendItemRequest(BaseModel):
+    """Append a single item to goals, dreams, ideas, or notes."""
+    target: Literal["goals", "dreams", "ideas", "notes"]
+    title: str = ""
+    content: str = ""          # used for notes, ideas, and as description for goals/dreams
+    priority: int = 1          # 0=high, 1=medium, 2=low (not used for notes)
+
+
+@router.post("/append-item", status_code=201)
+async def append_creator_item(
+    body: AppendItemRequest,
+    _user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Append a single item to a Creator profile list (goals/dreams/ideas/notes).
+
+    Creates the profile if it does not exist yet.
+    Returns the newly created item.
+    """
+    svc = CreatorProfileService(db)
+    profile = await svc.get_profile()
+
+    item_id = str(uuid.uuid4())
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    if body.target == "notes":
+        new_item = NoteItem(id=item_id, title=body.title, content=body.content, created_at=now_iso)
+    elif body.target == "goals":
+        new_item = GoalItem(id=item_id, title=body.title, description=body.content, priority=body.priority)
+    elif body.target == "dreams":
+        new_item = DreamItem(id=item_id, title=body.title, description=body.content, priority=body.priority)
+    elif body.target == "ideas":
+        new_item = IdeaItem(id=item_id, title=body.title, description=body.content, priority=body.priority)
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown target: {body.target}")
+
+    # Use $push to append atomically
+    col = db["creator_profile"]
+    if profile:
+        await col.update_one(
+            {"_id": profile.id},
+            {"$push": {body.target: new_item.model_dump()}},
+        )
+    else:
+        # No profile yet — create with single item
+        from app.mongodb.models.creator_profile import MongoCreatorProfile
+        new_profile = MongoCreatorProfile(**{body.target: [new_item]})
+        doc = new_profile.model_dump()
+        doc["_id"] = doc.pop("id")
+        await col.insert_one(doc)
+
+    return {"ok": True, "item": new_item.model_dump()}

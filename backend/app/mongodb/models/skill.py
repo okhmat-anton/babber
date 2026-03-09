@@ -19,6 +19,7 @@ class MongoSkill(BaseModel):
     output_schema: Dict[str, Any] = Field(default_factory=dict)
     is_system: bool = False
     is_shared: bool = False
+    enabled: bool = True
     author_agent_id: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

@@ -12,6 +12,8 @@ class GoalItem(BaseModel):
     description: str = ""
     target_date: Optional[str] = None          # target date (ISO or free-form text)
     priority: int = 1                          # 0=high, 1=medium, 2=low
+    completed: bool = False                    # marked as done
+    in_context: bool = True                    # included in agent context
     children: List["GoalItem"] = Field(default_factory=list)  # sub-goals
 
 
@@ -21,6 +23,8 @@ class DreamItem(BaseModel):
     title: str = ""
     description: str = ""
     priority: int = 1                          # 0=high, 1=medium, 2=low
+    completed: bool = False
+    in_context: bool = True
 
 
 class IdeaItem(BaseModel):
@@ -29,6 +33,8 @@ class IdeaItem(BaseModel):
     title: str = ""
     description: str = ""
     priority: int = 1                          # 0=high, 1=medium, 2=low
+    completed: bool = False
+    in_context: bool = True
 
 
 class NoteItem(BaseModel):
@@ -36,6 +42,8 @@ class NoteItem(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     title: str = ""
     content: str = ""
+    completed: bool = False
+    in_context: bool = True
     created_at: Optional[str] = None  # ISO datetime string
 
 
@@ -89,27 +97,33 @@ class MongoCreatorProfile(BaseModel):
         if self.who:
             sections.append(f"Who they are: {self.who}")
         if self.goals:
-            lines = ["Goals:"]
-            for g in self.goals:
-                date_part = f" (target: {g.target_date})" if g.target_date else ""
-                prio = f" [{priority_labels.get(g.priority, 'MEDIUM')}]"
-                lines.append(f"  - {g.title}{prio}{date_part}")
-                if g.description:
-                    lines.append(f"    {g.description}")
-                for sub in g.children:
-                    sd = f" (target: {sub.target_date})" if sub.target_date else ""
-                    lines.append(f"    - {sub.title}{sd}")
-                    if sub.description:
-                        lines.append(f"      {sub.description}")
-            sections.append("\n".join(lines))
+            active_goals = [g for g in self.goals if getattr(g, 'in_context', True) and not getattr(g, 'completed', False)]
+            if active_goals:
+                lines = ["Goals:"]
+                for g in active_goals:
+                    date_part = f" (target: {g.target_date})" if g.target_date else ""
+                    prio = f" [{priority_labels.get(g.priority, 'MEDIUM')}]"
+                    lines.append(f"  - {g.title}{prio}{date_part}")
+                    if g.description:
+                        lines.append(f"    {g.description}")
+                    for sub in g.children:
+                        if getattr(sub, 'completed', False) or not getattr(sub, 'in_context', True):
+                            continue
+                        sd = f" (target: {sub.target_date})" if sub.target_date else ""
+                        lines.append(f"    - {sub.title}{sd}")
+                        if sub.description:
+                            lines.append(f"      {sub.description}")
+                sections.append("\n".join(lines))
         if self.dreams:
-            lines = ["Dreams:"]
-            for d in self.dreams:
-                prio = f" [{priority_labels.get(d.priority, 'MEDIUM')}]"
-                lines.append(f"  - {d.title}{prio}")
-                if d.description:
-                    lines.append(f"    {d.description}")
-            sections.append("\n".join(lines))
+            active_dreams = [d for d in self.dreams if getattr(d, 'in_context', True) and not getattr(d, 'completed', False)]
+            if active_dreams:
+                lines = ["Dreams:"]
+                for d in active_dreams:
+                    prio = f" [{priority_labels.get(d.priority, 'MEDIUM')}]"
+                    lines.append(f"  - {d.title}{prio}")
+                    if d.description:
+                        lines.append(f"    {d.description}")
+                sections.append("\n".join(lines))
         if self.skills_and_abilities:
             sections.append(f"Skills and abilities: {self.skills_and_abilities}")
         if self.current_situation:
@@ -123,18 +137,22 @@ class MongoCreatorProfile(BaseModel):
         if self.action_history:
             sections.append(f"Action history: {self.action_history}")
         if self.ideas:
-            lines = ["Ideas:"]
-            for i in self.ideas:
-                prio = f" [{priority_labels.get(i.priority, 'MEDIUM')}]"
-                lines.append(f"  - {i.title}{prio}")
-                if i.description:
-                    lines.append(f"    {i.description}")
-            sections.append("\n".join(lines))
+            active_ideas = [i for i in self.ideas if getattr(i, 'in_context', True) and not getattr(i, 'completed', False)]
+            if active_ideas:
+                lines = ["Ideas:"]
+                for i in active_ideas:
+                    prio = f" [{priority_labels.get(i.priority, 'MEDIUM')}]"
+                    lines.append(f"  - {i.title}{prio}")
+                    if i.description:
+                        lines.append(f"    {i.description}")
+                sections.append("\n".join(lines))
         if self.notes:
-            lines = ["Notes:"]
-            for n in self.notes:
-                lines.append(f"  - {n.title}")
-                if n.content:
-                    lines.append(f"    {n.content}")
-            sections.append("\n".join(lines))
+            active_notes = [n for n in self.notes if getattr(n, 'in_context', True) and not getattr(n, 'completed', False)]
+            if active_notes:
+                lines = ["Notes:"]
+                for n in active_notes:
+                    lines.append(f"  - {n.title}")
+                    if n.content:
+                        lines.append(f"    {n.content}")
+                sections.append("\n".join(lines))
         return "\n".join(sections) if sections else ""
