@@ -207,6 +207,46 @@
       </v-card-text>
     </v-card>
 
+    <!-- ScrapeCreators (Video Transcripts) -->
+    <v-card class="mb-6">
+      <v-card-title>
+        <v-icon class="mr-2" color="teal">mdi-video-outline</v-icon>ScrapeCreators (Video Transcripts)
+      </v-card-title>
+      <v-card-text>
+        <v-row>
+          <v-col cols="12" md="8">
+            <v-text-field
+              v-model="scrapcreatorsSettings.scrapecreators_api_key"
+              label="ScrapeCreators API Key"
+              :type="showScrapcreatorsKey ? 'text' : 'password'"
+              variant="outlined"
+              density="compact"
+              hide-details
+              placeholder="Enter your ScrapeCreators API key"
+              :append-inner-icon="showScrapcreatorsKey ? 'mdi-eye-off' : 'mdi-eye'"
+              @click:append-inner="showScrapcreatorsKey = !showScrapcreatorsKey"
+            />
+          </v-col>
+          <v-col cols="12" md="4" class="d-flex align-center ga-2">
+            <v-btn
+              color="primary"
+              :disabled="!scrapcreatorsSettingsChanged"
+              :loading="savingScrapcreators"
+              @click="saveScrapcreatorsSettings"
+            >
+              <v-icon start>mdi-content-save</v-icon>
+              Save
+            </v-btn>
+          </v-col>
+        </v-row>
+        <v-alert type="info" variant="tonal" density="compact" class="mt-3">
+          ScrapeCreators API is used by the <strong>video_watch</strong> skill to fetch video transcripts from
+          YouTube, TikTok, Instagram, Facebook, and Twitter.
+          Get your API key at <a href="https://app.scrapecreators.com" target="_blank" class="text-primary">app.scrapecreators.com</a>.
+        </v-alert>
+      </v-card-text>
+    </v-card>
+
     <v-row>
       <v-col cols="6">
         <v-card>
@@ -315,6 +355,16 @@ const anthropicSettingsChanged = computed(() => {
   return anthropicSettings.value.anthropic_api_key !== originalAnthropicSettings.value.anthropic_api_key
 })
 
+// ScrapeCreators settings
+const scrapcreatorsSettings = ref({ scrapecreators_api_key: '' })
+const originalScrapcreatorsSettings = ref({ scrapecreators_api_key: '' })
+const showScrapcreatorsKey = ref(false)
+const savingScrapcreators = ref(false)
+
+const scrapcreatorsSettingsChanged = computed(() => {
+  return scrapcreatorsSettings.value.scrapecreators_api_key !== originalScrapcreatorsSettings.value.scrapecreators_api_key
+})
+
 // Confirmation dialog
 const confirmDialog = ref(false)
 const confirmText = ref('')
@@ -357,6 +407,11 @@ onMounted(async () => {
       anthropicSettings.value.anthropic_api_key = store.systemSettings.anthropic_api_key.value
       originalAnthropicSettings.value.anthropic_api_key = store.systemSettings.anthropic_api_key.value
     }
+    // Load ScrapeCreators settings
+    if (store.systemSettings.scrapecreators_api_key?.value) {
+      scrapcreatorsSettings.value.scrapecreators_api_key = store.systemSettings.scrapecreators_api_key.value
+      originalScrapcreatorsSettings.value.scrapecreators_api_key = store.systemSettings.scrapecreators_api_key.value
+    }
   } catch (e) {
     console.error('Failed to load system settings', e)
   }
@@ -390,6 +445,19 @@ const testAnthropicConnection = async () => {
     anthropicTestResult.value = { type: 'error', message: e.response?.data?.detail || 'Connection failed' }
   } finally {
     testingAnthropic.value = false
+  }
+}
+
+const saveScrapcreatorsSettings = async () => {
+  savingScrapcreators.value = true
+  try {
+    await store.updateSystemSetting('scrapecreators_api_key', scrapcreatorsSettings.value.scrapecreators_api_key)
+    originalScrapcreatorsSettings.value.scrapecreators_api_key = scrapcreatorsSettings.value.scrapecreators_api_key
+    showSnackbar('ScrapeCreators API key saved')
+  } catch (e) {
+    showSnackbar(e.response?.data?.detail || 'Failed to save ScrapeCreators key', 'error')
+  } finally {
+    savingScrapcreators.value = false
   }
 }
 

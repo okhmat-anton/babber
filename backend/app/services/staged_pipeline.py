@@ -83,6 +83,106 @@ TASK_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+
+# ── ScrapeCreators platform detection ────────────────────────────────
+
+def _detect_video_platform(url: str) -> tuple[str | None, str | None]:
+    """Detect platform from video URL and return (platform_name, api_path).
+    Returns (None, None) if the platform is not supported.
+    """
+    url_lower = url.lower()
+    if "youtube.com" in url_lower or "youtu.be" in url_lower:
+        return ("youtube", "/v1/youtube/video/transcript")
+    elif "tiktok.com" in url_lower:
+        return ("tiktok", "/v1/tiktok/video/transcript")
+    elif "instagram.com" in url_lower:
+        return ("instagram", "/v2/instagram/media/transcript")
+    elif "facebook.com" in url_lower or "fb.watch" in url_lower:
+        return ("facebook", "/v1/facebook/post/transcript")
+    elif "twitter.com" in url_lower or "x.com" in url_lower:
+        return ("twitter", "/v1/twitter/tweet/transcript")
+    return (None, None)
+
+
+def _parse_transcript_response(
+    platform: str, data: dict
+) -> tuple[str | None, str | None, list | None, str | None]:
+    """Parse ScrapeCreators API response and extract transcript text.
+    Returns (transcript_text, video_id, segments, language).
+    """
+    transcript_text = None
+    video_id = None
+    segments = None
+    language = None
+
+    if platform == "youtube":
+        # YouTube returns {videoId, transcript: [{text, startMs, endMs, startTimeText}], transcript_only_text, language}
+        video_id = data.get("videoId")
+        transcript_text = data.get("transcript_only_text")
+        language = data.get("language")
+        raw_segments = data.get("transcript")
+        if isinstance(raw_segments, list):
+            segments = raw_segments
+        # Fallback: build text from segments
+        if not transcript_text and segments:
+            transcript_text = " ".join(s.get("text", "") for s in segments if isinstance(s, dict))
+
+    elif platform == "tiktok":
+        # TikTok returns {id, url, transcript: "WEBVTT string"}
+        video_id = data.get("id")
+        raw = data.get("transcript")
+        if isinstance(raw, str) and raw.strip():
+            # Extract plain text from WEBVTT format
+            lines = raw.split("\n")
+            text_lines = []
+            for line in lines:
+                line = line.strip()
+                if not line or line.startswith("WEBVTT") or "-->" in line or line.isdigit():
+                    continue
+                text_lines.append(line)
+            transcript_text = " ".join(text_lines) if text_lines else None
+
+    elif platform == "instagram":
+        # Instagram returns {success, transcripts: [{id, shortcode, text}]}
+        transcripts = data.get("transcripts", [])
+        if isinstance(transcripts, list) and transcripts:
+            parts = []
+            for t in transcripts:
+                if isinstance(t, dict) and t.get("text"):
+                    parts.append(t["text"])
+                    if not video_id:
+                        video_id = t.get("id") or t.get("shortcode")
+            transcript_text = " ".join(parts) if parts else None
+
+    elif platform == "facebook":
+        # Facebook returns transcript similarly to TikTok/YouTube
+        video_id = data.get("id")
+        transcript_text = data.get("transcript_only_text") or data.get("transcript")
+        if isinstance(transcript_text, list):
+            transcript_text = " ".join(
+                s.get("text", "") for s in transcript_text if isinstance(s, dict)
+            )
+        language = data.get("language")
+
+    elif platform == "twitter":
+        # Twitter returns transcript similarly
+        video_id = data.get("id")
+        transcript_text = data.get("transcript_only_text") or data.get("transcript")
+        if isinstance(transcript_text, list):
+            transcript_text = " ".join(
+                s.get("text", "") for s in transcript_text if isinstance(s, dict)
+            )
+        language = data.get("language")
+
+    # Clean up transcript text
+    if isinstance(transcript_text, str):
+        transcript_text = transcript_text.strip()
+        if not transcript_text:
+            transcript_text = None
+
+    return (transcript_text, str(video_id) if video_id else None, segments, language)
+
+
 # ── Skill categories ─────────────────────────────────────────────────
 # "gather" skills collect information — safe to run automatically
 # "action" skills modify state — only run from explicit plan
@@ -94,6 +194,7 @@ GATHER_SKILLS = frozenset({
     "study_material", "recall_knowledge",
     "creator_context",
     "fact_read",
+    "video_watch",
 })
 
 ACTION_SKILLS = frozenset({
@@ -459,6 +560,7 @@ class StagedPipeline:
         "study_material", "recall_knowledge",
         "creator_context",
         "fact_save", "fact_read", "fact_extract",
+        "video_watch",
     }
 
     async def _exec_skill(self, name: str, args: dict) -> dict:
@@ -512,6 +614,8 @@ class StagedPipeline:
             return await self._sys_fact_read(db, agent_id, args)
         elif name == "fact_extract":
             return await self._sys_fact_extract(db, agent_id, args)
+        elif name == "video_watch":
+            return await self._sys_video_watch(db, agent_id, args)
         return None
 
     async def _sys_memory_search(self, db, agent_id: str, args: dict) -> dict:
@@ -1138,6 +1242,111 @@ class StagedPipeline:
         except Exception as e:
             logger.warning(f"fact_extract failed: {e}")
             return {"error": f"Fact extraction failed: {e}"}
+
+    async def _sys_video_watch(self, db, agent_id: str, args: dict) -> dict:
+        """Fetch video transcript via ScrapeCreators API and cache in watched_videos collection."""
+        import httpx
+        from app.api.settings import get_setting_value
+        from app.mongodb.services import WatchedVideoService
+        from app.mongodb.models.watched_video import MongoWatchedVideo
+
+        url = str(args.get("url", "")).strip()
+        language = str(args.get("language", "")).strip() or None
+        if not url:
+            return {"error": "No URL provided"}
+
+        video_svc = WatchedVideoService(db)
+
+        # Check cache first
+        existing = await video_svc.get_by_url(url)
+        if existing and existing.transcript:
+            return {
+                "result": {
+                    "platform": existing.platform,
+                    "video_id": existing.video_id,
+                    "transcript": existing.transcript,
+                    "language": existing.language,
+                    "cached": True,
+                },
+            }
+
+        # Get API key from system settings
+        api_key = await get_setting_value(db, "scrapecreators_api_key")
+        if not api_key:
+            return {"error": "ScrapeCreators API key not configured. Add it in Settings."}
+
+        # Detect platform and build request
+        platform, api_path = _detect_video_platform(url)
+        if not platform:
+            return {"error": f"Unsupported video URL. Supported platforms: YouTube, TikTok, Instagram, Facebook, Twitter."}
+
+        # Call ScrapeCreators API
+        base_url = "https://api.scrapecreators.com"
+        params = {"url": url}
+        if language:
+            params["language"] = language
+
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.get(
+                    f"{base_url}{api_path}",
+                    params=params,
+                    headers={"x-api-key": api_key},
+                )
+            if resp.status_code != 200:
+                error_detail = resp.text[:500]
+                # Save failed attempt
+                failed_record = MongoWatchedVideo(
+                    url=url,
+                    platform=platform,
+                    agent_id=agent_id,
+                    error=f"HTTP {resp.status_code}: {error_detail}",
+                )
+                await video_svc.create(failed_record)
+                return {"error": f"ScrapeCreators API error ({resp.status_code}): {error_detail}"}
+
+            data = resp.json()
+        except Exception as e:
+            return {"error": f"ScrapeCreators API request failed: {e}"}
+
+        # Extract transcript based on platform
+        transcript_text, video_id, segments, lang = _parse_transcript_response(platform, data)
+
+        if not transcript_text:
+            # Save record with no transcript (video might not have captions)
+            record = MongoWatchedVideo(
+                url=url,
+                platform=platform,
+                video_id=video_id,
+                agent_id=agent_id,
+                language=lang or (language if language else None),
+                error="No transcript available for this video",
+            )
+            await video_svc.create(record)
+            return {"error": "No transcript available for this video."}
+
+        # Save successful transcript
+        record = MongoWatchedVideo(
+            url=url,
+            platform=platform,
+            video_id=video_id,
+            transcript=transcript_text,
+            transcript_segments=segments,
+            language=lang or language,
+            agent_id=agent_id,
+            metadata={"raw_keys": list(data.keys())},
+        )
+        await video_svc.create(record)
+
+        return {
+            "result": {
+                "platform": platform,
+                "video_id": video_id,
+                "transcript": transcript_text,
+                "language": lang or language,
+                "cached": False,
+            },
+        }
 
     def _build_context(self, classification: Classification, user_input: str) -> dict:
         """Build context dict for arg inference."""

@@ -13,6 +13,7 @@ from app.mongodb.models.memory import MongoMemory, MongoMemoryLink
 from app.mongodb.models.creator_profile import MongoCreatorProfile
 from app.mongodb.models.agent_fact import MongoAgentFact
 from app.mongodb.models.research_resource import MongoResearchResource
+from app.mongodb.models.watched_video import MongoWatchedVideo
 
 __all__ = [
     "MongoUser",
@@ -39,4 +40,5 @@ __all__ = [
     "MongoCreatorProfile",
     "MongoAgentFact",
     "MongoResearchResource",
+    "MongoWatchedVideo",
 ]

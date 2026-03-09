@@ -374,6 +374,8 @@ _DEFAULT_SETTINGS = {
     "tts_timeout": {"value": "120", "description": "Maximum time (seconds) to wait for TTS audio generation. kie.ai processes async, so longer texts need more time."},
     # Anthropic
     "anthropic_api_key": {"value": "", "description": "Anthropic API key for Claude models (claude-sonnet-4, claude-opus-4, etc.)"},
+    # ScrapeCreators — social media video transcripts
+    "scrapecreators_api_key": {"value": "", "description": "ScrapeCreators API key for fetching video transcripts from YouTube, TikTok, Instagram, Facebook, Twitter"},
 }
 
 

@@ -28,6 +28,7 @@ from app.mongodb.models import (
 from app.mongodb.models.messenger import MongoMessengerAccount, MongoMessengerMessage, MongoMessengerLog
 from app.mongodb.models.agent_fact import MongoAgentFact
 from app.mongodb.models.research_resource import MongoResearchResource
+from app.mongodb.models.watched_video import MongoWatchedVideo
 
 
 class UserService(BaseMongoService[MongoUser]):
@@ -381,4 +382,39 @@ class ResearchResourceService(BaseMongoService[MongoResearchResource]):
             {"_id": resource_id},
             {"$inc": {"use_count": 1}, "$set": {"last_used_at": datetime.now(timezone.utc).isoformat()}}
         )
+
+
+class WatchedVideoService(BaseMongoService[MongoWatchedVideo]):
+    """CRUD service for watched video transcripts."""
+    def __init__(self, db: AsyncIOMotorDatabase):
+        super().__init__(db, "watched_videos", MongoWatchedVideo)
+
+    async def get_by_url(self, url: str) -> MongoWatchedVideo | None:
+        """Find a watched video by its original URL."""
+        return await self.find_one({"url": url})
+
+    async def get_by_platform(self, platform: str, limit: int = 100, skip: int = 0):
+        """Get all watched videos for a specific platform."""
+        cursor = self.collection.find({"platform": platform}).sort("created_at", -1).skip(skip).limit(limit)
+        docs = await cursor.to_list(length=limit)
+        return [self.model_class.from_mongo(doc) for doc in docs]
+
+    async def get_by_agent(self, agent_id: str, limit: int = 100, skip: int = 0):
+        """Get all watched videos requested by a specific agent."""
+        cursor = self.collection.find({"agent_id": agent_id}).sort("created_at", -1).skip(skip).limit(limit)
+        docs = await cursor.to_list(length=limit)
+        return [self.model_class.from_mongo(doc) for doc in docs]
+
+    async def search(self, query: str, limit: int = 50):
+        """Search watched videos by URL, title, or transcript text."""
+        filt = {
+            "$or": [
+                {"url": {"$regex": query, "$options": "i"}},
+                {"title": {"$regex": query, "$options": "i"}},
+                {"transcript": {"$regex": query, "$options": "i"}},
+            ]
+        }
+        cursor = self.collection.find(filt).sort("created_at", -1).limit(limit)
+        docs = await cursor.to_list(length=limit)
+        return [self.model_class.from_mongo(doc) for doc in docs]
 

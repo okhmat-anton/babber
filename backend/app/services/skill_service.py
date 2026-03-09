@@ -699,6 +699,30 @@ SYSTEM_SKILLS = [
         "code": "# Creator context — executed by pipeline handler",
         "input_schema": {"type": "object", "properties": {}},
     },
+    {
+        "name": "video_watch",
+        "display_name": "Video Watch",
+        "description": "Fetch video transcript from YouTube, TikTok, Instagram, Facebook, or Twitter via ScrapeCreators API.",
+        "description_for_agent": (
+            "Fetch the transcript (subtitles/captions) of a video from YouTube, TikTok, Instagram, "
+            "Facebook, or Twitter using the ScrapeCreators API. The transcript is saved to the "
+            "watched videos database so repeated requests for the same URL are served from cache. "
+            "Parameters: url (string, required — full video URL), "
+            "language (string, optional — 2-letter language code like 'en', 'es', 'fr'; default: auto-detect). "
+            "Returns: {platform, video_id, transcript, language, cached} on success or {error} on failure. "
+            "Use this when asked to watch, transcribe, or get the content of a video."
+        ),
+        "category": "web",
+        "code": "# Video transcript via ScrapeCreators — executed by pipeline handler",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "Full video URL (YouTube, TikTok, Instagram, Facebook, or Twitter)"},
+                "language": {"type": "string", "description": "2-letter language code (en, es, fr, etc.). Optional."},
+            },
+            "required": ["url"],
+        },
+    },
 ]
 
 
