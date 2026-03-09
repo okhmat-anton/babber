@@ -46,7 +46,7 @@
             size="small"
             variant="outlined"
             prepend-icon="mdi-delete-sweep"
-            @click="output = []"
+            @click="output = []; saveState()"
           >
             Clear
           </v-btn>
@@ -210,6 +210,32 @@ const shellHistory = ref([])
 const localHistory = ref([])
 const historyIndex = ref(-1)
 
+// Persistence helpers
+const STORAGE_KEY_OUTPUT = 'terminal_output'
+const STORAGE_KEY_CWD = 'terminal_cwd'
+const STORAGE_KEY_HISTORY = 'terminal_local_history'
+const MAX_PERSISTED_ENTRIES = 500
+
+function saveState() {
+  try {
+    const trimmed = output.value.slice(-MAX_PERSISTED_ENTRIES)
+    sessionStorage.setItem(STORAGE_KEY_OUTPUT, JSON.stringify(trimmed))
+    sessionStorage.setItem(STORAGE_KEY_CWD, cwd.value)
+    localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(localHistory.value.slice(0, 200)))
+  } catch { /* quota exceeded — ignore */ }
+}
+
+function restoreState() {
+  try {
+    const saved = sessionStorage.getItem(STORAGE_KEY_OUTPUT)
+    if (saved) output.value = JSON.parse(saved)
+    const savedCwd = sessionStorage.getItem(STORAGE_KEY_CWD)
+    if (savedCwd) cwd.value = savedCwd
+    const savedHistory = localStorage.getItem(STORAGE_KEY_HISTORY)
+    if (savedHistory) localHistory.value = JSON.parse(savedHistory)
+  } catch { /* corrupted — ignore */ }
+}
+
 const quickCommands = [
   { label: 'pwd', cmd: 'pwd' },
   { label: 'whoami', cmd: 'whoami' },
@@ -229,6 +255,7 @@ const quickCommands = [
 ]
 
 onMounted(async () => {
+  restoreState()
   await settingsStore.fetchSystemSettings()
   enabled.value = settingsStore.systemSettings.system_access_enabled?.value === 'true'
   if (enabled.value) {
@@ -236,10 +263,10 @@ onMounted(async () => {
     try {
       const { data } = await api.post('/terminal/execute', { command: 'echo $HOME', timeout: 5 })
       homeDir.value = data.stdout.trim()
-      cwd.value = homeDir.value
+      if (!cwd.value) cwd.value = homeDir.value
     } catch {
-      cwd.value = '/tmp'
-      homeDir.value = '/tmp'
+      if (!cwd.value) cwd.value = '/tmp'
+      homeDir.value = cwd.value || '/tmp'
     }
   }
 })
@@ -297,6 +324,7 @@ async function runCommand() {
     })
   } finally {
     executing.value = false
+    saveState()
     scrollToBottom()
   }
 }
@@ -320,6 +348,7 @@ async function changeDir(dir) {
   } catch (e) {
     output.value.push({ type: 'stderr', text: `cd: ${dir}: No such file or directory` })
   }
+  saveState()
   scrollToBottom()
 }
 

@@ -20,6 +20,16 @@
           :value="item.path"
           rounded="xl"
         />
+        <v-divider class="my-2" />
+        <v-list-item
+          v-for="item in settingsNav"
+          :key="item.path"
+          :to="item.path"
+          :prepend-icon="item.icon"
+          :title="item.title"
+          :value="item.path"
+          rounded="xl"
+        />
       </v-list>
       <template #append>
         <v-list density="compact" nav>
@@ -155,18 +165,14 @@ const navItems = [
   { path: '/', icon: 'mdi-view-dashboard', title: 'Dashboard' },
   { path: '/creator', icon: 'mdi-account-heart', title: 'Creator' },
   { path: '/agents', icon: 'mdi-robot', title: 'Agents' },
-  { path: '/protocols', icon: 'mdi-head-cog', title: 'Protocols' },
   { path: '/research-resources', icon: 'mdi-book-search', title: 'Research Resources' },
   { path: '/tasks', icon: 'mdi-clipboard-list', title: 'Tasks' },
-  { path: '/skills', icon: 'mdi-puzzle', title: 'Skills (Codes)' },
   { path: '/projects', icon: 'mdi-folder-wrench', title: 'Projects' },
-  { path: '/agent-errors', icon: 'mdi-alert-circle-outline', title: 'Agent Errors' },
   { path: '/models', icon: 'mdi-brain', title: 'Models' },
+]
+
+const settingsNav = [
   { path: '/settings', icon: 'mdi-cog', title: 'Settings' },
-  { path: '/files', icon: 'mdi-folder-open', title: 'Files' },
-  { path: '/terminal', icon: 'mdi-console', title: 'Terminal' },
-  { path: '/system', icon: 'mdi-monitor-dashboard', title: 'System' },
-  { path: '/system/logs', icon: 'mdi-text-box-search', title: 'System Logs' },
 ]
 
 onMounted(() => {
