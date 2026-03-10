@@ -66,6 +66,7 @@ class ChatSessionCreate(BaseModel):
     chat_type: str = "user"            # 'user', 'agent', 'project_task'
     project_slug: Optional[str] = None # for project_task chats
     task_id: Optional[str] = None      # for project_task chats
+    video_id: Optional[str] = None     # for video transcript chats
 
 
 class ChatSessionUpdate(BaseModel):
@@ -88,6 +89,7 @@ class ChatSessionResponse(BaseModel):
     chat_type: str = "user"
     project_slug: Optional[str] = None
     task_id: Optional[str] = None
+    video_id: Optional[str] = None
     unread_count: int = 0
     message_count: int = 0
     created_at: str
@@ -157,6 +159,7 @@ def _session_to_response(session: MongoChatSession, messages: list = None,
         "chat_type": session.chat_type,
         "project_slug": session.project_slug,
         "task_id": session.task_id,
+        "video_id": getattr(session, 'video_id', None),
         "unread_count": session.unread_count,
         "protocol_state": session.protocol_state,
         "message_count": len(msgs),
@@ -545,6 +548,7 @@ async def create_session(
         chat_type=body.chat_type,
         project_slug=body.project_slug,
         task_id=body.task_id,
+        video_id=body.video_id,
         unread_count=0,
     )
     session = await sess_svc.create(session)

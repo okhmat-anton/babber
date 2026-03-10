@@ -70,7 +70,7 @@
       <TopBar />
       <div class="layout-split">
         <!-- Main Content -->
-        <div class="main-content" :style="{ marginRight: chatStore.panelOpen ? panelWidth + 'px' : '0' }">
+        <div ref="mainContentEl" class="main-content" :style="{ marginRight: chatStore.panelOpen ? panelWidth + 'px' : '0' }">
           <v-alert
             v-if="baseModelAlert"
             type="error"
@@ -85,6 +85,14 @@
             <router-view />
           </v-container>
         </div>
+
+        <!-- Global Text Selection Popup (for all pages) -->
+        <TextSelectionPopup
+          ref="globalSelectionPopupRef"
+          :container-el="mainContentEl"
+          :agents="globalAgents"
+          @save="handleGlobalSelectionSave"
+        />
 
         <!-- Chat Side Panel -->
         <transition name="slide-panel">
@@ -123,20 +131,28 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useChatStore } from '../stores/chat'
 import { useSettingsStore } from '../stores/settings'
+import { useAgentsStore } from '../stores/agents'
 import ChatPanel from '../components/ChatPanel.vue'
 import TopBar from '../components/TopBar.vue'
+import TextSelectionPopup from '../components/TextSelectionPopup.vue'
+import api from '../api'
 
 const router = useRouter()
 const auth = useAuthStore()
 const chatStore = useChatStore()
 const settingsStore = useSettingsStore()
+const agentsStore = useAgentsStore()
 const drawer = ref(true)
 const rail = ref(false)
+
+const globalSelectionPopupRef = ref(null)
+const mainContentEl = ref(null)
+const globalAgents = ref([])
 
 const baseModelAlert = computed(() => settingsStore.baseModelAlertText)
 
@@ -204,6 +220,7 @@ const navItems = [
   { path: '/analysis', icon: 'mdi-chart-timeline-variant-shimmer', title: 'Analysis' },
   { path: '/facts', icon: 'mdi-check-decagram', title: 'Facts' },
   { path: '/events', icon: 'mdi-calendar-clock', title: 'Events' },
+  { path: '/ideas', icon: 'mdi-lightbulb-on', title: 'Ideas' },
   { path: '/projects', icon: 'mdi-folder-wrench', title: 'Projects' },
   { path: '/models', icon: 'mdi-brain', title: 'Models' },
 ]
@@ -214,7 +231,92 @@ const settingsNav = [
 
 onMounted(() => {
   settingsStore.refreshBaseModelStatus()
+  // Load agents for global text selection popup
+  agentsStore.fetchAgents().then(() => {
+    globalAgents.value = agentsStore.agents || []
+  }).catch(() => {})
 })
+
+// ── Global text selection save handler ──────────────────────────────
+async function handleGlobalSelectionSave(target, extra = {}) {
+  const text = globalSelectionPopupRef.value?.getSelectedText()
+  if (!text?.trim()) return
+  const trimmed = text.trim()
+  const titleSnippet = trimmed.substring(0, 80).replace(/[#*`\n]/g, '').trim() + (trimmed.length > 80 ? '…' : '')
+  
+  try {
+    // Global targets
+    if (target === 'global_fact') {
+      // Need an agent for facts - use first available
+      const agentId = globalAgents.value[0]?.id
+      if (!agentId) {
+        globalSelectionPopupRef.value?.showStatus('No agent available', 'error')
+        return
+      }
+      await api.post('/facts', {
+        agent_id: agentId,
+        type: 'fact',
+        content: trimmed,
+        source: 'text_selection',
+      })
+    } else if (target === 'global_analysis') {
+      await api.post('/analysis-topics', {
+        title: titleSnippet,
+        description: trimmed,
+        status: 'active',
+      })
+    } else if (target === 'global_idea') {
+      await api.post('/ideas', {
+        title: titleSnippet,
+        description: trimmed,
+        source: 'user',
+      })
+    } else if (target.startsWith('agent_') && extra.agentId) {
+      // Agent targets
+      const aid = extra.agentId
+      switch (target) {
+        case 'agent_fact':
+          await api.post(`/agents/${aid}/facts`, {
+            type: 'fact', content: trimmed, source: 'text_selection',
+          })
+          break
+        case 'agent_belief':
+          await api.post(`/agents/${aid}/beliefs/core`, {
+            text: trimmed, category: 'other',
+          })
+          break
+        case 'agent_aspiration':
+          await api.post(`/agents/${aid}/aspirations/goals`, {
+            text: trimmed, priority: 'medium', locked: true,
+          })
+          break
+        case 'agent_event':
+          await api.post(`/agents/${aid}/events`, {
+            event_type: 'observation', title: titleSnippet, description: trimmed,
+            source: 'text_selection', importance: 'medium',
+          })
+          break
+        case 'agent_task':
+          await api.post(`/agents/${aid}/tasks`, {
+            title: titleSnippet, description: trimmed,
+          })
+          break
+      }
+    } else {
+      // Creator items (notes, goals, ideas, dreams)
+      await api.post('/creator/append-item', {
+        target,
+        title: titleSnippet,
+        content: trimmed,
+      })
+    }
+    globalSelectionPopupRef.value?.showStatus('Saved!', 'success')
+    window.getSelection()?.removeAllRanges()
+  } catch (e) {
+    console.error('Global selection save failed:', e)
+    globalSelectionPopupRef.value?.showStatus('Error', 'error')
+  }
+}
 
 const handleLogout = async () => {
   await auth.logout()

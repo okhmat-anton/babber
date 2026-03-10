@@ -13,6 +13,7 @@ class MongoChatSession(BaseModel):
     chat_type: str = "user"  # user, agent, project_task
     project_slug: Optional[str] = None
     task_id: Optional[str] = None
+    video_id: Optional[str] = None  # linked watched video
     model_ids: List[str] = Field(default_factory=list)
     agent_id: Optional[str] = None
     agent_ids: List[str] = Field(default_factory=list)

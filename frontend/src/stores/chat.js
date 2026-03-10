@@ -82,6 +82,7 @@ export const useChatStore = defineStore('chat', {
           chat_type: params.chat_type || 'user',
           project_slug: params.project_slug || null,
           task_id: params.task_id || null,
+          video_id: params.video_id || null,
         })
         this.sessions.unshift(data)
         this.currentSession = data

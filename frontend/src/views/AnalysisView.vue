@@ -4,6 +4,16 @@
     <div class="d-flex align-center mb-6">
       <div class="text-h4 font-weight-bold">Analysis</div>
       <v-spacer />
+      <v-btn
+        v-if="selectedItems.length"
+        color="deep-purple"
+        variant="tonal"
+        prepend-icon="mdi-forum"
+        class="mr-3"
+        @click="discussSelected"
+      >
+        Discuss ({{ selectedItems.length }})
+      </v-btn>
       <v-btn color="primary" prepend-icon="mdi-plus" @click="openCreateDialog">
         New Topic
       </v-btn>
@@ -60,9 +70,12 @@
         <v-card>
           <v-card-text class="pa-0">
             <v-data-table
+              v-model="selectedItems"
               :headers="headers"
               :items="group.items"
               :loading="loading"
+              show-select
+              return-object
               hover
               density="compact"
               @click:row="(_, { item }) => openDetail(item)"
@@ -86,6 +99,9 @@
               <template #item.fact_ids="{ item }">
                 <v-chip size="small" variant="tonal" color="teal">{{ item.fact_ids?.length || 0 }} facts</v-chip>
               </template>
+              <template #item.links="{ item }">
+                <span class="text-caption">{{ linkedCount(item) || '' }}</span>
+              </template>
               <template #item.created_at="{ item }">{{ formatDate(item.created_at) }}</template>
               <template #item.actions="{ item }">
                 <v-btn icon size="small" variant="text" @click.stop="editTopic(item)"><v-icon>mdi-pencil</v-icon></v-btn>
@@ -101,9 +117,12 @@
     <v-card v-else>
       <v-card-text class="pa-0">
         <v-data-table
+          v-model="selectedItems"
           :headers="headers"
           :items="topics"
           :loading="loading"
+          show-select
+          return-object
           hover
           @click:row="(_, { item }) => openDetail(item)"
         >
@@ -137,6 +156,10 @@
             <v-chip size="small" variant="tonal" color="teal">
               {{ item.fact_ids?.length || 0 }} facts
             </v-chip>
+          </template>
+
+          <template #item.links="{ item }">
+            <span class="text-caption">{{ linkedCount(item) || '' }}</span>
           </template>
 
           <template #item.created_at="{ item }">
@@ -188,6 +211,24 @@
           </div>
 
           <v-divider class="mb-4" />
+
+          <!-- Linked Entities -->
+          <div v-if="currentTopic.linked_video_ids?.length || currentTopic.linked_idea_ids?.length" class="mb-4">
+            <div class="text-subtitle-2 font-weight-bold mb-2">
+              <v-icon size="18" class="mr-1">mdi-link-variant</v-icon>
+              Linked Entities
+            </div>
+            <div class="d-flex flex-wrap ga-2">
+              <v-chip v-for="vid in (currentTopic.linked_video_ids || [])" :key="'v-'+vid" size="small" variant="tonal" color="red" closable @click:close="unlinkFromTopic('video', vid)">
+                <v-icon start size="14">mdi-video-outline</v-icon>
+                Video
+              </v-chip>
+              <v-chip v-for="iid in (currentTopic.linked_idea_ids || [])" :key="'i-'+iid" size="small" variant="tonal" color="amber" closable @click:close="unlinkFromTopic('idea', iid)">
+                <v-icon start size="14">mdi-lightbulb-on-outline</v-icon>
+                Idea
+              </v-chip>
+            </div>
+          </div>
 
           <!-- Connected Facts -->
           <div class="d-flex align-center mb-3">
@@ -300,6 +341,31 @@
 
     <!-- Connect Fact Dialog -->
     <v-dialog v-model="connectFactDialog" max-width="700" scrollable>
+
+    <!-- Delete Confirmation Dialog -->
+    <v-dialog v-model="deleteDialog" max-width="400">
+      <v-card>
+        <v-card-title class="text-h6">Delete Topic</v-card-title>
+        <v-card-text>
+          Are you sure you want to delete this topic? This action cannot be undone.
+          <v-text-field
+            v-model="deleteConfirmText"
+            label="Type DELETE to confirm"
+            variant="outlined"
+            density="compact"
+            class="mt-4"
+          />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn @click="deleteDialog = false">Cancel</v-btn>
+          <v-btn color="error" :disabled="deleteConfirmText !== 'DELETE'" @click="doDeleteTopic">Delete</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Connect Fact Dialog -->
+    <v-dialog v-model="connectFactDialog" max-width="700" scrollable>
       <v-card>
         <v-card-title class="d-flex align-center">
           Connect Fact
@@ -358,9 +424,11 @@
 import { ref, computed, onMounted, inject } from 'vue'
 import api from '../api'
 import { useAgentsStore } from '../stores/agents'
+import { useChatStore } from '../stores/chat'
 
 const showSnackbar = inject('showSnackbar')
 const agentsStore = useAgentsStore()
+const chatStore = useChatStore()
 
 // State
 const topics = ref([])
@@ -378,11 +446,16 @@ const editingTopic = ref(null)
 const saving = ref(false)
 const formData = ref({ title: '', description: '', status: 'active', agent_id: null, category: '', tags: [] })
 const filterCategory = ref(null)
+const selectedItems = ref([])
 
 const connectFactDialog = ref(false)
 const availableFacts = ref([])
 const availableFactsLoading = ref(false)
 const factSearchQuery = ref('')
+
+const deleteDialog = ref(false)
+const deleteTopicId = ref(null)
+const deleteConfirmText = ref('')
 
 const agents = ref([])
 
@@ -399,6 +472,7 @@ const headers = [
   { title: 'Agent', key: 'agent_id', width: 150 },
   { title: 'Category', key: 'category', width: 140 },
   { title: 'Facts', key: 'fact_ids', width: 100 },
+  { title: 'Links', key: 'links', width: 80, sortable: false },
   { title: 'Created', key: 'created_at', width: 140 },
   { title: 'Actions', key: 'actions', sortable: false, width: 100 },
 ]
@@ -506,6 +580,14 @@ async function saveTopic() {
 }
 
 async function deleteTopic(id) {
+  deleteTopicId.value = id
+  deleteConfirmText.value = ''
+  deleteDialog.value = true
+}
+
+async function doDeleteTopic() {
+  const id = deleteTopicId.value
+  deleteDialog.value = false
   try {
     await api.delete(`/analysis-topics/${id}`)
     topics.value = topics.value.filter(t => t.id !== id)
@@ -594,8 +676,43 @@ function statusColor(s) {
   return { draft: 'grey', active: 'blue', completed: 'success', archived: 'brown' }[s] || 'grey'
 }
 
+function linkedCount(item) {
+  return (item.linked_video_ids?.length || 0) + (item.linked_idea_ids?.length || 0)
+}
+
 function formatDate(dt) {
   if (!dt) return ''
   return new Date(dt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+async function discussSelected() {
+  if (!selectedItems.value.length) return
+  try {
+    const lines = selectedItems.value.map(t => {
+      const desc = t.description ? `\n${t.description.substring(0, 300)}` : ''
+      return `### ${t.title}${desc}`
+    }).join('\n\n')
+    const session = await chatStore.createSession({ title: `Discuss ${selectedItems.value.length} analysis topic(s)` })
+    chatStore.openPanel()
+    await chatStore.sendMessage(`Please analyze and discuss these topics:\n\n${lines}`)
+    selectedItems.value = []
+    showSnackbar?.('Chat session created', 'success')
+  } catch (e) {
+    showSnackbar?.('Failed to create discussion', 'error')
+  }
+}
+
+async function unlinkFromTopic(targetType, targetId) {
+  if (!currentTopic.value?.id) return
+  try {
+    const { data } = await api.post(`/analysis-topics/${currentTopic.value.id}/unlink`, {
+      target_type: targetType,
+      target_id: targetId,
+    })
+    currentTopic.value = data
+    showSnackbar?.('Unlinked', 'success')
+  } catch (e) {
+    showSnackbar?.('Failed to unlink', 'error')
+  }
 }
 </script>

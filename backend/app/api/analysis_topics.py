@@ -63,6 +63,8 @@ def _topic_to_response(t: MongoAnalysisTopic) -> dict:
         "category": t.category,
         "fact_ids": t.fact_ids,
         "tags": t.tags,
+        "linked_video_ids": getattr(t, 'linked_video_ids', []) or [],
+        "linked_idea_ids": getattr(t, 'linked_idea_ids', []) or [],
         "created_by": t.created_by,
         "created_at": t.created_at.isoformat() if isinstance(t.created_at, datetime) else str(t.created_at),
         "updated_at": t.updated_at.isoformat() if isinstance(t.updated_at, datetime) else str(t.updated_at),
@@ -112,6 +114,55 @@ async def create_global_topic(
     svc = AnalysisTopicService(db)
     created = await svc.create(topic)
     return _topic_to_response(created)
+
+
+# ── Link / Unlink ────────────────────────────────────
+
+class TopicLinkRequest(BaseModel):
+    target_type: str  # "video", "idea"
+    target_id: str
+
+
+@router.post("/api/analysis-topics/{topic_id}/link")
+async def link_entity_to_topic(
+    topic_id: str,
+    body: TopicLinkRequest,
+    _user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Link a video or idea to an analysis topic."""
+    svc = AnalysisTopicService(db)
+    topic = await svc.get_by_id(topic_id)
+    if not topic:
+        raise HTTPException(status_code=404, detail="Analysis topic not found")
+    field_map = {"video": "linked_video_ids", "idea": "linked_idea_ids"}
+    field = field_map.get(body.target_type)
+    if not field:
+        raise HTTPException(status_code=400, detail=f"Invalid target_type: {body.target_type}")
+    await svc.collection.update_one({"_id": topic_id}, {"$addToSet": {field: body.target_id}})
+    updated = await svc.get_by_id(topic_id)
+    return _topic_to_response(updated)
+
+
+@router.post("/api/analysis-topics/{topic_id}/unlink")
+async def unlink_entity_from_topic(
+    topic_id: str,
+    body: TopicLinkRequest,
+    _user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Unlink a video or idea from an analysis topic."""
+    svc = AnalysisTopicService(db)
+    topic = await svc.get_by_id(topic_id)
+    if not topic:
+        raise HTTPException(status_code=404, detail="Analysis topic not found")
+    field_map = {"video": "linked_video_ids", "idea": "linked_idea_ids"}
+    field = field_map.get(body.target_type)
+    if not field:
+        raise HTTPException(status_code=400, detail=f"Invalid target_type: {body.target_type}")
+    await svc.collection.update_one({"_id": topic_id}, {"$pull": {field: body.target_id}})
+    updated = await svc.get_by_id(topic_id)
+    return _topic_to_response(updated)
 
 
 @router.get("/api/analysis-topics/{topic_id}")

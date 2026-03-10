@@ -4,6 +4,16 @@
     <div class="d-flex align-center mb-6">
       <div class="text-h4 font-weight-bold">Facts</div>
       <v-spacer />
+      <v-btn
+        v-if="selectedItems.length"
+        color="deep-purple"
+        variant="tonal"
+        prepend-icon="mdi-forum"
+        class="mr-3"
+        @click="discussSelected"
+      >
+        Discuss ({{ selectedItems.length }})
+      </v-btn>
       <v-btn color="teal" prepend-icon="mdi-plus" @click="openCreateDialog">
         Add Fact
       </v-btn>
@@ -76,9 +86,12 @@
         <v-card>
           <v-card-text class="pa-0">
             <v-data-table
+              v-model="selectedItems"
               :headers="headers"
               :items="group.items"
               :loading="loading"
+              show-select
+              return-object
               hover
               density="compact"
             >
@@ -96,6 +109,9 @@
               </template>
               <template #item.category="{ item }">
                 <v-chip v-if="item.category" size="small" variant="tonal" color="indigo">{{ item.category }}</v-chip>
+              </template>
+              <template #item.links="{ item }">
+                <span class="text-caption">{{ linkedCount(item) || '' }}</span>
               </template>
               <template #item.verified="{ item }">
                 <v-icon v-if="item.verified" color="green" size="20">mdi-check-circle</v-icon>
@@ -120,9 +136,12 @@
     <v-card v-else>
       <v-card-text class="pa-0">
         <v-data-table
+          v-model="selectedItems"
           :headers="headers"
           :items="facts"
           :loading="loading"
+          show-select
+          return-object
           hover
         >
           <template #item.type="{ item }">
@@ -144,6 +163,10 @@
 
           <template #item.category="{ item }">
             <v-chip v-if="item.category" size="small" variant="tonal" color="indigo">{{ item.category }}</v-chip>
+          </template>
+
+          <template #item.links="{ item }">
+            <span class="text-caption">{{ linkedCount(item) || '' }}</span>
           </template>
 
           <template #item.verified="{ item }">
@@ -178,6 +201,28 @@
         </v-data-table>
       </v-card-text>
     </v-card>
+
+    <!-- Delete Confirmation Dialog -->
+    <v-dialog v-model="deleteDialog" max-width="400">
+      <v-card>
+        <v-card-title class="text-h6">Delete Fact</v-card-title>
+        <v-card-text>
+          Are you sure you want to delete this fact? This action cannot be undone.
+          <v-text-field
+            v-model="deleteConfirmText"
+            label="Type DELETE to confirm"
+            variant="outlined"
+            density="compact"
+            class="mt-4"
+          />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn @click="deleteDialog = false">Cancel</v-btn>
+          <v-btn color="error" :disabled="deleteConfirmText !== 'DELETE'" @click="doDeleteFact">Delete</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
 
     <!-- Create/Edit Fact Dialog -->
     <v-dialog v-model="formDialog" max-width="600">
@@ -268,9 +313,11 @@
 import { ref, computed, onMounted, inject } from 'vue'
 import api from '../api'
 import { useAgentsStore } from '../stores/agents'
+import { useChatStore } from '../stores/chat'
 
 const showSnackbar = inject('showSnackbar')
 const agentsStore = useAgentsStore()
+const chatStore = useChatStore()
 
 // State
 const facts = ref([])
@@ -288,6 +335,11 @@ const formData = ref({
   agent_id: null, type: 'fact', content: '', source: 'user',
   verified: false, confidence: 0.8, category: '', tags: [],
 })
+
+const deleteDialog = ref(false)
+const deleteFactId = ref(null)
+const deleteConfirmText = ref('')
+const selectedItems = ref([])
 
 const agents = ref([])
 const agentOptions = computed(() => agents.value)
@@ -314,6 +366,7 @@ const headers = [
   { title: 'Content', key: 'content' },
   { title: 'Agent', key: 'agent_id', width: 150 },
   { title: 'Category', key: 'category', width: 140 },
+  { title: 'Links', key: 'links', width: 80, sortable: false },
   { title: 'Verified', key: 'verified', width: 90 },
   { title: 'Confidence', key: 'confidence', width: 110 },
   { title: 'Created', key: 'created_at', width: 140 },
@@ -427,6 +480,14 @@ async function verifyFact(item) {
 }
 
 async function deleteFact(id) {
+  deleteFactId.value = id
+  deleteConfirmText.value = ''
+  deleteDialog.value = true
+}
+
+async function doDeleteFact() {
+  const id = deleteFactId.value
+  deleteDialog.value = false
   try {
     await api.delete(`/facts/${id}`)
     facts.value = facts.value.filter(f => f.id !== id)
@@ -441,8 +502,29 @@ function agentName(agentId) {
   return a?.name || agentId?.substring(0, 8)
 }
 
+function linkedCount(item) {
+  return (item.linked_video_ids?.length || 0) + (item.linked_analysis_ids?.length || 0) + (item.linked_idea_ids?.length || 0)
+}
+
 function formatDate(dt) {
   if (!dt) return ''
   return new Date(dt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+async function discussSelected() {
+  if (!selectedItems.value.length) return
+  try {
+    const lines = selectedItems.value.map(f => {
+      const label = f.type === 'hypothesis' ? 'Hypothesis' : 'Fact'
+      return `### ${label}: ${f.content.substring(0, 300)}`
+    }).join('\n\n')
+    const session = await chatStore.createSession({ title: `Discuss ${selectedItems.value.length} fact(s)` })
+    chatStore.openPanel()
+    await chatStore.sendMessage(`Please analyze and discuss these facts:\n\n${lines}`)
+    selectedItems.value = []
+    showSnackbar?.('Chat session created', 'success')
+  } catch (e) {
+    showSnackbar?.('Failed to create discussion', 'error')
+  }
 }
 </script>

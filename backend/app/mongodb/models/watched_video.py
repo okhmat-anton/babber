@@ -22,6 +22,11 @@ class MongoWatchedVideo(BaseModel):
     category: Optional[str] = None  # User-defined category for grouping
     credits_used: int = 1
     error: Optional[str] = None  # Error message if fetch failed
+    # Cross-linking
+    linked_fact_ids: List[str] = Field(default_factory=list)
+    linked_analysis_ids: List[str] = Field(default_factory=list)
+    linked_idea_ids: List[str] = Field(default_factory=list)
+    linked_chat_session_ids: List[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     def to_mongo(self) -> dict:

@@ -66,6 +66,9 @@ def _idea_to_response(idea: MongoIdea) -> dict:
         "priority": idea.priority,
         "status": idea.status,
         "tags": idea.tags,
+        "linked_video_ids": getattr(idea, 'linked_video_ids', []) or [],
+        "linked_fact_ids": getattr(idea, 'linked_fact_ids', []) or [],
+        "linked_analysis_ids": getattr(idea, 'linked_analysis_ids', []) or [],
         "created_by": idea.created_by,
         "created_at": idea.created_at.isoformat() if isinstance(idea.created_at, datetime) else str(idea.created_at),
         "updated_at": idea.updated_at.isoformat() if isinstance(idea.updated_at, datetime) else str(idea.updated_at),
@@ -197,6 +200,55 @@ async def delete_idea(
         raise HTTPException(status_code=404, detail="Idea not found")
     await svc.delete(idea_id)
     return {"detail": "Deleted"}
+
+
+# ── Link / Unlink ────────────────────────────────────
+
+class IdeaLinkRequest(BaseModel):
+    target_type: str  # "video", "fact", "analysis"
+    target_id: str
+
+
+@router.post("/api/ideas/{idea_id}/link")
+async def link_entity_to_idea(
+    idea_id: str,
+    body: IdeaLinkRequest,
+    _user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Link a video, fact, or analysis topic to an idea."""
+    svc = IdeaService(db)
+    idea = await svc.get_by_id(idea_id)
+    if not idea:
+        raise HTTPException(status_code=404, detail="Idea not found")
+    field_map = {"video": "linked_video_ids", "fact": "linked_fact_ids", "analysis": "linked_analysis_ids"}
+    field = field_map.get(body.target_type)
+    if not field:
+        raise HTTPException(status_code=400, detail=f"Invalid target_type: {body.target_type}")
+    await svc.collection.update_one({"_id": idea_id}, {"$addToSet": {field: body.target_id}})
+    updated = await svc.get_by_id(idea_id)
+    return _idea_to_response(updated)
+
+
+@router.post("/api/ideas/{idea_id}/unlink")
+async def unlink_entity_from_idea(
+    idea_id: str,
+    body: IdeaLinkRequest,
+    _user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Unlink a video, fact, or analysis topic from an idea."""
+    svc = IdeaService(db)
+    idea = await svc.get_by_id(idea_id)
+    if not idea:
+        raise HTTPException(status_code=404, detail="Idea not found")
+    field_map = {"video": "linked_video_ids", "fact": "linked_fact_ids", "analysis": "linked_analysis_ids"}
+    field = field_map.get(body.target_type)
+    if not field:
+        raise HTTPException(status_code=400, detail=f"Invalid target_type: {body.target_type}")
+    await svc.collection.update_one({"_id": idea_id}, {"$pull": {field: body.target_id}})
+    updated = await svc.get_by_id(idea_id)
+    return _idea_to_response(updated)
 
 
 # ── Per-Agent Endpoints ──────────────────────────────

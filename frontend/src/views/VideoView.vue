@@ -4,19 +4,17 @@
     <div class="d-flex align-center mb-6">
       <div class="text-h4 font-weight-bold">Video Analysis</div>
       <v-spacer />
-      <v-text-field
-        v-model="videoUrl"
-        density="compact"
-        variant="outlined"
-        placeholder="Paste video URL..."
-        prepend-inner-icon="mdi-link"
-        hide-details
-        clearable
+      <v-btn
+        v-if="selectedItems.length"
+        color="deep-purple"
+        variant="tonal"
+        prepend-icon="mdi-forum"
         class="mr-3"
-        style="max-width: 400px"
-        @keydown.enter="addVideo"
-      />
-      <v-btn color="primary" prepend-icon="mdi-plus" :loading="adding" :disabled="!videoUrl?.trim()" @click="addVideo">
+        @click="discussSelected"
+      >
+        Discuss ({{ selectedItems.length }})
+      </v-btn>
+      <v-btn color="primary" prepend-icon="mdi-plus" @click="openAddDialog">
         Add Video
       </v-btn>
     </div>
@@ -74,9 +72,12 @@
         <v-card>
           <v-card-text class="pa-0">
             <v-data-table
+              v-model="selectedItems"
               :headers="headers"
               :items="group.items"
               :loading="loadingHistory"
+              show-select
+              return-object
               hover
               density="compact"
               @click:row="(_, { item }) => openVideo(item)"
@@ -125,9 +126,12 @@
     <v-card v-else>
       <v-card-text class="pa-0">
         <v-data-table
+          v-model="selectedItems"
           :headers="headers"
           :items="filteredHistory"
           :loading="loadingHistory"
+          show-select
+          return-object
           hover
           @click:row="(_, { item }) => openVideo(item)"
         >
@@ -210,6 +214,41 @@
       </v-card>
     </v-dialog>
 
+    <!-- Add Video Dialog -->
+    <v-dialog v-model="addDialog" max-width="550">
+      <v-card>
+        <v-card-title class="text-h6">Add Video</v-card-title>
+        <v-card-text>
+          <v-text-field
+            v-model="addUrl"
+            label="Video URL"
+            placeholder="Paste YouTube, TikTok, Instagram, etc. URL..."
+            variant="outlined"
+            density="compact"
+            prepend-inner-icon="mdi-link"
+            class="mb-3"
+            autofocus
+            @keydown.enter="addVideo"
+          />
+          <v-combobox
+            v-model="addCategory"
+            :items="categoryOptions"
+            label="Category"
+            variant="outlined"
+            density="compact"
+            hide-details
+            clearable
+            prepend-inner-icon="mdi-tag-outline"
+          />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn @click="addDialog = false">Cancel</v-btn>
+          <v-btn color="primary" :loading="adding" :disabled="!addUrl?.trim()" @click="addVideo">Add</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- Video Detail Dialog -->
     <v-dialog v-model="detailDialog" max-width="900" scrollable>
       <v-card v-if="currentVideo">
@@ -231,7 +270,23 @@
           >
             Get Transcript
           </v-btn>
+          <v-btn
+            v-if="transcript"
+            color="amber-darken-2"
+            size="small"
+            variant="tonal"
+            :loading="fetching"
+            prepend-icon="mdi-refresh"
+            class="mr-2"
+            @click="regenerateTranscript"
+          >
+            Regenerate
+          </v-btn>
           <v-chip v-if="currentVideo.language" size="x-small" variant="tonal" class="mr-2">{{ currentVideo.language }}</v-chip>
+          <v-btn icon size="small" variant="text" color="error" class="mr-1" @click="confirmDeleteFromDetail">
+            <v-icon>mdi-delete</v-icon>
+            <v-tooltip activator="parent" location="top">Delete Video</v-tooltip>
+          </v-btn>
           <v-btn icon size="small" variant="text" @click="detailDialog = false">
             <v-icon>mdi-close</v-icon>
           </v-btn>
@@ -293,8 +348,34 @@
             {{ memoryResult }}
           </v-alert>
 
+          <!-- Linked Entities -->
+          <div v-if="currentVideo && (currentVideo.linked_fact_ids?.length || currentVideo.linked_analysis_ids?.length || currentVideo.linked_idea_ids?.length || currentVideo.linked_chat_session_ids?.length)" class="mb-4">
+            <div class="text-subtitle-2 font-weight-bold mb-2">
+              <v-icon size="18" class="mr-1">mdi-link-variant</v-icon>
+              Linked Entities
+            </div>
+            <div class="d-flex flex-wrap ga-2">
+              <v-chip v-for="fid in (currentVideo.linked_fact_ids || [])" :key="'f-'+fid" size="small" variant="tonal" color="teal" closable @click:close="unlinkFromVideo('fact', fid)">
+                <v-icon start size="14">mdi-check-decagram</v-icon>
+                Fact
+              </v-chip>
+              <v-chip v-for="aid in (currentVideo.linked_analysis_ids || [])" :key="'a-'+aid" size="small" variant="tonal" color="blue" closable @click:close="unlinkFromVideo('analysis', aid)">
+                <v-icon start size="14">mdi-chart-line</v-icon>
+                Analysis
+              </v-chip>
+              <v-chip v-for="iid in (currentVideo.linked_idea_ids || [])" :key="'i-'+iid" size="small" variant="tonal" color="amber" closable @click:close="unlinkFromVideo('idea', iid)">
+                <v-icon start size="14">mdi-lightbulb-on-outline</v-icon>
+                Idea
+              </v-chip>
+              <v-chip v-for="cid in (currentVideo.linked_chat_session_ids || [])" :key="'c-'+cid" size="small" variant="tonal" color="purple" @click="openLinkedChat(cid)">
+                <v-icon start size="14">mdi-chat-outline</v-icon>
+                Chat
+              </v-chip>
+            </div>
+          </div>
+
           <!-- Transcript text -->
-          <div v-if="transcript" class="transcript-box pa-4 rounded-lg" style="
+          <div v-if="transcript" ref="transcriptContainerRef" class="transcript-box pa-4 rounded-lg" style="
             background: rgba(255,255,255,0.03);
             border: 1px solid rgba(255,255,255,0.08);
             white-space: pre-wrap;
@@ -348,6 +429,13 @@ const deleteDialog = ref(false)
 const deleteVideoId = ref(null)
 const deleteConfirmText = ref('')
 const filterCategory = ref(null)
+const selectedItems = ref([])
+
+// Add video dialog
+const addDialog = ref(false)
+const addUrl = ref('')
+const addCategory = ref(null)
+const transcriptContainerRef = ref(null)
 
 const platforms = [
   { value: 'youtube', label: 'YouTube', color: 'red', icon: 'mdi-youtube' },
@@ -425,12 +513,16 @@ async function loadHistory() {
 }
 
 async function addVideo() {
-  if (!videoUrl.value?.trim()) return
+  if (!addUrl.value?.trim()) return
   adding.value = true
   errorMsg.value = null
   try {
-    const { data } = await api.post('/watched-videos', { url: videoUrl.value.trim() })
-    videoUrl.value = ''
+    const payload = { url: addUrl.value.trim() }
+    if (addCategory.value) payload.category = addCategory.value
+    const { data } = await api.post('/watched-videos', payload)
+    addUrl.value = ''
+    addCategory.value = null
+    addDialog.value = false
     await loadHistory()
     openVideo(data)
   } catch (e) {
@@ -438,6 +530,12 @@ async function addVideo() {
   } finally {
     adding.value = false
   }
+}
+
+function openAddDialog() {
+  addUrl.value = ''
+  addCategory.value = null
+  addDialog.value = true
 }
 
 function openVideo(item) {
@@ -516,10 +614,35 @@ async function fetchTranscriptForItem(item) {
 
 function startChatWithTranscript() {
   if (!transcript.value) return
-  const prefix = `Video transcript from ${currentVideo.value?.url || 'video'}:\n\n`
-  chatStore.pendingInput = prefix + transcript.value
-  chatStore.openPanel()
-  detailDialog.value = false
+  const videoTitle = currentVideo.value?.title || currentVideo.value?.url || 'video'
+  
+  // Create a NEW chat session linked to this video
+  chatStore.createSession({
+    title: `Video: ${videoTitle.substring(0, 60)}`,
+    chat_type: 'user',
+    video_id: currentVideo.value?.id || null,
+  }).then(session => {
+    if (session) {
+      // Link chat session to video
+      if (currentVideo.value?.id) {
+        api.post(`/watched-videos/${currentVideo.value.id}/link`, {
+          target_type: 'chat_session',
+          target_id: session.id,
+        }).then(() => {
+          // Update local linked_chat_session_ids
+          if (!currentVideo.value.linked_chat_session_ids) currentVideo.value.linked_chat_session_ids = []
+          currentVideo.value.linked_chat_session_ids.push(session.id)
+        }).catch(() => {})
+      }
+      // Set pending input with transcript
+      const prefix = `Video transcript from ${currentVideo.value?.url || 'video'}:\n\n`
+      chatStore.pendingInput = prefix + transcript.value
+      chatStore.openPanel()
+      detailDialog.value = false
+    }
+  }).catch(e => {
+    errorMsg.value = 'Failed to create chat session'
+  })
 }
 
 async function extractFacts() {
@@ -527,16 +650,71 @@ async function extractFacts() {
   extractingFacts.value = true
   factsResult.value = null
   try {
-    const { data } = await api.post(`/agents/${selectedAgentId.value}/facts`, {
-      type: 'fact',
-      content: `[Video: ${currentVideo.value?.url}]\n\n${transcript.value.substring(0, 8000)}`,
-      source: 'video',
-      verified: false,
-      confidence: 0.7,
-      tags: ['video', currentVideo.value?.platform || 'unknown'],
+    // Use LLM to extract individual facts from transcript
+    const { data: session } = await api.post('/chat/sessions', {
+      title: `Extract facts: ${currentVideo.value?.url?.substring(0, 50) || 'video'}`,
+      chat_type: 'user',
     })
-    factsResult.value = `Fact saved (id: ${data.id}). Source: video transcript.`
-    showSnackbar?.('Fact extracted and saved', 'success')
+    const { data } = await api.post(`/chat/sessions/${session.id}/messages`, {
+      content: `Extract all key facts from the following video transcript. Return ONLY a JSON array of strings, each being a concise factual statement. No explanations, just the JSON array.\n\n---\n\n${transcript.value.substring(0, 12000)}`,
+    }, { timeout: 300000 })
+    const assistantMsg = data.find?.(m => m.role === 'assistant') || data
+    const responseText = assistantMsg.content || assistantMsg.text || ''
+    
+    // Parse JSON array from response
+    let facts = []
+    try {
+      const jsonMatch = responseText.match(/\[[\s\S]*\]/)
+      if (jsonMatch) {
+        facts = JSON.parse(jsonMatch[0])
+      }
+    } catch {
+      // Fallback: split by newlines and filter
+      facts = responseText.split('\n').map(l => l.replace(/^[-*•\d.]+\s*/, '').trim()).filter(l => l.length > 10)
+    }
+    
+    if (!facts.length) {
+      factsResult.value = 'No facts extracted from transcript.'
+      return
+    }
+    
+    // Save each fact linked to this video
+    let savedCount = 0
+    for (const factText of facts) {
+      if (typeof factText !== 'string' || factText.length < 5) continue
+      try {
+        const { data: newFact } = await api.post(`/agents/${selectedAgentId.value}/facts`, {
+          type: 'fact',
+          content: factText,
+          source: 'video',
+          verified: false,
+          confidence: 0.7,
+          tags: ['video', currentVideo.value?.platform || 'unknown'],
+        })
+        // Link fact to video bidirectionally
+        if (currentVideo.value?.id && newFact?.id) {
+          await api.post(`/watched-videos/${currentVideo.value.id}/link`, {
+            target_type: 'fact', target_id: newFact.id,
+          }).catch(() => {})
+          await api.post(`/facts/${newFact.id}/link`, {
+            target_type: 'video', target_id: currentVideo.value.id,
+          }).catch(() => {})
+        }
+        savedCount++
+      } catch (e) {
+        console.error('Failed to save fact:', factText, e)
+      }
+    }
+    
+    factsResult.value = `Extracted and saved ${savedCount} facts from transcript.`
+    showSnackbar?.(`${savedCount} facts extracted and saved`, 'success')
+    // Reload video to get updated linked_fact_ids
+    if (currentVideo.value?.id) {
+      try {
+        const { data: updated } = await api.get(`/watched-videos/${currentVideo.value.id}`)
+        currentVideo.value = { ...currentVideo.value, ...updated }
+      } catch {}
+    }
   } catch (e) {
     errorMsg.value = e.response?.data?.detail || 'Failed to extract facts'
   } finally {
@@ -594,6 +772,39 @@ function confirmDeleteVideo(id) {
   deleteDialog.value = true
 }
 
+function confirmDeleteFromDetail() {
+  if (!currentVideo.value) return
+  deleteVideoId.value = currentVideo.value.id
+  deleteConfirmText.value = ''
+  deleteDialog.value = true
+}
+
+async function regenerateTranscript() {
+  if (!currentVideo.value) return
+  fetching.value = true
+  errorMsg.value = null
+  try {
+    const { data } = await api.post('/watched-videos/fetch', { video_id: currentVideo.value.id, force: true })
+    currentVideo.value = { ...currentVideo.value, ...data }
+    if (data.id) {
+      try {
+        const { data: full } = await api.get(`/watched-videos/${data.id}/full-transcript`)
+        transcript.value = full.transcript || data.transcript || ''
+      } catch {
+        transcript.value = data.transcript || ''
+      }
+    } else {
+      transcript.value = data.transcript || ''
+    }
+    await loadHistory()
+    showSnackbar?.('Transcript regenerated', 'success')
+  } catch (e) {
+    errorMsg.value = e.response?.data?.detail || 'Failed to regenerate transcript'
+  } finally {
+    fetching.value = false
+  }
+}
+
 async function updateVideoCategory(val) {
   if (!currentVideo.value) return
   const category = val || null
@@ -632,5 +843,43 @@ function platformColor(p) {
 function formatDate(dt) {
   if (!dt) return ''
   return new Date(dt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+async function discussSelected() {
+  if (!selectedItems.value.length) return
+  try {
+    const lines = selectedItems.value.map(v => {
+      const label = v.url || v.platform || 'Video'
+      const snippet = v.transcript ? v.transcript.substring(0, 500) : '(no transcript)'
+      return `### ${label}\n${snippet}`
+    }).join('\n\n')
+    const session = await chatStore.createSession({ title: `Discuss ${selectedItems.value.length} video(s)` })
+    chatStore.openPanel()
+    await chatStore.sendMessage(`Please analyze and discuss these videos:\n\n${lines}`)
+    selectedItems.value = []
+    showSnackbar?.('Chat session created', 'success')
+  } catch (e) {
+    showSnackbar?.('Failed to create discussion', 'error')
+  }
+}
+
+async function unlinkFromVideo(targetType, targetId) {
+  if (!currentVideo.value?.id) return
+  try {
+    const { data } = await api.post(`/watched-videos/${currentVideo.value.id}/unlink`, {
+      target_type: targetType,
+      target_id: targetId,
+    })
+    currentVideo.value = { ...currentVideo.value, ...data }
+    showSnackbar?.('Unlinked', 'success')
+  } catch (e) {
+    showSnackbar?.('Failed to unlink', 'error')
+  }
+}
+
+function openLinkedChat(sessionId) {
+  chatStore.loadSession(sessionId)
+  chatStore.openPanel()
+  detailDialog.value = false
 }
 </script>

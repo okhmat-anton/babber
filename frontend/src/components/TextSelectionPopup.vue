@@ -30,6 +30,25 @@
         </div>
       </div>
 
+      <!-- Global section -->
+      <div class="popup-section">
+        <div class="popup-section-label">Global</div>
+        <div class="popup-actions">
+          <button class="popup-btn" @click="emit('save', 'global_fact')" title="Save as Global Fact">
+            <v-icon size="14">mdi-check-decagram</v-icon>
+            <span>Fact</span>
+          </button>
+          <button class="popup-btn" @click="emit('save', 'global_analysis')" title="Create Analysis Topic">
+            <v-icon size="14">mdi-chart-line</v-icon>
+            <span>Analysis</span>
+          </button>
+          <button class="popup-btn" @click="emit('save', 'global_idea')" title="Save as Idea">
+            <v-icon size="14">mdi-lightbulb-on-outline</v-icon>
+            <span>Idea</span>
+          </button>
+        </div>
+      </div>
+
       <!-- Agent section (only when agents available) -->
       <div v-if="agents.length" class="popup-section">
         <div class="popup-section-label">Agent</div>

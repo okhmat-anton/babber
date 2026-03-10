@@ -29,6 +29,10 @@ class MongoIdea(BaseModel):
     status: str = "new"  # new, in_progress, done, archived
     tags: List[str] = Field(default_factory=list)
     created_by: str = "user"  # user, agent
+    # Cross-linking
+    linked_video_ids: List[str] = Field(default_factory=list)
+    linked_fact_ids: List[str] = Field(default_factory=list)
+    linked_analysis_ids: List[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

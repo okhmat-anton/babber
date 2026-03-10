@@ -1,7 +1,10 @@
 """Watched Videos API — CRUD endpoints for video transcripts fetched via ScrapeCreators."""
+import logging
 import httpx
 from uuid import UUID
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -33,6 +36,10 @@ class WatchedVideoResponse(BaseModel):
     category: Optional[str] = None
     credits_used: int = 1
     error: Optional[str] = None
+    linked_fact_ids: list[str] = []
+    linked_analysis_ids: list[str] = []
+    linked_idea_ids: list[str] = []
+    linked_chat_session_ids: list[str] = []
     created_at: str
 
 
@@ -127,6 +134,10 @@ class UpdateVideoRequest(BaseModel):
     category: Optional[str] = None
     title: Optional[str] = None
     agent_id: Optional[str] = None
+    linked_fact_ids: Optional[list[str]] = None
+    linked_analysis_ids: Optional[list[str]] = None
+    linked_idea_ids: Optional[list[str]] = None
+    linked_chat_session_ids: Optional[list[str]] = None
 
 
 @router.patch("/{video_id}", response_model=WatchedVideoResponse)
@@ -152,6 +163,7 @@ async def update_watched_video(
 
 class AddVideoRequest(BaseModel):
     url: str
+    category: Optional[str] = None
 
 
 @router.post("", response_model=WatchedVideoResponse, status_code=201)
@@ -175,7 +187,7 @@ async def add_video(
         return _to_response(existing)
 
     platform, _ = _detect_video_platform(url)
-    record = MongoWatchedVideo(url=url, platform=platform or "unknown")
+    record = MongoWatchedVideo(url=url, platform=platform or "unknown", category=body.category or None)
     created = await svc.create(record)
     return _to_response(created)
 
@@ -186,6 +198,7 @@ class FetchTranscriptRequest(BaseModel):
     url: Optional[str] = None
     video_id: Optional[str] = None
     language: Optional[str] = None
+    force: bool = False
 
 
 class FetchTranscriptResponse(BaseModel):
@@ -208,6 +221,7 @@ async def fetch_video_transcript(
     """Fetch video transcript via ScrapeCreators API. Accepts url or video_id of an existing record."""
     from app.services.staged_pipeline import _detect_video_platform, _parse_transcript_response
 
+    logger.info("Transcript fetch request: video_id=%s, url=%s, force=%s", body.video_id, body.url, body.force)
     language = body.language.strip() if body.language else None
     svc = WatchedVideoService(db)
     existing = None
@@ -224,8 +238,9 @@ async def fetch_video_transcript(
     if not url:
         raise HTTPException(status_code=400, detail="URL or video_id is required")
 
-    # Return cached transcript if already fetched
-    if existing and existing.transcript:
+    # Return cached transcript if already fetched (unless force regenerate)
+    if existing and existing.transcript and not body.force:
+        logger.info("Returning cached transcript for %s (len=%d)", url, len(existing.transcript))
         return FetchTranscriptResponse(
             id=existing.id, url=existing.url, platform=existing.platform,
             video_id=existing.video_id, transcript=existing.transcript,
@@ -245,16 +260,23 @@ async def fetch_video_transcript(
     if language:
         params["language"] = language
 
+    # Read configurable timeout (default 120s)
+    timeout_str = await get_setting_value(db, "transcript_fetch_timeout")
+    timeout_sec = int(timeout_str) if timeout_str and timeout_str.isdigit() else 120
+    logger.info("Fetching transcript from ScrapeCreators: platform=%s, url=%s, timeout=%ds", platform, url, timeout_sec)
+
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=timeout_sec) as client:
             resp = await client.get(
                 f"https://api.scrapecreators.com{api_path}",
                 params=params,
                 headers={"x-api-key": api_key},
             )
+        logger.info("ScrapeCreators response: status=%d, content_length=%d", resp.status_code, len(resp.content))
         if resp.status_code != 200:
             error_detail = resp.text[:500]
             error_msg = f"HTTP {resp.status_code}: {error_detail}"
+            logger.warning("ScrapeCreators API error for %s: %s", url, error_msg)
             if existing:
                 await svc.collection.update_one({"_id": existing.id}, {"$set": {"error": error_msg}})
             else:
@@ -262,13 +284,20 @@ async def fetch_video_transcript(
                 await svc.create(failed)
             raise HTTPException(status_code=502, detail=f"ScrapeCreators API error ({resp.status_code}): {error_detail}")
         data = resp.json()
+    except httpx.TimeoutException as e:
+        logger.error("ScrapeCreators timeout after %ds for %s: %s", timeout_sec, url, e)
+        raise HTTPException(status_code=504, detail=f"ScrapeCreators request timed out after {timeout_sec}s. Increase 'transcript_fetch_timeout' in Settings.")
     except httpx.HTTPError as e:
+        logger.error("ScrapeCreators HTTP error for %s: %s", url, e)
         raise HTTPException(status_code=502, detail=f"ScrapeCreators request failed: {e}")
 
     transcript_text, video_id, segments, lang = _parse_transcript_response(platform, data)
+    logger.info("Parsed transcript: platform=%s, has_text=%s, video_id=%s, lang=%s, segments=%d",
+               platform, bool(transcript_text), video_id, lang, len(segments) if segments else 0)
 
     if not transcript_text:
         error_msg = "No transcript available"
+        logger.warning("No transcript text for %s (response keys: %s)", url, list(data.keys()))
         if existing:
             await svc.collection.update_one({"_id": existing.id}, {"$set": {"error": error_msg, "video_id": video_id, "language": lang}})
         else:
@@ -307,6 +336,75 @@ async def fetch_video_transcript(
         )
 
 
+# ── Link / Unlink endpoints ────────────────────────────────────────────
+
+class LinkRequest(BaseModel):
+    target_type: str  # "fact", "analysis", "idea", "chat_session"
+    target_id: str
+
+
+@router.post("/{video_id}/link", response_model=WatchedVideoResponse)
+async def link_entity_to_video(
+    video_id: str,
+    body: LinkRequest,
+    _user: MongoUser = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Link a fact, analysis topic, idea, or chat session to a video."""
+    svc = WatchedVideoService(db)
+    video = await svc.get_by_id(video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    field_map = {
+        "fact": "linked_fact_ids",
+        "analysis": "linked_analysis_ids",
+        "idea": "linked_idea_ids",
+        "chat_session": "linked_chat_session_ids",
+    }
+    field = field_map.get(body.target_type)
+    if not field:
+        raise HTTPException(status_code=400, detail=f"Invalid target_type: {body.target_type}")
+
+    await svc.collection.update_one(
+        {"_id": video_id},
+        {"$addToSet": {field: body.target_id}},
+    )
+    video = await svc.get_by_id(video_id)
+    return _to_response(video)
+
+
+@router.post("/{video_id}/unlink", response_model=WatchedVideoResponse)
+async def unlink_entity_from_video(
+    video_id: str,
+    body: LinkRequest,
+    _user: MongoUser = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Unlink a fact, analysis topic, idea, or chat session from a video."""
+    svc = WatchedVideoService(db)
+    video = await svc.get_by_id(video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    field_map = {
+        "fact": "linked_fact_ids",
+        "analysis": "linked_analysis_ids",
+        "idea": "linked_idea_ids",
+        "chat_session": "linked_chat_session_ids",
+    }
+    field = field_map.get(body.target_type)
+    if not field:
+        raise HTTPException(status_code=400, detail=f"Invalid target_type: {body.target_type}")
+
+    await svc.collection.update_one(
+        {"_id": video_id},
+        {"$pull": {field: body.target_id}},
+    )
+    video = await svc.get_by_id(video_id)
+    return _to_response(video)
+
+
 @router.get("/{video_id}/full-transcript")
 async def get_full_transcript(
     video_id: UUID,
@@ -337,5 +435,9 @@ def _to_response(v: MongoWatchedVideo) -> WatchedVideoResponse:
         category=v.category,
         credits_used=v.credits_used,
         error=v.error,
+        linked_fact_ids=v.linked_fact_ids or [],
+        linked_analysis_ids=v.linked_analysis_ids or [],
+        linked_idea_ids=v.linked_idea_ids or [],
+        linked_chat_session_ids=v.linked_chat_session_ids or [],
         created_at=v.created_at.isoformat() if hasattr(v.created_at, 'isoformat') else str(v.created_at),
     )

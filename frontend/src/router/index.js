@@ -59,6 +59,7 @@ const routes = [
       { path: 'analysis', name: 'Analysis', component: () => import('../views/AnalysisView.vue') },
       { path: 'facts', name: 'Facts', component: () => import('../views/FactsView.vue') },
       { path: 'events', name: 'Events', component: () => import('../views/EventsView.vue') },
+      { path: 'ideas', name: 'Ideas', component: () => import('../views/IdeasView.vue') },
       { path: 'projects', name: 'Projects', component: () => import('../views/ProjectsView.vue') },
       { path: 'projects/:slug', name: 'ProjectDetail', component: () => import('../views/ProjectDetailView.vue') },
       { path: 'creator', name: 'Creator', component: () => import('../views/CreatorView.vue') },

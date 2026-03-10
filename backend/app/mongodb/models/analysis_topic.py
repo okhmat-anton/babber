@@ -27,6 +27,9 @@ class MongoAnalysisTopic(BaseModel):
     fact_ids: List[str] = Field(default_factory=list)
     tags: List[str] = Field(default_factory=list)
     created_by: str = "user"  # agent, user
+    # Cross-linking
+    linked_video_ids: List[str] = Field(default_factory=list)
+    linked_idea_ids: List[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

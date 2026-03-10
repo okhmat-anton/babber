@@ -49,6 +49,9 @@ def _fact_to_response(f: MongoAgentFact) -> dict:
         "confidence": f.confidence,
         "category": f.category,
         "tags": f.tags,
+        "linked_video_ids": getattr(f, 'linked_video_ids', []) or [],
+        "linked_analysis_ids": getattr(f, 'linked_analysis_ids', []) or [],
+        "linked_idea_ids": getattr(f, 'linked_idea_ids', []) or [],
         "created_by": f.created_by,
         "created_at": f.created_at.isoformat() if isinstance(f.created_at, datetime) else str(f.created_at),
         "updated_at": f.updated_at.isoformat() if isinstance(f.updated_at, datetime) else str(f.updated_at),
@@ -163,3 +166,52 @@ async def delete_global_fact(
         raise HTTPException(status_code=404, detail="Fact not found")
     await svc.delete(fact_id)
     return {"detail": "Deleted"}
+
+
+# ── Link / Unlink ────────────────────────────────────
+
+class FactLinkRequest(BaseModel):
+    target_type: str  # "video", "analysis", "idea"
+    target_id: str
+
+
+@router.post("/{fact_id}/link")
+async def link_entity_to_fact(
+    fact_id: str,
+    body: FactLinkRequest,
+    _user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Link a video, analysis topic, or idea to a fact."""
+    svc = AgentFactService(db)
+    existing = await svc.get_by_id(fact_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Fact not found")
+    field_map = {"video": "linked_video_ids", "analysis": "linked_analysis_ids", "idea": "linked_idea_ids"}
+    field = field_map.get(body.target_type)
+    if not field:
+        raise HTTPException(status_code=400, detail=f"Invalid target_type: {body.target_type}")
+    await svc.collection.update_one({"_id": fact_id}, {"$addToSet": {field: body.target_id}})
+    updated = await svc.get_by_id(fact_id)
+    return _fact_to_response(updated)
+
+
+@router.post("/{fact_id}/unlink")
+async def unlink_entity_from_fact(
+    fact_id: str,
+    body: FactLinkRequest,
+    _user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Unlink a video, analysis topic, or idea from a fact."""
+    svc = AgentFactService(db)
+    existing = await svc.get_by_id(fact_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Fact not found")
+    field_map = {"video": "linked_video_ids", "analysis": "linked_analysis_ids", "idea": "linked_idea_ids"}
+    field = field_map.get(body.target_type)
+    if not field:
+        raise HTTPException(status_code=400, detail=f"Invalid target_type: {body.target_type}")
+    await svc.collection.update_one({"_id": fact_id}, {"$pull": {field: body.target_id}})
+    updated = await svc.get_by_id(fact_id)
+    return _fact_to_response(updated)

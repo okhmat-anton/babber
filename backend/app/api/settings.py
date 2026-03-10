@@ -520,6 +520,7 @@ _DEFAULT_SETTINGS = {
     "anthropic_api_key": {"value": "", "description": "Anthropic API key for Claude models (claude-sonnet-4, claude-opus-4, etc.)"},
     # ScrapeCreators — social media video transcripts
     "scrapecreators_api_key": {"value": "", "description": "ScrapeCreators API key for fetching video transcripts from YouTube, TikTok, Instagram, Facebook, Twitter"},
+    "transcript_fetch_timeout": {"value": "120", "description": "Maximum time (seconds) to wait for video transcript fetching from ScrapeCreators API. Increase if you get timeout errors on long videos."},
     # AKM Advisor CRM
     "akm_advisor_api_key": {"value": "", "description": "AKM Advisor Agent API key (X-Agent-Key) for CRM access"},
     "akm_advisor_url": {"value": "", "description": "AKM Advisor Agent API URL (e.g. https://app.akm-advisor.com/api/v1/agent/PROJECT_ID)"},
