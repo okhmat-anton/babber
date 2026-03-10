@@ -103,7 +103,7 @@
         <v-divider class="mb-4" />
 
         <v-alert v-if="access.full_access" type="info" variant="tonal" density="compact" class="mb-4">
-          Full access is ON — agent can access all sections and boards. Turn it off to restrict access to specific sections.
+          Full access is ON — agent can access all sections. Turn it off to restrict access to specific sections.
         </v-alert>
 
         <!-- Sections (always visible) -->
@@ -126,105 +126,97 @@
           </v-chip>
         </div>
 
-        <!-- Lead Boards -->
-        <div v-if="access.full_access || access.allowed_sections.includes('leads')" class="mb-6">
-          <div class="d-flex align-center mb-2">
-            <v-icon size="18" class="mr-1" color="green">mdi-account-filter</v-icon>
-            <span class="text-subtitle-2">Lead Boards</span>
-            <v-chip v-if="!access.allowed_lead_boards.length" size="x-small" variant="tonal" color="success" class="ml-2">All boards</v-chip>
-            <v-btn
-              v-if="!leadBoards.length"
-              variant="text"
-              size="x-small"
-              color="primary"
-              :loading="loadingResources"
-              class="ml-2"
-              @click="fetchResources"
-            >
-              <v-icon start size="14">mdi-refresh</v-icon> Load boards
-            </v-btn>
-          </div>
-          <div v-if="leadBoards.length" class="d-flex flex-wrap ga-2">
-            <v-chip
-              v-for="b in leadBoards"
-              :key="b.id || b.name"
-              :color="access.allowed_lead_boards.includes(b.id || b.name) ? 'green' : 'default'"
-              :variant="access.allowed_lead_boards.includes(b.id || b.name) ? 'flat' : 'outlined'"
-              :disabled="access.full_access"
-              @click="toggleBoard('lead', b.id || b.name)"
-            >
-              {{ b.name || b.title || b.id }}
-            </v-chip>
-            <v-chip
-              v-if="access.allowed_lead_boards.length"
-              variant="text"
-              size="small"
-              color="grey"
-              :disabled="access.full_access"
-              @click="access.allowed_lead_boards = []"
-            >Clear (allow all)</v-chip>
-          </div>
-          <div v-else class="text-grey text-body-2">
-            No lead boards found in this project. Empty list = all boards allowed.
-          </div>
-        </div>
-
-        <!-- Deal Boards -->
-        <div v-if="access.full_access || access.allowed_sections.includes('deals')" class="mb-6">
-          <div class="d-flex align-center mb-2">
-            <v-icon size="18" class="mr-1" color="purple">mdi-handshake</v-icon>
-            <span class="text-subtitle-2">Deal Boards</span>
-            <v-chip v-if="!access.allowed_deal_boards.length" size="x-small" variant="tonal" color="success" class="ml-2">All boards</v-chip>
-            <v-btn
-              v-if="!dealBoards.length"
-              variant="text"
-              size="x-small"
-              color="primary"
-              :loading="loadingResources"
-              class="ml-2"
-              @click="fetchResources"
-            >
-              <v-icon start size="14">mdi-refresh</v-icon> Load boards
-            </v-btn>
-          </div>
-          <div v-if="dealBoards.length" class="d-flex flex-wrap ga-2">
-            <v-chip
-              v-for="b in dealBoards"
-              :key="b.id || b.name"
-              :color="access.allowed_deal_boards.includes(b.id || b.name) ? 'purple' : 'default'"
-              :variant="access.allowed_deal_boards.includes(b.id || b.name) ? 'flat' : 'outlined'"
-              :disabled="access.full_access"
-              @click="toggleBoard('deal', b.id || b.name)"
-            >
-              {{ b.name || b.title || b.id }}
-            </v-chip>
-            <v-chip
-              v-if="access.allowed_deal_boards.length"
-              variant="text"
-              size="small"
-              color="grey"
-              :disabled="access.full_access"
-              @click="access.allowed_deal_boards = []"
-            >Clear (allow all)</v-chip>
-          </div>
-          <div v-else class="text-grey text-body-2">
-            No deal boards found in this project. Empty list = all boards allowed.
-          </div>
-        </div>
-
-        <!-- Project Info -->
-        <div v-if="projectInfo" class="mb-4">
+        <!-- Available Resources Info -->
+        <div v-if="resourcesLoaded" class="mb-4">
           <v-divider class="mb-3" />
           <div class="text-subtitle-2 mb-2">
-            <v-icon size="18" class="mr-1">mdi-information</v-icon>
-            Connected Project
+            <v-icon size="18" class="mr-1">mdi-cloud-check</v-icon>
+            Agent Key Info
           </div>
-          <v-chip variant="tonal" color="blue" class="mr-2">
-            <v-icon start size="14">mdi-key-variant</v-icon>
-            {{ projectInfo.key }}
-          </v-chip>
-          <v-chip variant="tonal" color="primary" class="mr-2">{{ projectInfo.name }}</v-chip>
-          <span v-if="projectInfo.description" class="text-grey text-body-2 ml-1">{{ projectInfo.description }}</span>
+          <v-row dense>
+            <!-- Permissions Overview -->
+            <v-col v-if="permissions" cols="12">
+              <v-card variant="tonal" density="compact" class="pa-3">
+                <div class="d-flex align-center ga-2 mb-3">
+                  <v-chip size="small" variant="tonal" :color="permissions.allow_all ? 'success' : 'info'" prepend-icon="mdi-key">
+                    {{ permissions.allow_all ? 'Full Access' : 'Restricted Access' }}
+                  </v-chip>
+                  <span class="font-weight-medium">{{ permissions.key_name }}</span>
+                  <v-chip v-if="permissions.key_source" size="x-small" variant="outlined" class="ml-1">
+                    {{ permissions.key_source === 'tenant' ? 'Tenant key' : 'Project key' }}
+                  </v-chip>
+                </div>
+
+                <!-- Allowed Sections -->
+                <div v-if="permissions.sections?.length" class="mb-3">
+                  <div class="text-caption text-grey mb-1">Allowed Sections ({{ permissions.sections.length }})</div>
+                  <div class="d-flex flex-wrap ga-1">
+                    <v-chip v-for="sec in permissions.sections" :key="sec" size="x-small" variant="outlined" color="primary">
+                      {{ sectionLabel(sec) }}
+                    </v-chip>
+                  </div>
+                </div>
+
+                <!-- Access Scope: Projects, Pipelines -->
+                <div class="d-flex flex-wrap ga-3">
+                  <!-- Projects -->
+                  <div>
+                    <div class="text-caption text-grey mb-1">Projects</div>
+                    <v-chip v-if="!permissions.projects?.length || (permissions.projects.length === 1 && permissions.projects[0].id === 'all')"
+                      size="small" variant="tonal" color="success" prepend-icon="mdi-folder-multiple">
+                      All projects
+                    </v-chip>
+                    <div v-else class="d-flex flex-wrap ga-1">
+                      <v-chip v-for="p in permissions.projects" :key="p.id" size="x-small" variant="tonal" color="blue" prepend-icon="mdi-folder">
+                        {{ p.name }}
+                      </v-chip>
+                    </div>
+                  </div>
+                  <!-- Deal Pipelines -->
+                  <div>
+                    <div class="text-caption text-grey mb-1">Deal Pipelines</div>
+                    <v-chip v-if="!permissions.deal_pipelines?.length || (permissions.deal_pipelines.length === 1 && permissions.deal_pipelines[0].id === 'all')"
+                      size="small" variant="tonal" color="success" prepend-icon="mdi-handshake">
+                      All pipelines
+                    </v-chip>
+                    <div v-else class="d-flex flex-wrap ga-1">
+                      <v-chip v-for="p in permissions.deal_pipelines" :key="p.id" size="x-small" variant="tonal" color="green" prepend-icon="mdi-handshake">
+                        {{ p.name }}
+                      </v-chip>
+                    </div>
+                  </div>
+                  <!-- Lead Pipelines -->
+                  <div>
+                    <div class="text-caption text-grey mb-1">Lead Pipelines</div>
+                    <v-chip v-if="!permissions.lead_pipelines?.length || (permissions.lead_pipelines.length === 1 && permissions.lead_pipelines[0].id === 'all')"
+                      size="small" variant="tonal" color="success" prepend-icon="mdi-account-arrow-right">
+                      All pipelines
+                    </v-chip>
+                    <div v-else class="d-flex flex-wrap ga-1">
+                      <v-chip v-for="p in permissions.lead_pipelines" :key="p.id" size="x-small" variant="tonal" color="blue" prepend-icon="mdi-account-arrow-right">
+                        {{ p.name }}
+                      </v-chip>
+                    </div>
+                  </div>
+                </div>
+              </v-card>
+            </v-col>
+
+            <!-- Connected Project Context -->
+            <v-col v-if="projectInfo" cols="12" md="6">
+              <v-card variant="tonal" density="compact" class="pa-3">
+                <div class="text-caption text-grey mb-1">Connected Project</div>
+                <div class="d-flex align-center ga-2">
+                  <v-chip variant="tonal" color="blue" size="small">{{ projectInfo.key }}</v-chip>
+                  <span class="font-weight-medium">{{ projectInfo.name }}</span>
+                </div>
+                <div v-if="issuesCount" class="text-caption text-grey mt-1">{{ issuesCount }} issues total</div>
+                <div v-if="projectInfo.statuses?.length" class="d-flex flex-wrap ga-1 mt-2">
+                  <v-chip v-for="st in projectInfo.statuses" :key="st" size="x-small" variant="outlined">{{ st }}</v-chip>
+                </div>
+              </v-card>
+            </v-col>
+          </v-row>
         </div>
 
         <!-- Save -->
@@ -322,20 +314,25 @@ const testConnection = async () => {
 
 // ── Access Control ──
 const allSections = [
-  { value: 'projects', label: 'Projects / Tasks', icon: 'mdi-clipboard-list' },
-  { value: 'leads', label: 'Leads', icon: 'mdi-account-filter' },
+  { value: 'wiki', label: 'Knowledge Base', icon: 'mdi-book-open-variant' },
+  { value: 'email', label: 'Email', icon: 'mdi-email' },
+  { value: 'my-tasks', label: 'My Tasks', icon: 'mdi-checkbox-marked-circle' },
+  { value: 'business-ideas', label: 'Business Ideas', icon: 'mdi-lightbulb-on' },
+  { value: 'leads', label: 'Leads', icon: 'mdi-account-arrow-right' },
   { value: 'deals', label: 'Deals', icon: 'mdi-handshake' },
   { value: 'contacts', label: 'Contacts', icon: 'mdi-contacts' },
+  { value: 'companies', label: 'Companies', icon: 'mdi-domain' },
+  { value: 'goals', label: 'Goals', icon: 'mdi-flag-checkered' },
+  { value: 'projects', label: 'Projects', icon: 'mdi-folder-multiple' },
+  { value: 'project-board', label: 'Project Board', icon: 'mdi-view-column' },
+  { value: 'backlog', label: 'Backlog', icon: 'mdi-clipboard-list' },
   { value: 'sprints', label: 'Sprints', icon: 'mdi-run-fast' },
-  { value: 'epics', label: 'Epics', icon: 'mdi-bookmark-multiple' },
-  { value: 'goals', label: 'Goals', icon: 'mdi-target' },
+  { value: 'roadmap', label: 'Roadmap', icon: 'mdi-map-marker-path' },
 ]
 
 const access = ref({
   full_access: true,
-  allowed_sections: ['projects', 'leads', 'deals', 'contacts', 'sprints', 'epics', 'goals'],
-  allowed_lead_boards: [],
-  allowed_deal_boards: [],
+  allowed_sections: [],
 })
 const origAccess = ref(null)
 const savingAccess = ref(false)
@@ -352,11 +349,9 @@ const toggleSection = (val) => {
   else access.value.allowed_sections.push(val)
 }
 
-const toggleBoard = (type, id) => {
-  const arr = type === 'lead' ? access.value.allowed_lead_boards : access.value.allowed_deal_boards
-  const idx = arr.indexOf(id)
-  if (idx >= 0) arr.splice(idx, 1)
-  else arr.push(id)
+const sectionLabel = (id) => {
+  const found = allSections.find(s => s.value === id)
+  return found ? found.label : id
 }
 
 const saveAccess = async () => {
@@ -377,17 +372,19 @@ const saveAccess = async () => {
 
 // ── Available Resources ──
 const loadingResources = ref(false)
+const resourcesLoaded = ref(false)
 const projectInfo = ref(null)
-const leadBoards = ref([])
-const dealBoards = ref([])
+const issuesCount = ref(0)
+const permissions = ref(null)
 
 const fetchResources = async () => {
   loadingResources.value = true
   try {
     const { data } = await api.get('/settings/akm-advisor/available-resources')
     projectInfo.value = data.project
-    leadBoards.value = data.lead_boards || []
-    dealBoards.value = data.deal_boards || []
+    issuesCount.value = data.issues_count || 0
+    permissions.value = data.permissions
+    resourcesLoaded.value = true
   } catch (e) {
     showSnackbar(e.response?.data?.detail || 'Failed to load resources', 'error')
   } finally {
@@ -416,8 +413,6 @@ onMounted(async () => {
       access.value = {
         full_access: data.full_access ?? true,
         allowed_sections: data.allowed_sections || [],
-        allowed_lead_boards: data.allowed_lead_boards || [],
-        allowed_deal_boards: data.allowed_deal_boards || [],
       }
     } catch {
       // Keep defaults

@@ -1,0 +1,14 @@
+{
+  "name": "akm_email_accounts",
+  "display_name": "AKM: Email Accounts",
+  "description": "List connected email accounts from AKM Advisor.",
+  "description_for_agent": "List all connected email accounts in AKM Advisor. No parameters needed. Returns account email addresses, providers, sync status, and message counts. Use this first to discover available email accounts.",
+  "category": "crm",
+  "version": "1.0.0",
+  "entry_point": "main.py",
+  "input_schema": {
+    "type": "object",
+    "properties": {}
+  },
+  "output_schema": {}
+}

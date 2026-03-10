@@ -1,0 +1,14 @@
+{
+  "name": "akm_email_stats",
+  "display_name": "AKM: Email Stats",
+  "description": "Get email statistics from AKM Advisor.",
+  "description_for_agent": "Get email statistics from AKM Advisor — message counts per folder, unread counts, per-account breakdown. No parameters needed. Use this for a quick overview of the email situation.",
+  "category": "crm",
+  "version": "1.0.0",
+  "entry_point": "main.py",
+  "input_schema": {
+    "type": "object",
+    "properties": {}
+  },
+  "output_schema": {}
+}

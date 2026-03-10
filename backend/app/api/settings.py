@@ -390,8 +390,6 @@ async def test_akm_advisor_connection(
 class AkmAccessUpdate(BaseModel):
     full_access: bool = True
     allowed_sections: list[str] = []
-    allowed_lead_boards: list[str] = []
-    allowed_deal_boards: list[str] = []
 
 
 @router.get("/akm-advisor/access")
@@ -406,19 +404,9 @@ async def get_akm_access(
         sections = json.loads(await get_setting_value(db, "akm_advisor_allowed_sections") or "[]")
     except Exception:
         sections = []
-    try:
-        lead_boards = json.loads(await get_setting_value(db, "akm_advisor_allowed_lead_boards") or "[]")
-    except Exception:
-        lead_boards = []
-    try:
-        deal_boards = json.loads(await get_setting_value(db, "akm_advisor_allowed_deal_boards") or "[]")
-    except Exception:
-        deal_boards = []
     return {
         "full_access": full_access,
         "allowed_sections": sections,
-        "allowed_lead_boards": lead_boards,
-        "allowed_deal_boards": deal_boards,
     }
 
 
@@ -435,8 +423,6 @@ async def update_akm_access(
     for key, val in [
         ("akm_advisor_full_access", "true" if body.full_access else "false"),
         ("akm_advisor_allowed_sections", json.dumps(body.allowed_sections)),
-        ("akm_advisor_allowed_lead_boards", json.dumps(body.allowed_lead_boards)),
-        ("akm_advisor_allowed_deal_boards", json.dumps(body.allowed_deal_boards)),
     ]:
         setting = await setting_service.get_by_key(key)
         if setting:
@@ -449,7 +435,7 @@ async def get_akm_available_resources(
     _user: MongoUser = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_mongodb),
 ):
-    """Fetch available resources from AKM Advisor API (project info, lead boards, deal boards)."""
+    """Fetch available resources from AKM Advisor API: permissions + project context."""
     api_key = await get_setting_value(db, "akm_advisor_api_key")
     if not api_key:
         raise HTTPException(status_code=400, detail="AKM Advisor API key not configured")
@@ -458,13 +444,22 @@ async def get_akm_available_resources(
         raise HTTPException(status_code=400, detail="AKM Advisor API URL not configured")
 
     headers = {"X-Agent-Key": api_key}
-    from urllib.parse import urlparse
-    parsed = urlparse(base_url)
-    origin = f"{parsed.scheme}://{parsed.netloc}"
 
-    result = {"project": None, "lead_boards": [], "deal_boards": [], "statuses": []}
+    result = {
+        "project": None,
+        "issues_count": 0,
+        "permissions": None,
+    }
 
     async with httpx.AsyncClient(timeout=15) as client:
+        # Agent permissions (sections, pipelines, etc.)
+        try:
+            r = await client.get(f"{base_url}/permissions", headers=headers)
+            if r.status_code == 200:
+                result["permissions"] = r.json()
+        except Exception:
+            pass
+
         # Project context
         try:
             r = await client.get(f"{base_url}/context", headers=headers)
@@ -478,34 +473,7 @@ async def get_akm_available_resources(
                     "statuses": data.get("statuses", []),
                     "team_members": data.get("team_members", []),
                 }
-                result["statuses"] = data.get("statuses", [])
-        except Exception:
-            pass
-
-        # Lead boards/pipelines
-        try:
-            r = await client.get(f"{origin}/api/v1/data/leads/stats", headers=headers)
-            if r.status_code == 200:
-                data = r.json()
-                boards = data if isinstance(data, list) else data.get("boards", data.get("pipelines", []))
-                if isinstance(boards, list):
-                    result["lead_boards"] = boards
-                elif isinstance(data, dict):
-                    # If it returns stats object, wrap it
-                    result["lead_boards"] = [{"id": "default", "name": "Leads", "stats": data}]
-        except Exception:
-            pass
-
-        # Deal boards/pipelines
-        try:
-            r = await client.get(f"{origin}/api/v1/data/deals/stats", headers=headers)
-            if r.status_code == 200:
-                data = r.json()
-                boards = data if isinstance(data, list) else data.get("boards", data.get("pipelines", []))
-                if isinstance(boards, list):
-                    result["deal_boards"] = boards
-                elif isinstance(data, dict):
-                    result["deal_boards"] = [{"id": "default", "name": "Deals", "stats": data}]
+                result["issues_count"] = data.get("total_issues", 0)
         except Exception:
             pass
 

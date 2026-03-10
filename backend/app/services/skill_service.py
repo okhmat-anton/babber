@@ -1324,29 +1324,100 @@ SYSTEM_SKILLS = [
         },
     },
     {
-        "name": "akm_list_lead_boards",
-        "display_name": "AKM: Lead Boards",
-        "description": "List lead pipeline boards (statuses/stages) from AKM CRM.",
+        "name": "akm_email_accounts",
+        "display_name": "AKM: Email Accounts",
+        "description": "List connected email accounts from AKM Advisor.",
         "description_for_agent": (
-            "Get all lead boards/pipelines from AKM Advisor CRM. "
-            "Returns lead collection stats and available statuses/stages. No parameters needed. "
-            "Use this to understand the lead pipeline structure before viewing leads."
+            "List all connected email accounts in AKM Advisor. "
+            "No parameters needed. Returns account email addresses, providers, sync status, "
+            "and message counts. Use this first to discover available email accounts."
         ),
         "category": "crm",
         "code": (
             "import httpx\n"
             "import os\n"
-            "from urllib.parse import urlparse\n"
             "async def execute():\n"
             "    api_key = os.environ.get('AKM_ADVISOR_API_KEY', '')\n"
             "    base_url = os.environ.get('AKM_ADVISOR_URL', '').rstrip('/')\n"
             "    if not api_key or not base_url:\n"
             "        return {'error': 'AKM Advisor API key/URL not configured.'}\n"
-            "    parsed = urlparse(base_url)\n"
-            "    origin = f'{parsed.scheme}://{parsed.netloc}'\n"
             "    headers = {'X-Agent-Key': api_key}\n"
             "    async with httpx.AsyncClient(timeout=20, verify=False) as client:\n"
-            "        r = await client.get(f'{origin}/api/v1/data/leads/stats', headers=headers)\n"
+            "        r = await client.get(f'{base_url}/email/accounts', headers=headers)\n"
+            "        if r.status_code != 200:\n"
+            "            return {'error': f'API error {r.status_code}: {r.text[:500]}'}\n"
+            "        data = r.json()\n"
+            "        return {'accounts': data.get('items', []), 'total': data.get('total', 0)}\n"
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "akm_email_messages",
+        "display_name": "AKM: Email Messages",
+        "description": "List and search email messages from AKM Advisor.",
+        "description_for_agent": (
+            "List and search email messages in AKM Advisor across all accounts. "
+            "Parameters: folder (string, optional, default 'inbox' — inbox, sent, drafts, trash, spam), "
+            "search (string, optional — search in subject, sender, snippet), "
+            "is_read (boolean, optional — filter read/unread), "
+            "limit (integer, optional, default 50, max 200), page (integer, optional, default 1). "
+            "Returns emails with subject, sender, date, snippet, read status."
+        ),
+        "category": "crm",
+        "code": (
+            "import httpx\n"
+            "import os\n"
+            "async def execute(folder='inbox', search=None, is_read=None, limit=50, page=1):\n"
+            "    api_key = os.environ.get('AKM_ADVISOR_API_KEY', '')\n"
+            "    base_url = os.environ.get('AKM_ADVISOR_URL', '').rstrip('/')\n"
+            "    if not api_key or not base_url:\n"
+            "        return {'error': 'AKM Advisor API key/URL not configured.'}\n"
+            "    headers = {'X-Agent-Key': api_key}\n"
+            "    params = {'folder': folder, 'limit': min(limit, 200), 'page': page}\n"
+            "    if search:\n"
+            "        params['search'] = search\n"
+            "    if is_read is not None:\n"
+            "        params['is_read'] = str(is_read).lower()\n"
+            "    async with httpx.AsyncClient(timeout=30, verify=False) as client:\n"
+            "        r = await client.get(f'{base_url}/email/messages', headers=headers, params=params)\n"
+            "        if r.status_code != 200:\n"
+            "            return {'error': f'API error {r.status_code}: {r.text[:500]}'}\n"
+            "        data = r.json()\n"
+            "        return {'emails': data.get('items', []), 'total': data.get('total', 0), "
+            "'page': data.get('page', page), 'pages': data.get('pages', 0)}\n"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "folder": {"type": "string", "description": "Folder: inbox, sent, drafts, trash, spam (default: inbox)"},
+                "search": {"type": "string", "description": "Search in subject, sender, snippet"},
+                "is_read": {"type": "boolean", "description": "Filter by read status (true/false)"},
+                "limit": {"type": "integer", "description": "Results per page (default: 50, max: 200)"},
+                "page": {"type": "integer", "description": "Page number (default: 1)"},
+            },
+        },
+    },
+    {
+        "name": "akm_email_stats",
+        "display_name": "AKM: Email Stats",
+        "description": "Get email statistics from AKM Advisor.",
+        "description_for_agent": (
+            "Get email statistics from AKM Advisor — message counts per folder, "
+            "unread counts, per-account breakdown. No parameters needed. "
+            "Use this for a quick overview of the email situation."
+        ),
+        "category": "crm",
+        "code": (
+            "import httpx\n"
+            "import os\n"
+            "async def execute():\n"
+            "    api_key = os.environ.get('AKM_ADVISOR_API_KEY', '')\n"
+            "    base_url = os.environ.get('AKM_ADVISOR_URL', '').rstrip('/')\n"
+            "    if not api_key or not base_url:\n"
+            "        return {'error': 'AKM Advisor API key/URL not configured.'}\n"
+            "    headers = {'X-Agent-Key': api_key}\n"
+            "    async with httpx.AsyncClient(timeout=20, verify=False) as client:\n"
+            "        r = await client.get(f'{base_url}/email/stats', headers=headers)\n"
             "        if r.status_code != 200:\n"
             "            return {'error': f'API error {r.status_code}: {r.text[:500]}'}\n"
             "        return r.json()\n"
@@ -1354,227 +1425,74 @@ SYSTEM_SKILLS = [
         "input_schema": {"type": "object", "properties": {}},
     },
     {
-        "name": "akm_list_leads",
-        "display_name": "AKM: List Leads",
-        "description": "List leads from AKM CRM with optional filters.",
+        "name": "akm_permissions",
+        "display_name": "AKM: Permissions",
+        "description": "Get agent permissions and available sections from AKM Advisor.",
         "description_for_agent": (
-            "List leads from AKM Advisor CRM. "
-            "Parameters: status (string, optional — filter by pipeline status/stage), "
-            "search (string, optional — search by name/email/phone), "
-            "limit (integer, optional, default 50), page (integer, optional, default 1). "
-            "Returns leads with contact info, status, source, and assigned user."
+            "Get the current agent API key permissions from AKM Advisor. "
+            "Returns which sections are accessible (e.g. wiki, email, leads, deals, contacts, goals, projects, sprints, roadmap), "
+            "which projects the key can access, and pipeline access scope. No parameters needed. "
+            "Use this to understand what data the agent can access in AKM Advisor."
         ),
         "category": "crm",
         "code": (
             "import httpx\n"
             "import os\n"
-            "from urllib.parse import urlparse\n"
-            "async def execute(status=None, search=None, limit=50, page=1):\n"
-            "    api_key = os.environ.get('AKM_ADVISOR_API_KEY', '')\n"
-            "    base_url = os.environ.get('AKM_ADVISOR_URL', '').rstrip('/')\n"
-            "    if not api_key or not base_url:\n"
-            "        return {'error': 'AKM Advisor API key/URL not configured.'}\n"
-            "    parsed = urlparse(base_url)\n"
-            "    origin = f'{parsed.scheme}://{parsed.netloc}'\n"
-            "    headers = {'X-Agent-Key': api_key}\n"
-            "    params = {'limit': limit, 'page': page}\n"
-            "    if status:\n"
-            "        params['filter'] = '{\"status\": \"' + status + '\"}'\n"
-            "    if search:\n"
-            "        params['search'] = search\n"
-            "    async with httpx.AsyncClient(timeout=20, verify=False) as client:\n"
-            "        r = await client.get(f'{origin}/api/v1/data/leads', headers=headers, params=params)\n"
-            "        if r.status_code != 200:\n"
-            "            return {'error': f'API error {r.status_code}: {r.text[:500]}'}\n"
-            "        data = r.json()\n"
-            "        items = data.get('items', data) if isinstance(data, dict) else data\n"
-            "        return {'leads': items, 'total': data.get('total', len(items)), 'page': data.get('page', page)}\n"
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "status": {"type": "string", "description": "Filter by lead status/stage"},
-                "search": {"type": "string", "description": "Search by name, email, phone"},
-                "limit": {"type": "integer", "description": "Results per page (default: 50)"},
-                "page": {"type": "integer", "description": "Page number (default: 1)"},
-            },
-        },
-    },
-    {
-        "name": "akm_list_deal_boards",
-        "display_name": "AKM: Deal Boards",
-        "description": "List deal pipeline boards (statuses/stages) from AKM CRM.",
-        "description_for_agent": (
-            "Get deal pipeline stats and stages from AKM Advisor CRM. "
-            "Returns deal collection statistics and pipeline structure. No parameters needed. "
-            "Use this to understand the deal pipeline before viewing deals."
-        ),
-        "category": "crm",
-        "code": (
-            "import httpx\n"
-            "import os\n"
-            "from urllib.parse import urlparse\n"
             "async def execute():\n"
             "    api_key = os.environ.get('AKM_ADVISOR_API_KEY', '')\n"
             "    base_url = os.environ.get('AKM_ADVISOR_URL', '').rstrip('/')\n"
             "    if not api_key or not base_url:\n"
             "        return {'error': 'AKM Advisor API key/URL not configured.'}\n"
-            "    parsed = urlparse(base_url)\n"
-            "    origin = f'{parsed.scheme}://{parsed.netloc}'\n"
             "    headers = {'X-Agent-Key': api_key}\n"
             "    async with httpx.AsyncClient(timeout=20, verify=False) as client:\n"
-            "        r = await client.get(f'{origin}/api/v1/data/deals/stats', headers=headers)\n"
+            "        r = await client.get(f'{base_url}/permissions', headers=headers)\n"
             "        if r.status_code != 200:\n"
             "            return {'error': f'API error {r.status_code}: {r.text[:500]}'}\n"
             "        return r.json()\n"
         ),
         "input_schema": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "akm_list_deals",
-        "display_name": "AKM: List Deals",
-        "description": "List deals from AKM CRM with optional filters.",
-        "description_for_agent": (
-            "List deals from AKM Advisor CRM. "
-            "Parameters: status (string, optional — filter by pipeline status/stage), "
-            "search (string, optional — search by name/company), "
-            "limit (integer, optional, default 50), page (integer, optional, default 1). "
-            "Returns deals with value, stage, assigned user, and contact info."
-        ),
-        "category": "crm",
-        "code": (
-            "import httpx\n"
-            "import os\n"
-            "from urllib.parse import urlparse\n"
-            "async def execute(status=None, search=None, limit=50, page=1):\n"
-            "    api_key = os.environ.get('AKM_ADVISOR_API_KEY', '')\n"
-            "    base_url = os.environ.get('AKM_ADVISOR_URL', '').rstrip('/')\n"
-            "    if not api_key or not base_url:\n"
-            "        return {'error': 'AKM Advisor API key/URL not configured.'}\n"
-            "    parsed = urlparse(base_url)\n"
-            "    origin = f'{parsed.scheme}://{parsed.netloc}'\n"
-            "    headers = {'X-Agent-Key': api_key}\n"
-            "    params = {'limit': limit, 'page': page}\n"
-            "    if status:\n"
-            "        params['filter'] = '{\"status\": \"' + status + '\"}'\n"
-            "    if search:\n"
-            "        params['search'] = search\n"
-            "    async with httpx.AsyncClient(timeout=20, verify=False) as client:\n"
-            "        r = await client.get(f'{origin}/api/v1/data/deals', headers=headers, params=params)\n"
-            "        if r.status_code != 200:\n"
-            "            return {'error': f'API error {r.status_code}: {r.text[:500]}'}\n"
-            "        data = r.json()\n"
-            "        items = data.get('items', data) if isinstance(data, dict) else data\n"
-            "        return {'deals': items, 'total': data.get('total', len(items)), 'page': data.get('page', page)}\n"
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "status": {"type": "string", "description": "Filter by deal status/stage"},
-                "search": {"type": "string", "description": "Search by name or company"},
-                "limit": {"type": "integer", "description": "Results per page (default: 50)"},
-                "page": {"type": "integer", "description": "Page number (default: 1)"},
-            },
-        },
-    },
-    {
-        "name": "akm_list_contacts",
-        "display_name": "AKM: List Contacts",
-        "description": "List contacts from AKM CRM.",
-        "description_for_agent": (
-            "List contacts from AKM Advisor CRM. "
-            "Parameters: search (string, optional — search by name/email/phone), "
-            "limit (integer, optional, default 50), page (integer, optional, default 1). "
-            "Returns contacts with name, email, phone, company, and other details."
-        ),
-        "category": "crm",
-        "code": (
-            "import httpx\n"
-            "import os\n"
-            "from urllib.parse import urlparse\n"
-            "async def execute(search=None, limit=50, page=1):\n"
-            "    api_key = os.environ.get('AKM_ADVISOR_API_KEY', '')\n"
-            "    base_url = os.environ.get('AKM_ADVISOR_URL', '').rstrip('/')\n"
-            "    if not api_key or not base_url:\n"
-            "        return {'error': 'AKM Advisor API key/URL not configured.'}\n"
-            "    parsed = urlparse(base_url)\n"
-            "    origin = f'{parsed.scheme}://{parsed.netloc}'\n"
-            "    headers = {'X-Agent-Key': api_key}\n"
-            "    params = {'limit': limit, 'page': page}\n"
-            "    if search:\n"
-            "        params['search'] = search\n"
-            "    async with httpx.AsyncClient(timeout=20, verify=False) as client:\n"
-            "        r = await client.get(f'{origin}/api/v1/data/contacts', headers=headers, params=params)\n"
-            "        if r.status_code != 200:\n"
-            "            return {'error': f'API error {r.status_code}: {r.text[:500]}'}\n"
-            "        data = r.json()\n"
-            "        items = data.get('items', data) if isinstance(data, dict) else data\n"
-            "        return {'contacts': items, 'total': data.get('total', len(items)), 'page': data.get('page', page)}\n"
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "search": {"type": "string", "description": "Search by name, email, phone"},
-                "limit": {"type": "integer", "description": "Results per page (default: 50)"},
-                "page": {"type": "integer", "description": "Page number (default: 1)"},
-            },
-        },
-    },
-    {
-        "name": "akm_crm_goals",
-        "display_name": "AKM: CRM Goals",
-        "description": "List business goals from AKM Advisor CRM.",
-        "description_for_agent": (
-            "List business/strategic goals from AKM Advisor CRM. "
-            "Parameters: type (string, optional — filter by goal type), "
-            "status (string, optional — filter by status), "
-            "limit (integer, optional, default 50). "
-            "Returns goals with title, description, metrics, deadlines, progress."
-        ),
-        "category": "crm",
-        "code": (
-            "import httpx\n"
-            "import os\n"
-            "from urllib.parse import urlparse\n"
-            "async def execute(type=None, status=None, limit=50):\n"
-            "    api_key = os.environ.get('AKM_ADVISOR_API_KEY', '')\n"
-            "    base_url = os.environ.get('AKM_ADVISOR_URL', '').rstrip('/')\n"
-            "    if not api_key or not base_url:\n"
-            "        return {'error': 'AKM Advisor API key/URL not configured.'}\n"
-            "    parsed = urlparse(base_url)\n"
-            "    origin = f'{parsed.scheme}://{parsed.netloc}'\n"
-            "    headers = {'X-Agent-Key': api_key}\n"
-            "    params = {'limit': limit}\n"
-            "    if type:\n"
-            "        params['type'] = type\n"
-            "    if status:\n"
-            "        params['status'] = status\n"
-            "    async with httpx.AsyncClient(timeout=20, verify=False) as client:\n"
-            "        r = await client.get(f'{origin}/api/v1/goals', headers=headers, params=params)\n"
-            "        if r.status_code != 200:\n"
-            "            return {'error': f'API error {r.status_code}: {r.text[:500]}'}\n"
-            "        data = r.json()\n"
-            "        items = data.get('items', data) if isinstance(data, list) else data.get('items', [])\n"
-            "        return {'goals': items if isinstance(items, list) else [items], 'total': len(items) if isinstance(items, list) else 1}\n"
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "type": {"type": "string", "description": "Filter by goal type"},
-                "status": {"type": "string", "description": "Filter by goal status"},
-                "limit": {"type": "integer", "description": "Max results (default: 50)"},
-            },
-        },
     },
 ]
 
 
 async def create_system_skills(db: AsyncIOMotorDatabase):
-    """Create system skills if not exists."""
+    """Create or update system skills. Removes obsolete ones."""
+    import logging
+    logger = logging.getLogger(__name__)
     svc = SkillService(db)
+
+    # Names of skills that were removed and should be cleaned up
+    OBSOLETE_SKILLS = [
+        "akm_list_lead_boards", "akm_list_leads",
+        "akm_list_deal_boards", "akm_list_deals",
+        "akm_list_contacts", "akm_crm_goals",
+    ]
+    for name in OBSOLETE_SKILLS:
+        existing = await svc.find_one({"name": name})
+        if existing:
+            await svc.delete(existing.id)
+            logger.info(f"Removed obsolete system skill: {name}")
+
+    system_skill_names = {s["name"] for s in SYSTEM_SKILLS}
+
     for skill_data in SYSTEM_SKILLS:
         existing = await svc.find_one({"name": skill_data["name"]})
         if existing:
+            # Update system skills if code or description changed
+            updates = {}
+            if existing.code != skill_data["code"]:
+                updates["code"] = skill_data["code"]
+            if existing.description != skill_data["description"]:
+                updates["description"] = skill_data["description"]
+            desc_for_agent = skill_data.get("description_for_agent", "")
+            if existing.description_for_agent != desc_for_agent:
+                updates["description_for_agent"] = desc_for_agent
+            new_schema = skill_data.get("input_schema", {})
+            if existing.input_schema != new_schema:
+                updates["input_schema"] = new_schema
+            if updates and existing.is_system:
+                await svc.update(existing.id, updates)
+                logger.info(f"Updated system skill: {skill_data['name']}")
             continue
 
         skill = MongoSkill(
@@ -1589,6 +1507,7 @@ async def create_system_skills(db: AsyncIOMotorDatabase):
             is_shared=True,
         )
         skill = await svc.create(skill)
+        logger.info(f"Created system skill: {skill_data['name']}")
 
         # Create filesystem directory + manifest
         init_skill_directory(skill)

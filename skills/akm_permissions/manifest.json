@@ -1,0 +1,14 @@
+{
+  "name": "akm_permissions",
+  "display_name": "AKM: Permissions",
+  "description": "Get agent permissions and available sections from AKM Advisor.",
+  "description_for_agent": "Get the current agent API key permissions from AKM Advisor. Returns which sections are accessible (e.g. wiki, email, leads, deals, contacts, goals, projects, sprints, roadmap), which projects the key can access, and pipeline access scope. No parameters needed. Use this to understand what data the agent can access in AKM Advisor.",
+  "category": "crm",
+  "version": "1.0.0",
+  "entry_point": "main.py",
+  "input_schema": {
+    "type": "object",
+    "properties": {}
+  },
+  "output_schema": {}
+}
