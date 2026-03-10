@@ -360,9 +360,6 @@
       </v-card>
     </v-dialog>
 
-    <!-- Connect Fact Dialog -->
-    <v-dialog v-model="connectFactDialog" max-width="700" scrollable>
-
     <!-- Delete Confirmation Dialog -->
     <v-dialog v-model="deleteDialog" max-width="400">
       <v-card>

@@ -100,126 +100,132 @@
           </template>
         </v-switch>
 
-        <v-expand-transition>
-          <div v-if="!access.full_access">
-            <v-divider class="mb-4" />
+        <v-divider class="mb-4" />
 
-            <!-- Sections -->
-            <div class="text-subtitle-2 mb-2">
-              <v-icon size="18" class="mr-1">mdi-view-grid</v-icon>
-              Allowed Sections
-            </div>
-            <div class="d-flex flex-wrap ga-2 mb-6">
-              <v-chip
-                v-for="s in allSections"
-                :key="s.value"
-                :color="access.allowed_sections.includes(s.value) ? 'primary' : 'default'"
-                :variant="access.allowed_sections.includes(s.value) ? 'flat' : 'outlined'"
-                :prepend-icon="s.icon"
-                @click="toggleSection(s.value)"
-              >
-                {{ s.label }}
-              </v-chip>
-            </div>
+        <v-alert v-if="access.full_access" type="info" variant="tonal" density="compact" class="mb-4">
+          Full access is ON — agent can access all sections and boards. Turn it off to restrict access to specific sections.
+        </v-alert>
 
-            <!-- Lead Boards -->
-            <div v-if="access.allowed_sections.includes('leads')" class="mb-6">
-              <div class="d-flex align-center mb-2">
-                <v-icon size="18" class="mr-1" color="green">mdi-account-filter</v-icon>
-                <span class="text-subtitle-2">Lead Boards</span>
-                <v-chip v-if="!access.allowed_lead_boards.length" size="x-small" variant="tonal" color="success" class="ml-2">All boards</v-chip>
-                <v-btn
-                  v-if="!leadBoards.length"
-                  variant="text"
-                  size="x-small"
-                  color="primary"
-                  :loading="loadingResources"
-                  class="ml-2"
-                  @click="fetchResources"
-                >
-                  <v-icon start size="14">mdi-refresh</v-icon> Load boards
-                </v-btn>
-              </div>
-              <div v-if="leadBoards.length" class="d-flex flex-wrap ga-2">
-                <v-chip
-                  v-for="b in leadBoards"
-                  :key="b.id || b.name"
-                  :color="access.allowed_lead_boards.includes(b.id || b.name) ? 'green' : 'default'"
-                  :variant="access.allowed_lead_boards.includes(b.id || b.name) ? 'flat' : 'outlined'"
-                  @click="toggleBoard('lead', b.id || b.name)"
-                >
-                  {{ b.name || b.title || b.id }}
-                </v-chip>
-                <v-chip
-                  v-if="access.allowed_lead_boards.length"
-                  variant="text"
-                  size="small"
-                  color="grey"
-                  @click="access.allowed_lead_boards = []"
-                >Clear (allow all)</v-chip>
-              </div>
-              <div v-else class="text-grey text-body-2">
-                No boards loaded. Click "Load boards" or test API connection first. Empty = all boards allowed.
-              </div>
-            </div>
+        <!-- Sections (always visible) -->
+        <div class="text-subtitle-2 mb-2">
+          <v-icon size="18" class="mr-1">mdi-view-grid</v-icon>
+          Allowed Sections
+          <span v-if="access.full_access" class="text-grey font-weight-regular ml-1">(all allowed — full access is ON)</span>
+        </div>
+        <div class="d-flex flex-wrap ga-2 mb-6">
+          <v-chip
+            v-for="s in allSections"
+            :key="s.value"
+            :color="access.full_access || access.allowed_sections.includes(s.value) ? 'primary' : 'default'"
+            :variant="access.full_access || access.allowed_sections.includes(s.value) ? 'flat' : 'outlined'"
+            :prepend-icon="s.icon"
+            :disabled="access.full_access"
+            @click="toggleSection(s.value)"
+          >
+            {{ s.label }}
+          </v-chip>
+        </div>
 
-            <!-- Deal Boards -->
-            <div v-if="access.allowed_sections.includes('deals')" class="mb-6">
-              <div class="d-flex align-center mb-2">
-                <v-icon size="18" class="mr-1" color="purple">mdi-handshake</v-icon>
-                <span class="text-subtitle-2">Deal Boards</span>
-                <v-chip v-if="!access.allowed_deal_boards.length" size="x-small" variant="tonal" color="success" class="ml-2">All boards</v-chip>
-                <v-btn
-                  v-if="!dealBoards.length"
-                  variant="text"
-                  size="x-small"
-                  color="primary"
-                  :loading="loadingResources"
-                  class="ml-2"
-                  @click="fetchResources"
-                >
-                  <v-icon start size="14">mdi-refresh</v-icon> Load boards
-                </v-btn>
-              </div>
-              <div v-if="dealBoards.length" class="d-flex flex-wrap ga-2">
-                <v-chip
-                  v-for="b in dealBoards"
-                  :key="b.id || b.name"
-                  :color="access.allowed_deal_boards.includes(b.id || b.name) ? 'purple' : 'default'"
-                  :variant="access.allowed_deal_boards.includes(b.id || b.name) ? 'flat' : 'outlined'"
-                  @click="toggleBoard('deal', b.id || b.name)"
-                >
-                  {{ b.name || b.title || b.id }}
-                </v-chip>
-                <v-chip
-                  v-if="access.allowed_deal_boards.length"
-                  variant="text"
-                  size="small"
-                  color="grey"
-                  @click="access.allowed_deal_boards = []"
-                >Clear (allow all)</v-chip>
-              </div>
-              <div v-else class="text-grey text-body-2">
-                No boards loaded. Click "Load boards" or test API connection first. Empty = all boards allowed.
-              </div>
-            </div>
-
-            <!-- Project Info -->
-            <div v-if="projectInfo" class="mb-4">
-              <v-divider class="mb-3" />
-              <div class="text-subtitle-2 mb-2">
-                <v-icon size="18" class="mr-1">mdi-information</v-icon>
-                Connected Project
-              </div>
-              <v-chip variant="tonal" color="blue" class="mr-2">
-                <v-icon start size="14">mdi-key-variant</v-icon>
-                {{ projectInfo.key }}
-              </v-chip>
-              <v-chip variant="tonal" color="primary" class="mr-2">{{ projectInfo.name }}</v-chip>
-              <span v-if="projectInfo.description" class="text-grey text-body-2 ml-1">{{ projectInfo.description }}</span>
-            </div>
+        <!-- Lead Boards -->
+        <div v-if="access.full_access || access.allowed_sections.includes('leads')" class="mb-6">
+          <div class="d-flex align-center mb-2">
+            <v-icon size="18" class="mr-1" color="green">mdi-account-filter</v-icon>
+            <span class="text-subtitle-2">Lead Boards</span>
+            <v-chip v-if="!access.allowed_lead_boards.length" size="x-small" variant="tonal" color="success" class="ml-2">All boards</v-chip>
+            <v-btn
+              v-if="!leadBoards.length"
+              variant="text"
+              size="x-small"
+              color="primary"
+              :loading="loadingResources"
+              class="ml-2"
+              @click="fetchResources"
+            >
+              <v-icon start size="14">mdi-refresh</v-icon> Load boards
+            </v-btn>
           </div>
-        </v-expand-transition>
+          <div v-if="leadBoards.length" class="d-flex flex-wrap ga-2">
+            <v-chip
+              v-for="b in leadBoards"
+              :key="b.id || b.name"
+              :color="access.allowed_lead_boards.includes(b.id || b.name) ? 'green' : 'default'"
+              :variant="access.allowed_lead_boards.includes(b.id || b.name) ? 'flat' : 'outlined'"
+              :disabled="access.full_access"
+              @click="toggleBoard('lead', b.id || b.name)"
+            >
+              {{ b.name || b.title || b.id }}
+            </v-chip>
+            <v-chip
+              v-if="access.allowed_lead_boards.length"
+              variant="text"
+              size="small"
+              color="grey"
+              :disabled="access.full_access"
+              @click="access.allowed_lead_boards = []"
+            >Clear (allow all)</v-chip>
+          </div>
+          <div v-else class="text-grey text-body-2">
+            No lead boards found in this project. Empty list = all boards allowed.
+          </div>
+        </div>
+
+        <!-- Deal Boards -->
+        <div v-if="access.full_access || access.allowed_sections.includes('deals')" class="mb-6">
+          <div class="d-flex align-center mb-2">
+            <v-icon size="18" class="mr-1" color="purple">mdi-handshake</v-icon>
+            <span class="text-subtitle-2">Deal Boards</span>
+            <v-chip v-if="!access.allowed_deal_boards.length" size="x-small" variant="tonal" color="success" class="ml-2">All boards</v-chip>
+            <v-btn
+              v-if="!dealBoards.length"
+              variant="text"
+              size="x-small"
+              color="primary"
+              :loading="loadingResources"
+              class="ml-2"
+              @click="fetchResources"
+            >
+              <v-icon start size="14">mdi-refresh</v-icon> Load boards
+            </v-btn>
+          </div>
+          <div v-if="dealBoards.length" class="d-flex flex-wrap ga-2">
+            <v-chip
+              v-for="b in dealBoards"
+              :key="b.id || b.name"
+              :color="access.allowed_deal_boards.includes(b.id || b.name) ? 'purple' : 'default'"
+              :variant="access.allowed_deal_boards.includes(b.id || b.name) ? 'flat' : 'outlined'"
+              :disabled="access.full_access"
+              @click="toggleBoard('deal', b.id || b.name)"
+            >
+              {{ b.name || b.title || b.id }}
+            </v-chip>
+            <v-chip
+              v-if="access.allowed_deal_boards.length"
+              variant="text"
+              size="small"
+              color="grey"
+              :disabled="access.full_access"
+              @click="access.allowed_deal_boards = []"
+            >Clear (allow all)</v-chip>
+          </div>
+          <div v-else class="text-grey text-body-2">
+            No deal boards found in this project. Empty list = all boards allowed.
+          </div>
+        </div>
+
+        <!-- Project Info -->
+        <div v-if="projectInfo" class="mb-4">
+          <v-divider class="mb-3" />
+          <div class="text-subtitle-2 mb-2">
+            <v-icon size="18" class="mr-1">mdi-information</v-icon>
+            Connected Project
+          </div>
+          <v-chip variant="tonal" color="blue" class="mr-2">
+            <v-icon start size="14">mdi-key-variant</v-icon>
+            {{ projectInfo.key }}
+          </v-chip>
+          <v-chip variant="tonal" color="primary" class="mr-2">{{ projectInfo.name }}</v-chip>
+          <span v-if="projectInfo.description" class="text-grey text-body-2 ml-1">{{ projectInfo.description }}</span>
+        </div>
 
         <!-- Save -->
         <v-divider class="my-4" />

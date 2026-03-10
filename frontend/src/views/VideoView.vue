@@ -260,6 +260,19 @@
             hide-details
             clearable
             prepend-inner-icon="mdi-tag-outline"
+            class="mb-3"
+          />
+          <v-combobox
+            v-model="addTags"
+            :items="allTags"
+            label="Tags"
+            variant="outlined"
+            density="compact"
+            multiple
+            chips
+            closable-chips
+            hide-details
+            clearable
           />
         </v-card-text>
         <v-card-actions>
@@ -315,7 +328,7 @@
 
         <v-divider />
 
-        <!-- Category -->
+        <!-- Category & Tags -->
         <div class="d-flex align-center ga-2 px-4 py-2" style="background: rgba(255,255,255,0.02);">
           <v-combobox
             :model-value="currentVideo.category"
@@ -328,6 +341,19 @@
             style="max-width: 250px;"
             prepend-inner-icon="mdi-tag-outline"
             @update:model-value="updateVideoCategory($event)"
+          />
+          <v-combobox
+            :model-value="currentVideo.tags || []"
+            :items="allTags"
+            label="Tags"
+            variant="outlined"
+            density="compact"
+            hide-details
+            multiple
+            chips
+            closable-chips
+            style="max-width: 400px;"
+            @update:model-value="updateVideoTags($event)"
           />
           <v-spacer />
         </div>
@@ -456,6 +482,7 @@ const selectedItems = ref([])
 const addDialog = ref(false)
 const addUrl = ref('')
 const addCategory = ref(null)
+const addTags = ref([])
 const transcriptContainerRef = ref(null)
 
 const platforms = [
@@ -557,9 +584,11 @@ async function addVideo() {
   try {
     const payload = { url: addUrl.value.trim() }
     if (addCategory.value) payload.category = addCategory.value
+    if (addTags.value?.length) payload.tags = addTags.value
     const { data } = await api.post('/watched-videos', payload)
     addUrl.value = ''
     addCategory.value = null
+    addTags.value = []
     addDialog.value = false
     await loadHistory()
     openVideo(data)
@@ -573,6 +602,7 @@ async function addVideo() {
 function openAddDialog() {
   addUrl.value = ''
   addCategory.value = null
+  addTags.value = []
   addDialog.value = true
 }
 
@@ -854,6 +884,20 @@ async function updateVideoCategory(val) {
     showSnackbar?.('Category updated', 'success')
   } catch (e) {
     showSnackbar?.('Failed to update category', 'error')
+  }
+}
+
+async function updateVideoTags(val) {
+  if (!currentVideo.value) return
+  const tags = val || []
+  try {
+    await api.patch(`/watched-videos/${currentVideo.value.id}`, { tags })
+    currentVideo.value = { ...currentVideo.value, tags }
+    const idx = history.value.findIndex(v => v.id === currentVideo.value.id)
+    if (idx !== -1) history.value[idx] = { ...history.value[idx], tags }
+    showSnackbar?.('Tags updated', 'success')
+  } catch (e) {
+    showSnackbar?.('Failed to update tags', 'error')
   }
 }
 

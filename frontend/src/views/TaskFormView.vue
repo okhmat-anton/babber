@@ -30,6 +30,18 @@
             class="mb-4"
           />
 
+          <v-combobox
+            v-model="form.tags"
+            :items="existingTags"
+            label="Tags"
+            multiple
+            chips
+            closable-chips
+            density="compact"
+            hide-details
+            class="mb-4"
+          />
+
           <!-- Schedule builder -->
           <v-card v-if="form.type !== 'one_time'" variant="outlined" class="mb-4">
             <v-card-title class="text-subtitle-1 pb-0">
@@ -214,7 +226,13 @@ const isEdit = computed(() => !!route.params.id)
 const agentId = computed(() => route.query.agent_id || null)
 
 const form = ref({
-  title: '', description: '', type: 'one_time', priority: 'normal', schedule: null, max_retries: 3, timeout: 300, is_user_task: false,
+  title: '', description: '', type: 'one_time', priority: 'normal', schedule: null, max_retries: 3, timeout: 300, is_user_task: false, tags: [],
+})
+
+const existingTags = computed(() => {
+  const tags = new Set()
+  store.tasks.forEach(t => (t.tags || []).forEach(tag => tags.add(tag)))
+  return [...tags].sort()
 })
 
 // ── Schedule builder ──────────────────────────────

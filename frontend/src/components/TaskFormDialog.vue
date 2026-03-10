@@ -33,6 +33,18 @@
             class="mb-3"
           />
 
+          <v-combobox
+            v-model="form.tags"
+            :items="existingTags"
+            label="Tags"
+            multiple
+            chips
+            closable-chips
+            density="compact"
+            hide-details
+            class="mb-3"
+          />
+
           <!-- Agent select (only when not pre-set) -->
           <v-autocomplete
             v-if="!agentId"
@@ -247,7 +259,13 @@ const isEdit = computed(() => !!props.taskId)
 const selectedAgentId = ref(null)
 
 const form = ref({
-  title: '', description: '', type: 'one_time', priority: 'normal', schedule: null, max_retries: 3, timeout: 300, is_user_task: false,
+  title: '', description: '', type: 'one_time', priority: 'normal', schedule: null, max_retries: 3, timeout: 300, is_user_task: false, tags: [],
+})
+
+const existingTags = computed(() => {
+  const tags = new Set()
+  store.tasks.forEach(t => (t.tags || []).forEach(tag => tags.add(tag)))
+  return [...tags].sort()
 })
 
 // ── Schedule builder ──────────────────────────────
@@ -428,7 +446,7 @@ watch(() => props.modelValue, async (open) => {
 
 const resetForm = () => {
   form.value = {
-    title: '', description: '', type: 'one_time', priority: 'normal', schedule: null, max_retries: 3, timeout: 300, is_user_task: false,
+    title: '', description: '', type: 'one_time', priority: 'normal', schedule: null, max_retries: 3, timeout: 300, is_user_task: false, tags: [],
   }
   sched.value = {
     frequency: 'every_n_min', interval: 5, hourInterval: 2, minute: 0, hour: 9, weekday: 1, dayOfMonth: 1,
