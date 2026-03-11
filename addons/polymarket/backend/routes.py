@@ -439,6 +439,30 @@ async def ai_betting_analyze(
 
     logger.info("AI Betting: %d events match strategy '%s'", len(filtered_events), body.strategy)
 
+    # 2.5. Global exclusion — get all token_ids that were already bet on
+    placed_token_ids = set()
+    cursor = db["addon_polymarket_bets"].find({}, {"token_id": 1})
+    async for rec in cursor:
+        if rec.get("token_id"):
+            placed_token_ids.add(rec["token_id"])
+    # Also check bets marked as placed in other sessions
+    session_cursor = db["polymarket_sessions"].find(
+        {"bets.placed": True},
+        {"bets.token_id": 1, "bets.placed": 1},
+    )
+    async for sess in session_cursor:
+        for b in sess.get("bets", []):
+            if b.get("placed") and b.get("token_id"):
+                placed_token_ids.add(b["token_id"])
+    # Also exclude rejected token_ids (agent decided not to play)
+    rejected_cursor = db["polymarket_rejected_bets"].find({}, {"token_id": 1})
+    async for rec in rejected_cursor:
+        if rec.get("token_id"):
+            placed_token_ids.add(rec["token_id"])
+
+    if placed_token_ids:
+        logger.info("AI Betting: excluding %d globally placed/rejected token_ids", len(placed_token_ids))
+
     # 3. Build bet options — pick the rare (low-probability) side of each market
     bets = []
     bet_num = 0
@@ -472,6 +496,9 @@ async def ai_betting_analyze(
                     })
 
             for s in sides:
+                # Skip if already placed globally
+                if s["token_id"] and s["token_id"] in placed_token_ids:
+                    continue
                 bet_num += 1
                 bets.append({
                     "number": bet_num,
@@ -484,6 +511,7 @@ async def ai_betting_analyze(
                     "payout_multiplier": s["payout_multiplier"],
                     "amount": body.default_amount,
                     "expected_payout": round(body.default_amount * s["payout_multiplier"], 2),
+                    "end_date": ev.get("endDate") or ev.get("end_date"),
                     "selected": True,
                 })
 
@@ -652,6 +680,76 @@ async def place_session_bets(
     return {"placed": placed, "failed": failed, "results": results}
 
 
+@router.post("/ai-betting/sessions/{session_id}/place-single/{bet_number}")
+async def place_single_bet(
+    session_id: str,
+    bet_number: int,
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Place a single bet from a session."""
+    doc = await db["polymarket_sessions"].find_one({"id": session_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    creds = await _get_polymarket_creds(db)
+    if not creds["api_key"]:
+        raise HTTPException(status_code=400, detail="Polymarket API credentials not configured")
+
+    # Find the bet
+    bet = None
+    bet_idx = None
+    for i, b in enumerate(doc.get("bets", [])):
+        if b.get("number") == bet_number:
+            bet = b
+            bet_idx = i
+            break
+    if not bet:
+        raise HTTPException(status_code=404, detail=f"Bet #{bet_number} not found in session")
+    if bet.get("placed"):
+        raise HTTPException(status_code=400, detail=f"Bet #{bet_number} already placed")
+    if not bet.get("token_id"):
+        raise HTTPException(status_code=400, detail=f"Bet #{bet_number} has no token_id")
+
+    headers = _clob_headers(creds)
+    try:
+        async with httpx.AsyncClient(timeout=30, verify=False) as client:
+            r = await client.post(f"{CLOB_API}/order", headers=headers, json={
+                "tokenID": bet["token_id"],
+                "side": "BUY",
+                "price": str(bet["odds"]),
+                "size": str(bet["amount"]),
+            })
+            success = r.status_code in (200, 201)
+            detail = r.json() if success else r.text[:300]
+    except Exception as exc:
+        return {"success": False, "bet_number": bet_number, "detail": str(exc)}
+
+    if success:
+        # Save to bet history
+        await db["addon_polymarket_bets"].insert_one({
+            "token_id": bet["token_id"],
+            "side": bet["side"],
+            "price": bet["odds"],
+            "size": bet["amount"],
+            "order_id": detail.get("orderID") or detail.get("id"),
+            "result": "pending",
+            "profit": 0,
+            "session_id": session_id,
+            "api_response": detail,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        # Mark bet as placed in session
+        await db["polymarket_sessions"].update_one(
+            {"id": session_id},
+            {"$set": {
+                f"bets.{bet_idx}.placed": True,
+                f"bets.{bet_idx}.selected": False,
+            }},
+        )
+
+    return {"success": success, "bet_number": bet_number, "detail": detail}
+
+
 # ─── Agent Analysis ──────────────────────────────────────────
 
 class AgentAnalyzeRequest(BaseModel):
@@ -662,13 +760,61 @@ class AgentAnalyzeRequest(BaseModel):
     min_multiplier: float = 2.5
 
 
+def _parse_csv_verdicts(raw: str) -> dict[int, dict]:
+    """Parse CSV verdicts from agent response. Returns {number: {verdict, rating}}."""
+    import re as _re
+    verdict_map = {}
+    # Find CSV lines: number,verdict,rating
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or line.lower().startswith("number"):
+            continue
+        # Match: number, verdict, rating (with optional spaces)
+        m = _re.match(r'^(\d+)\s*[,;|\t]\s*(green|yellow|red)\s*[,;|\t]\s*(\d+)', line, _re.IGNORECASE)
+        if m:
+            num = int(m.group(1))
+            verdict = m.group(2).lower()
+            rating = int(m.group(3))
+            verdict_map[num] = {"verdict": verdict, "rating": rating, "reasoning": ""}
+    return verdict_map
+
+
+def _parse_reasoning_response(raw: str) -> dict[int, str]:
+    """Parse reasoning from stage-2 response. Supports JSON array or numbered lines."""
+    import re as _re
+    reasoning_map = {}
+
+    # Try JSON first
+    m = _re.search(r'\[.*\]', raw, _re.DOTALL)
+    if m:
+        try:
+            items = json.loads(m.group(0))
+            for item in items:
+                if isinstance(item, dict) and "number" in item:
+                    reasoning_map[item["number"]] = item.get("reasoning", "")
+            if reasoning_map:
+                return reasoning_map
+        except json.JSONDecodeError:
+            pass
+
+    # Fallback: parse numbered lines like "#1: reasoning text" or "1. reasoning text"
+    for line in raw.splitlines():
+        line = line.strip()
+        m2 = _re.match(r'^#?(\d+)[.):]\s*(.+)', line)
+        if m2:
+            num = int(m2.group(1))
+            reasoning_map[num] = m2.group(2).strip()
+
+    return reasoning_map
+
+
 @router.post("/ai-betting/sessions/{session_id}/agent-analyze")
 async def agent_analyze_bets(
     session_id: str,
     body: AgentAnalyzeRequest,
     db: AsyncIOMotorDatabase = Depends(get_mongodb),
 ):
-    """Send selected bets to the agent for analysis. Agent returns verdict + reasoning."""
+    """Two-stage agent analysis: 1) CSV verdicts+ratings, 2) reasoning for top/bottom bets."""
     from app.services.agent_chat_engine import AgentChatEngine
 
     doc = await db["polymarket_sessions"].find_one({"id": session_id})
@@ -676,7 +822,6 @@ async def agent_analyze_bets(
         raise HTTPException(status_code=404, detail="Session not found")
 
     bets = doc.get("bets", [])
-    # Filter to requested bets, excluding already-placed ones
     if body.bet_numbers:
         to_analyze = [b for b in bets if b["number"] in body.bet_numbers and not b.get("placed")]
     else:
@@ -685,11 +830,10 @@ async def agent_analyze_bets(
     if not to_analyze:
         raise HTTPException(status_code=400, detail="No bets selected for analysis")
 
-    # Budget / selection math
     max_picks = int(body.total_budget / body.bet_amount) if body.bet_amount > 0 else len(to_analyze)
     max_picks = min(max_picks, len(to_analyze))
 
-    # Build prompt for agent
+    # Build compact bets list
     bets_text = ""
     for b in to_analyze:
         bets_text += (
@@ -697,36 +841,194 @@ async def agent_analyze_bets(
             f"   Side: {b['side']}, Odds: {b['odds']*100:.1f}% (x{b['payout_multiplier']})\n\n"
         )
 
-    prompt = f"""You are a professional prediction-market analyst. Your job is to pick the BEST bets from the list below.
+    # ── STAGE 1: CSV verdicts + ratings ──
+    prompt_stage1 = f"""You are a professional prediction-market analyst. Evaluate ALL bets below.
 
 CONTEXT:
-- Total budget: ${body.total_budget:.2f}
-- Bet amount per position: ${body.bet_amount:.2f}
-- Maximum number of bets I can place: {max_picks}
-- Minimum payout multiplier required: x{body.min_multiplier}
-- Number of candidates: {len(to_analyze)}
+- Total budget: ${body.total_budget:.2f}, Bet: ${body.bet_amount:.2f}/position, Max picks: {max_picks}
+- Min payout multiplier: x{body.min_multiplier}
+- Candidates: {len(to_analyze)}
 
-YOUR TASK:
-From {len(to_analyze)} candidates, select the TOP {max_picks} bets that have the highest realistic probability of winning.
-Mark your top {max_picks} picks as "green", mark borderline/uncertain ones as "yellow", and mark the rest as "red" (do NOT bet).
+TASK: Rate each bet. Pick TOP {max_picks} as "green", borderline as "yellow", rest as "red".
+Prioritize: value bets (market underestimates probability), high multipliers, news/context awareness, avoid correlated bets.
 
-Prioritize:
-1. Events where the market underestimates the real probability (value bets)
-2. Higher payout multipliers at reasonable likelihood
-3. Recent news, geopolitical context, historical patterns
-4. Avoid correlated bets (don't pick 5 bets on the same event)
+RESPOND IN CSV FORMAT ONLY — one line per bet, no headers, no explanation:
+number,verdict,rating
 
-Respond ONLY with valid JSON — an array of objects, one per bet. No markdown, no explanation outside JSON.
-Each object must have exactly these fields:
-- "number": the bet number (integer)
-- "verdict": "green", "yellow", or "red"
-- "reasoning": 1-2 sentence explanation (string)
+Where rating is 1-100 (100=best opportunity). Example:
+1,green,85
+2,red,15
+3,yellow,45
 
-Here are the bets:
+BETS:
 
 {bets_text}
 
-Respond with JSON array:"""
+CSV:"""
+
+    engine = AgentChatEngine(db)
+    thinking_log_id = None
+
+    # Helper to save analysis log reference
+    async def _save_analysis_log(*, verdicts_summary=None, status="error", error_msg=None, log_id=None):
+        lid = log_id or thinking_log_id
+        if not lid:
+            return
+        log_entry = {
+            "thinking_log_id": lid,
+            "agent_id": body.agent_id,
+            "bets_analyzed": len(to_analyze),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "status": status,
+        }
+        if verdicts_summary:
+            log_entry["verdicts_summary"] = verdicts_summary
+        if error_msg:
+            log_entry["error"] = error_msg[:500]
+        await db["polymarket_sessions"].update_one(
+            {"id": session_id},
+            {"$push": {"analysis_logs": log_entry}},
+        )
+
+    # Stage 1 call
+    try:
+        result1 = await engine.generate_full(
+            agent_id=body.agent_id,
+            user_input=prompt_stage1,
+            history=[],
+            session_id=session_id,
+            load_skills=False,
+            load_protocols=False,
+            enable_thinking_log=True,
+            max_skill_iterations=0,
+        )
+    except Exception as exc:
+        logger.error("Agent analysis stage 1 failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Agent call failed: {exc}")
+
+    thinking_log_id = getattr(result1, 'thinking_log_id', None)
+    raw1 = result1.content.strip()
+
+    # Parse CSV
+    verdict_map = _parse_csv_verdicts(raw1)
+    if not verdict_map:
+        logger.warning("Stage 1: no CSV verdicts parsed from: %s", raw1[:500])
+        await _save_analysis_log(error_msg="Failed to parse CSV verdicts from agent response")
+        raise HTTPException(status_code=422, detail="Agent did not return valid CSV. Raw: " + raw1[:500])
+
+    logger.info("Stage 1 parsed %d verdicts (CSV)", len(verdict_map))
+
+    # Apply verdicts to session bets
+    for b in bets:
+        v = verdict_map.get(b["number"])
+        if v:
+            b["agent_verdict"] = v["verdict"]
+            b["agent_rating"] = v.get("rating", 50)
+            b["agent_reasoning"] = v.get("reasoning", "")
+            if v["verdict"] == "red":
+                b["selected"] = False
+                b["rejected"] = True  # mark as rejected
+
+    # Save
+    verdicts_summary = {
+        "green": len([v for v in verdict_map.values() if v["verdict"] == "green"]),
+        "yellow": len([v for v in verdict_map.values() if v["verdict"] == "yellow"]),
+        "red": len([v for v in verdict_map.values() if v["verdict"] == "red"]),
+    }
+    await _save_analysis_log(verdicts_summary=verdicts_summary, status="completed")
+    await db["polymarket_sessions"].update_one(
+        {"id": session_id},
+        {"$set": {"bets": bets, "agent_analyzed": True}},
+    )
+
+    # Save rejected token_ids globally so future sessions skip them
+    red_token_ids = []
+    for b in bets:
+        if b.get("rejected") and b.get("token_id"):
+            red_token_ids.append({
+                "token_id": b["token_id"],
+                "session_id": session_id,
+                "event_title": b.get("event_title", ""),
+                "market_question": b.get("market_question", ""),
+                "side": b.get("side", ""),
+                "odds": b.get("odds", 0),
+                "payout_multiplier": b.get("payout_multiplier", 0),
+                "rejected_at": datetime.now(timezone.utc).isoformat(),
+            })
+    if red_token_ids:
+        # Upsert to avoid duplicates
+        for entry in red_token_ids:
+            await db["polymarket_rejected_bets"].update_one(
+                {"token_id": entry["token_id"]},
+                {"$set": entry, "$setOnInsert": {"_id": entry["token_id"]}},
+                upsert=True,
+            )
+        logger.info("Saved %d rejected token_ids globally", len(red_token_ids))
+
+    return {
+        "analyzed": len(verdict_map),
+        **verdicts_summary,
+        "verdicts": {k: {"verdict": v["verdict"], "rating": v.get("rating", 50), "reasoning": v.get("reasoning", "")} for k, v in verdict_map.items()},
+        "thinking_log_id": thinking_log_id,
+    }
+
+
+# ─── Agent Reasoning (Stage 2 — separate call) ──────────────────────
+
+class AgentReasoningRequest(BaseModel):
+    agent_id: str
+    bet_numbers: List[int] = []  # empty = auto-select top greens + bottom reds
+
+
+@router.post("/ai-betting/sessions/{session_id}/agent-reasoning")
+async def agent_get_reasoning(
+    session_id: str,
+    body: AgentReasoningRequest,
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Stage 2: Get reasoning for selected bets (top green + worst red)."""
+    from app.services.agent_chat_engine import AgentChatEngine
+
+    doc = await db["polymarket_sessions"].find_one({"id": session_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    bets = doc.get("bets", [])
+    if not doc.get("agent_analyzed"):
+        raise HTTPException(status_code=400, detail="Run analysis first before requesting reasoning")
+
+    # Pick which bets to get reasoning for
+    if body.bet_numbers:
+        need_reasoning = body.bet_numbers
+    else:
+        # Auto: top 10 greens by rating + bottom 10 reds by rating
+        analyzed = [(b["number"], b) for b in bets if b.get("agent_verdict")]
+        analyzed.sort(key=lambda x: x[1].get("agent_rating", 50), reverse=True)
+        top_greens = [num for num, b in analyzed if b["agent_verdict"] == "green"][:10]
+        bottom_reds = [num for num, b in analyzed if b["agent_verdict"] == "red"][-10:]
+        need_reasoning = list(set(top_greens + bottom_reds))
+
+    if not need_reasoning:
+        raise HTTPException(status_code=400, detail="No bets to get reasoning for")
+
+    # Build prompt
+    reasoning_bets = []
+    for b in bets:
+        if b["number"] in need_reasoning:
+            reasoning_bets.append(
+                f"#{b['number']} [{b.get('agent_verdict','?')}, rating:{b.get('agent_rating','?')}] "
+                f"\"{b.get('event_title','')}\" — {b.get('market_question','')} "
+                f"(Side: {b.get('side','')}, x{b.get('payout_multiplier',0)})"
+            )
+
+    prompt = f"""You previously rated these bets. Now provide 1-2 sentence reasoning for each.
+
+Respond ONLY with a JSON array. Each object: {{"number": N, "reasoning": "..."}}
+
+Bets:
+{chr(10).join(reasoning_bets)}
+
+JSON:"""
 
     engine = AgentChatEngine(db)
     try:
@@ -741,77 +1043,111 @@ Respond with JSON array:"""
             max_skill_iterations=0,
         )
     except Exception as exc:
-        logger.error("Agent analysis failed: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Agent call failed: {exc}")
+        logger.error("Agent reasoning failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Agent reasoning call failed: {exc}")
 
-    # Parse response — extract JSON array
     raw = result.content.strip()
-    # Try to find JSON array in response
-    import re as _re
-    m = _re.search(r'\[.*\]', raw, _re.DOTALL)
-    if not m:
-        logger.warning("Agent returned non-JSON: %s", raw[:500])
-        raise HTTPException(status_code=422, detail="Agent did not return valid JSON. Raw response: " + raw[:500])
+    reasoning_map = _parse_reasoning_response(raw)
 
-    try:
-        verdicts = json.loads(m.group(0))
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=422, detail="Failed to parse agent JSON: " + m.group(0)[:500])
-
-    # Build lookup
-    verdict_map = {}
-    for v in verdicts:
-        if isinstance(v, dict) and "number" in v:
-            verdict_map[v["number"]] = {
-                "verdict": v.get("verdict", "yellow"),
-                "reasoning": v.get("reasoning", ""),
-            }
-
-    # Apply verdicts to session bets
+    # Apply reasoning to session bets
+    updated_count = 0
     for b in bets:
-        v = verdict_map.get(b["number"])
-        if v:
-            b["agent_verdict"] = v["verdict"]
-            b["agent_reasoning"] = v["reasoning"]
-            if v["verdict"] == "red":
-                b["selected"] = False
+        reason = reasoning_map.get(b["number"])
+        if reason:
+            b["agent_reasoning"] = reason
+            updated_count += 1
 
-    # Save back
+    await db["polymarket_sessions"].update_one(
+        {"id": session_id},
+        {"$set": {"bets": bets}},
+    )
+
     thinking_log_id = getattr(result, 'thinking_log_id', None)
-    update_fields = {"bets": bets, "agent_analyzed": True}
+    # Save to analysis logs
     if thinking_log_id:
-        # Append to analysis_logs list
         await db["polymarket_sessions"].update_one(
             {"id": session_id},
-            {
-                "$set": update_fields,
-                "$push": {"analysis_logs": {
-                    "thinking_log_id": thinking_log_id,
-                    "agent_id": body.agent_id,
-                    "bets_analyzed": len(to_analyze),
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                    "verdicts_summary": {
-                        "green": len([v for v in verdict_map.values() if v["verdict"] == "green"]),
-                        "yellow": len([v for v in verdict_map.values() if v["verdict"] == "yellow"]),
-                        "red": len([v for v in verdict_map.values() if v["verdict"] == "red"]),
-                    },
-                }},
-            },
-        )
-    else:
-        await db["polymarket_sessions"].update_one(
-            {"id": session_id},
-            {"$set": update_fields},
+            {"$push": {"analysis_logs": {
+                "thinking_log_id": thinking_log_id,
+                "agent_id": body.agent_id,
+                "bets_analyzed": len(need_reasoning),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "status": "completed",
+                "type": "reasoning",
+            }}},
         )
 
     return {
-        "analyzed": len(verdict_map),
-        "green": len([v for v in verdict_map.values() if v["verdict"] == "green"]),
-        "yellow": len([v for v in verdict_map.values() if v["verdict"] == "yellow"]),
-        "red": len([v for v in verdict_map.values() if v["verdict"] == "red"]),
-        "verdicts": verdict_map,
+        "reasoning_added": updated_count,
+        "requested": len(need_reasoning),
         "thinking_log_id": thinking_log_id,
     }
+
+
+# ─── Rejected Bets Management ──────────────────────
+
+@router.get("/ai-betting/rejected-bets")
+async def list_rejected_bets(
+    limit: int = 200,
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """List globally rejected bets (token_ids excluded from future sessions)."""
+    cursor = db["polymarket_rejected_bets"].find().sort("rejected_at", -1).limit(limit)
+    items = []
+    async for doc in cursor:
+        doc.pop("_id", None)
+        items.append(doc)
+    return {"items": items, "total": len(items)}
+
+
+@router.delete("/ai-betting/rejected-bets/{token_id}")
+async def unblock_rejected_bet(
+    token_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Unblock a rejected bet — remove from global exclusion."""
+    result = await db["polymarket_rejected_bets"].delete_one({"token_id": token_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Rejected bet not found")
+    return {"success": True, "token_id": token_id}
+
+
+@router.post("/ai-betting/sessions/{session_id}/unblock-bet/{bet_number}")
+async def unblock_session_bet(
+    session_id: str,
+    bet_number: int,
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Unblock a rejected bet in a session — remove rejected flag, re-select it."""
+    doc = await db["polymarket_sessions"].find_one({"id": session_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    bets = doc.get("bets", [])
+    found = False
+    token_id = None
+    for b in bets:
+        if b["number"] == bet_number:
+            b["rejected"] = False
+            b["selected"] = True
+            b["agent_verdict"] = "yellow"  # downgrade from red to yellow
+            token_id = b.get("token_id")
+            found = True
+            break
+
+    if not found:
+        raise HTTPException(status_code=404, detail="Bet not found")
+
+    await db["polymarket_sessions"].update_one(
+        {"id": session_id},
+        {"$set": {"bets": bets}},
+    )
+
+    # Also remove from global rejection
+    if token_id:
+        await db["polymarket_rejected_bets"].delete_one({"token_id": token_id})
+
+    return {"success": True}
 
 
 @router.get("/ai-betting/sessions/{session_id}/thinking-logs")

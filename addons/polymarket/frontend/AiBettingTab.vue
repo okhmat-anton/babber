@@ -190,6 +190,11 @@
           Thinking Logs
           <v-chip v-if="analysisLogs.length" size="x-small" class="ml-1" color="deep-purple" variant="tonal">{{ analysisLogs.length }}</v-chip>
         </v-tab>
+        <v-tab value="rejected">
+          <v-icon start size="16">mdi-cancel</v-icon>
+          Rejected
+          <v-chip v-if="rejectedBets.length" size="x-small" class="ml-1" color="red" variant="tonal">{{ rejectedBets.length }}</v-chip>
+        </v-tab>
       </v-tabs>
 
       <div v-if="sessionTab === 'bets'">
@@ -244,13 +249,25 @@
                 Analyze (top {{ maxBetsForBudget }})
               </v-btn>
               <v-btn
+                color="deep-purple-accent-2"
+                variant="tonal"
+                size="small"
+                prepend-icon="mdi-text-box-outline"
+                :loading="agentReasoningLoading"
+                :disabled="!currentSession.agent_analyzed || !currentSession.agent_id"
+                @click="agentReasoning"
+                class="mr-2"
+              >
+                Reasoning
+              </v-btn>
+              <v-btn
                 color="green"
                 variant="flat"
                 size="small"
                 prepend-icon="mdi-cash-multiple"
                 :loading="placing"
                 :disabled="!selectedBets.length || currentSession.status === 'placed'"
-                @click="placeBets"
+                @click="requestPlaceAll"
               >
                 Place {{ selectedBets.length }} Bet{{ selectedBets.length !== 1 ? 's' : '' }}
               </v-btn>
@@ -287,7 +304,7 @@
         <span v-if="placeResult.failed"> {{ placeResult.failed }} failed.</span>
       </v-alert>
 
-      <!-- Search & sort bar -->
+      <!-- Search & filters bar -->
       <div class="d-flex align-center mb-2 ga-2">
         <v-text-field
           v-model="betSearch"
@@ -297,8 +314,14 @@
           hide-details
           clearable
           prepend-inner-icon="mdi-magnify"
-          style="max-width: 360px;"
+          style="max-width: 320px;"
         />
+        <v-btn-toggle v-model="dateFilter" mandatory density="compact" variant="outlined" divided color="deep-purple">
+          <v-btn value="week" size="small">Week</v-btn>
+          <v-btn value="month" size="small">Month</v-btn>
+          <v-btn value="quarter" size="small">Quarter</v-btn>
+          <v-btn value="all" size="small">All</v-btn>
+        </v-btn-toggle>
         <div class="text-caption text-medium-emphasis ml-2">
           {{ displayBets.length }} / {{ currentSession.bets.length }} bets
         </div>
@@ -315,10 +338,13 @@
               <th style="width:40px" class="sortable" @click="setSort('number')"># <span v-if="sortKey==='number'">{{ sortAsc ? '\u25B2' : '\u25BC' }}</span></th>
               <th class="sortable" @click="setSort('event_title')">Event <span v-if="sortKey==='event_title'">{{ sortAsc ? '\u25B2' : '\u25BC' }}</span></th>
               <th class="sortable" @click="setSort('market_question')">Bet <span v-if="sortKey==='market_question'">{{ sortAsc ? '\u25B2' : '\u25BC' }}</span></th>
+              <th class="text-center sortable" style="width:80px" @click="setSort('end_date')">Ends <span v-if="sortKey==='end_date'">{{ sortAsc ? '\u25B2' : '\u25BC' }}</span></th>
               <th class="text-center" style="width:60px">Side</th>
               <th class="text-center sortable" style="width:80px" @click="setSort('odds')">Odds <span v-if="sortKey==='odds'">{{ sortAsc ? '\u25B2' : '\u25BC' }}</span></th>
+              <th class="text-center sortable" style="width:44px" @click="setSort('agent_rating')">R <span v-if="sortKey==='agent_rating'">{{ sortAsc ? '\u25B2' : '\u25BC' }}</span></th>
               <th style="width:80px">Amt</th>
               <th class="text-right sortable" style="width:90px" @click="setSort('expected_payout')">Payout <span v-if="sortKey==='expected_payout'">{{ sortAsc ? '\u25B2' : '\u25BC' }}</span></th>
+              <th style="width:44px"></th>
             </tr>
           </thead>
           <tbody>
@@ -332,12 +358,19 @@
                 <td class="mq" :title="bet.market_question">
                   <span :class="{ strike: bet.agent_verdict === 'red' }">{{ bet.market_question }}</span>
                 </td>
+                <td class="text-center text-caption">
+                  <span v-if="bet.end_date">{{ shortDate(bet.end_date) }}</span>
+                  <span v-else class="text-medium-emphasis">—</span>
+                </td>
                 <td class="text-center">
                   <span class="side-chip" :class="bet.side === 'YES' ? 'side-yes' : 'side-no'">{{ bet.side }}</span>
                 </td>
                 <td class="text-center">
                   <div>{{ (bet.odds * 100).toFixed(1) }}%</div>
                   <div class="mul">x{{ bet.payout_multiplier }}</div>
+                </td>
+                <td class="text-center">
+                  <span v-if="bet.agent_rating" class="rating-badge" :class="'c-' + (bet.agent_verdict || 'grey')">{{ bet.agent_rating }}</span>
                 </td>
                 <td>
                   <input type="number" v-model.number="bet.amount" min="0.1" step="0.5" class="amt-input" :disabled="bet.placed" @change="updateBetPayout(bet)" />
@@ -346,10 +379,19 @@
                   <span v-if="bet.placed" class="placed-badge">PLACED</span>
                   <span v-else>${{ bet.expected_payout.toFixed(2) }}</span>
                 </td>
+                <td class="text-center">
+                  <button
+                    v-if="!bet.placed"
+                    class="place-single-btn"
+                    :disabled="bet._placing"
+                    :title="'Place this bet ($' + (bet.amount || 0) + ')'"
+                    @click="requestPlaceSingle(bet)"
+                  >{{ bet._placing ? '...' : '$' }}</button>
+                </td>
               </tr>
               <tr v-if="bet.agent_reasoning" class="reasoning-row">
                 <td></td>
-                <td colspan="7" class="reasoning-cell">
+                <td colspan="10" class="reasoning-cell">
                   <span class="reasoning-icon" :class="'c-' + (bet.agent_verdict || 'grey')">{{ bet.agent_verdict === 'green' ? '\u2713' : bet.agent_verdict === 'red' ? '\u2717' : '?' }}</span>
                   <span class="reasoning-text" :class="'c-' + (bet.agent_verdict || 'grey')">{{ bet.agent_reasoning }}</span>
                 </td>
@@ -378,11 +420,15 @@
           <v-card-text class="py-2">
             <div class="d-flex align-center ga-2 flex-wrap">
               <v-chip size="x-small" color="deep-purple" variant="tonal">#{{ analysisLogs.length - idx }}</v-chip>
+              <v-chip v-if="log.status === 'error'" size="x-small" color="red" variant="flat">ERROR</v-chip>
               <span class="text-caption text-medium-emphasis">{{ formatDate(log.created_at) }}</span>
               <span class="text-caption">&middot; {{ log.bets_analyzed }} bets analyzed</span>
-              <v-chip size="x-small" color="green" variant="tonal">{{ log.verdicts_summary?.green || 0 }} green</v-chip>
-              <v-chip size="x-small" color="amber" variant="tonal">{{ log.verdicts_summary?.yellow || 0 }} yellow</v-chip>
-              <v-chip size="x-small" color="red" variant="tonal">{{ log.verdicts_summary?.red || 0 }} red</v-chip>
+              <template v-if="log.verdicts_summary">
+                <v-chip size="x-small" color="green" variant="tonal">{{ log.verdicts_summary?.green || 0 }} green</v-chip>
+                <v-chip size="x-small" color="amber" variant="tonal">{{ log.verdicts_summary?.yellow || 0 }} yellow</v-chip>
+                <v-chip size="x-small" color="red" variant="tonal">{{ log.verdicts_summary?.red || 0 }} red</v-chip>
+              </template>
+              <span v-if="log.error" class="text-caption text-red">{{ log.error }}</span>
               <v-spacer />
               <v-btn size="x-small" variant="tonal" color="deep-purple" @click="toggleLogDetail(log)" :loading="log._loading">
                 {{ log._expanded ? 'Hide' : 'Details' }}
@@ -429,6 +475,85 @@
         </v-card>
       </div>
 
+      <!-- Rejected Bets Tab -->
+      <div v-if="sessionTab === 'rejected'">
+        <div class="d-flex align-center mb-3">
+          <div class="text-subtitle-2 text-medium-emphasis">Rejected Bets (agent rated red)</div>
+          <v-spacer />
+          <v-btn variant="text" size="x-small" prepend-icon="mdi-refresh" @click="loadRejectedGlobal" :loading="rejectedLoading">Reload Global</v-btn>
+        </div>
+
+        <!-- Session rejected bets -->
+        <div v-if="!rejectedBets.length && !rejectedGlobal.length" class="text-center text-medium-emphasis py-8">
+          <v-icon size="48" class="mb-2">mdi-cancel</v-icon>
+          <div>No rejected bets yet. Run "Analyze" to have the agent filter out bad bets.</div>
+        </div>
+
+        <!-- Session rejected -->
+        <div v-if="rejectedBets.length" class="mb-4">
+          <div class="text-caption font-weight-bold mb-2">This Session ({{ rejectedBets.length }})</div>
+          <v-table density="compact" class="rejected-table">
+            <thead>
+              <tr>
+                <th style="width:40px">#</th>
+                <th>Event</th>
+                <th>Question</th>
+                <th style="width:55px">Side</th>
+                <th style="width:55px">x</th>
+                <th style="width:45px">R</th>
+                <th style="width:90px"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="bet in rejectedBets" :key="bet.number">
+                <td class="text-caption">{{ bet.number }}</td>
+                <td class="text-caption" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="bet.event_title">{{ bet.event_title }}</td>
+                <td class="text-caption" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="bet.market_question">{{ bet.market_question }}</td>
+                <td class="text-caption">{{ bet.side }}</td>
+                <td class="text-caption font-weight-bold">{{ bet.payout_multiplier }}x</td>
+                <td>
+                  <span class="rating-badge" :class="'c-' + (bet.agent_verdict || 'grey')">{{ bet.agent_rating ?? '—' }}</span>
+                </td>
+                <td>
+                  <v-btn size="x-small" color="amber" variant="tonal" prepend-icon="mdi-lock-open-variant" @click="unblockBet(bet)" :loading="bet._unblocking">
+                    Unblock
+                  </v-btn>
+                </td>
+              </tr>
+            </tbody>
+          </v-table>
+        </div>
+
+        <!-- Global rejected -->
+        <div v-if="rejectedGlobal.length" class="mb-4">
+          <div class="text-caption font-weight-bold mb-2">Globally Rejected ({{ rejectedGlobal.length }}) — excluded from all future sessions</div>
+          <v-table density="compact" class="rejected-table">
+            <thead>
+              <tr>
+                <th>Event</th>
+                <th>Question</th>
+                <th style="width:55px">Side</th>
+                <th style="width:55px">x</th>
+                <th style="width:90px"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in rejectedGlobal" :key="item.token_id">
+                <td class="text-caption" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="item.event_title">{{ item.event_title || '—' }}</td>
+                <td class="text-caption" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="item.market_question">{{ item.market_question || '—' }}</td>
+                <td class="text-caption">{{ item.side || '—' }}</td>
+                <td class="text-caption font-weight-bold">{{ item.payout_multiplier ? item.payout_multiplier + 'x' : '—' }}</td>
+                <td>
+                  <v-btn size="x-small" color="amber" variant="tonal" prepend-icon="mdi-lock-open-variant" @click="unblockGlobal(item)" :loading="item._unblocking">
+                    Unblock
+                  </v-btn>
+                </td>
+              </tr>
+            </tbody>
+          </v-table>
+        </div>
+      </div>
+
     </div>
 
     <!-- Delete Confirmation Dialog -->
@@ -452,6 +577,62 @@
           <v-spacer />
           <v-btn variant="text" @click="cancelDelete">Cancel</v-btn>
           <v-btn color="red" variant="flat" :disabled="deleteConfirmText !== 'CONFIRM'" @click="confirmDelete">Delete</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Place All Bets Confirmation Dialog -->
+    <v-dialog v-model="placeAllDialog" max-width="420" persistent>
+      <v-card>
+        <v-card-title class="text-h6">Place {{ selectedBets.length }} Bet{{ selectedBets.length !== 1 ? 's' : '' }}</v-card-title>
+        <v-card-text>
+          <div class="mb-3">
+            You are about to place <b>{{ selectedBets.length }}</b> bet(s) totaling <b>${{ totalBet.toFixed(2) }}</b>.
+            This will send real orders to Polymarket.
+          </div>
+          <div class="text-caption text-medium-emphasis mb-2">Type <b>CONFIRM</b> to proceed:</div>
+          <v-text-field
+            v-model="placeConfirmText"
+            density="compact"
+            variant="outlined"
+            placeholder="CONFIRM"
+            hide-details
+            autofocus
+            @keydown.enter="confirmPlaceAll"
+          />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="placeAllDialog = false; placeConfirmText = ''">Cancel</v-btn>
+          <v-btn color="green" variant="flat" :disabled="placeConfirmText !== 'CONFIRM'" @click="confirmPlaceAll">Place Bets</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Place Single Bet Confirmation Dialog -->
+    <v-dialog v-model="placeSingleDialog" max-width="420" persistent>
+      <v-card>
+        <v-card-title class="text-h6">Place Single Bet</v-card-title>
+        <v-card-text>
+          <div v-if="placeSingleTarget" class="mb-3">
+            <div class="mb-1"><b>#{{ placeSingleTarget.number }}</b> {{ placeSingleTarget.event_title }}</div>
+            <div class="text-caption text-medium-emphasis">{{ placeSingleTarget.market_question }} &middot; {{ placeSingleTarget.side }} &middot; ${{ placeSingleTarget.amount }}</div>
+          </div>
+          <div class="text-caption text-medium-emphasis mb-2">Type <b>CONFIRM</b> to place this bet:</div>
+          <v-text-field
+            v-model="placeConfirmText"
+            density="compact"
+            variant="outlined"
+            placeholder="CONFIRM"
+            hide-details
+            autofocus
+            @keydown.enter="confirmPlaceSingle"
+          />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="placeSingleDialog = false; placeConfirmText = ''; placeSingleTarget = null">Cancel</v-btn>
+          <v-btn color="green" variant="flat" :disabled="placeConfirmText !== 'CONFIRM'" @click="confirmPlaceSingle">Place Bet</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -490,12 +671,20 @@ const totalBudget = ref(parseFloat(localStorage.getItem('ai_betting_budget')) ||
 const betSearch = ref('')
 const sortKey = ref('')
 const sortAsc = ref(true)
+const dateFilter = ref('week')  // week, month, quarter, all
 const sessionTab = ref('bets')
 const analysisLogs = ref([])
 const logsLoading = ref(false)
 const deleteDialog = ref(false)
 const deleteConfirmText = ref('')
 const deleteTargetId = ref(null)
+const placeAllDialog = ref(false)
+const placeSingleDialog = ref(false)
+const placeConfirmText = ref('')
+const placeSingleTarget = ref(null)
+const agentReasoningLoading = ref(false)
+const rejectedGlobal = ref([])
+const rejectedLoading = ref(false)
 
 const STORAGE_KEY = 'ai_betting_current_session'
 
@@ -503,7 +692,21 @@ const STORAGE_KEY = 'ai_betting_current_session'
 const filteredBets = computed(() => {
   if (!currentSession.value) return []
   const minMul = sessionMinMultiplier.value || 1
-  let bets = currentSession.value.bets.filter(b => (b.payout_multiplier || 0) >= minMul)
+  let bets = currentSession.value.bets.filter(b => (b.payout_multiplier || 0) >= minMul && !b.rejected)
+
+  // Date filter
+  if (dateFilter.value !== 'all') {
+    const now = new Date()
+    let cutoff = new Date()
+    if (dateFilter.value === 'week') cutoff.setDate(now.getDate() + 7)
+    else if (dateFilter.value === 'month') cutoff.setMonth(now.getMonth() + 1)
+    else if (dateFilter.value === 'quarter') cutoff.setMonth(now.getMonth() + 3)
+    bets = bets.filter(b => {
+      if (!b.end_date) return true  // keep bets without end_date
+      return new Date(b.end_date) <= cutoff
+    })
+  }
+
   const q = (betSearch.value || '').toLowerCase().trim()
   if (q) {
     bets = bets.filter(b =>
@@ -517,6 +720,12 @@ const filteredBets = computed(() => {
 // Bets available for analysis (not yet placed)
 const analyzableBets = computed(() => {
   return filteredBets.value.filter(b => !b.placed)
+})
+
+// Bets rejected by agent (red verdict)
+const rejectedBets = computed(() => {
+  if (!currentSession.value) return []
+  return currentSession.value.bets.filter(b => b.rejected)
 })
 
 const displayBets = computed(() => {
@@ -582,6 +791,9 @@ watch(defaultAmount, (v) => localStorage.setItem('ai_betting_default_amount', St
 watch(maxOdds, (v) => localStorage.setItem('ai_betting_max_odds', String(v)))
 watch(minMultiplier, (v) => localStorage.setItem('ai_betting_min_multiplier', String(v)))
 watch(totalBudget, (v) => localStorage.setItem('ai_betting_budget', String(v)))
+watch(sessionTab, (v) => {
+  if (v === 'rejected') loadRejectedGlobal()
+})
 
 function setSort(key) {
   if (sortKey.value === key) {
@@ -611,6 +823,12 @@ function strategyLabel(key) {
 function statusColor(status) {
   const map = { draft: 'grey', placed: 'green', partial: 'orange', failed: 'red' }
   return map[status] || 'grey'
+}
+
+function shortDate(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
 function verdictColor(verdict) {
@@ -737,6 +955,78 @@ async function agentAnalyze() {
     showSnackbar(`Agent analysis failed: ${msg}`, 'error')
   } finally {
     agentAnalyzing.value = false
+  }
+}
+
+async function agentReasoning() {
+  if (!currentSession.value) return
+  const agentId = currentSession.value.agent_id || selectedAgentId.value
+  if (!agentId) {
+    showSnackbar('No agent selected', 'warning')
+    return
+  }
+  agentReasoningLoading.value = true
+  try {
+    const { data } = await api.post(
+      `/addons/polymarket/ai-betting/sessions/${currentSession.value.id}/agent-reasoning`,
+      { agent_id: agentId },
+      { timeout: 600000 }
+    )
+    // Reload session to get updated reasoning
+    const res = await api.get(`/addons/polymarket/ai-betting/sessions/${currentSession.value.id}`)
+    currentSession.value = res.data
+    saveToLocalStorage()
+    showSnackbar(`Reasoning added for ${data.reasoning_added} bets`, 'success')
+    await loadAnalysisLogs()
+  } catch (e) {
+    const msg = e.response?.data?.detail || e.message
+    showSnackbar(`Reasoning failed: ${msg}`, 'error')
+  } finally {
+    agentReasoningLoading.value = false
+  }
+}
+
+async function loadRejectedGlobal() {
+  rejectedLoading.value = true
+  try {
+    const { data } = await api.get('/addons/polymarket/ai-betting/rejected-bets')
+    rejectedGlobal.value = data.items || []
+  } catch (e) {
+    showSnackbar('Failed to load rejected bets', 'error')
+  } finally {
+    rejectedLoading.value = false
+  }
+}
+
+async function unblockBet(bet) {
+  if (!currentSession.value) return
+  bet._unblocking = true
+  try {
+    await api.post(`/addons/polymarket/ai-betting/sessions/${currentSession.value.id}/unblock-bet/${bet.number}`)
+    // Reload session
+    const res = await api.get(`/addons/polymarket/ai-betting/sessions/${currentSession.value.id}`)
+    currentSession.value = res.data
+    saveToLocalStorage()
+    showSnackbar(`Bet #${bet.number} unblocked`, 'success')
+  } catch (e) {
+    const msg = e.response?.data?.detail || e.message
+    showSnackbar(`Unblock failed: ${msg}`, 'error')
+  } finally {
+    bet._unblocking = false
+  }
+}
+
+async function unblockGlobal(item) {
+  item._unblocking = true
+  try {
+    await api.delete(`/addons/polymarket/ai-betting/rejected-bets/${encodeURIComponent(item.token_id)}`)
+    rejectedGlobal.value = rejectedGlobal.value.filter(r => r.token_id !== item.token_id)
+    showSnackbar('Bet unblocked globally', 'success')
+  } catch (e) {
+    const msg = e.response?.data?.detail || e.message
+    showSnackbar(`Unblock failed: ${msg}`, 'error')
+  } finally {
+    item._unblocking = false
   }
 }
 
@@ -869,6 +1159,56 @@ function restoreFromLocalStorage() {
       loadAnalysisLogs()
     } catch { /* ignore */ }
   }
+}
+
+async function placeSingleBet(bet) {
+  if (!currentSession.value || bet.placed || bet._placing) return
+  bet._placing = true
+  try {
+    const { data } = await api.post(
+      `/addons/polymarket/ai-betting/sessions/${currentSession.value.id}/place-single/${bet.number}`
+    )
+    if (data.success) {
+      bet.placed = true
+      bet.selected = false
+      saveToLocalStorage()
+      showSnackbar(`Bet #${bet.number} placed successfully`, 'success')
+    } else {
+      showSnackbar(`Bet #${bet.number} failed: ${data.detail || 'Unknown error'}`, 'error')
+    }
+  } catch (e) {
+    const msg = e.response?.data?.detail || e.message
+    showSnackbar(`Failed to place bet #${bet.number}: ${msg}`, 'error')
+  } finally {
+    bet._placing = false
+  }
+}
+
+function requestPlaceAll() {
+  placeConfirmText.value = ''
+  placeAllDialog.value = true
+}
+
+function confirmPlaceAll() {
+  if (placeConfirmText.value !== 'CONFIRM') return
+  placeAllDialog.value = false
+  placeConfirmText.value = ''
+  placeBets()
+}
+
+function requestPlaceSingle(bet) {
+  placeSingleTarget.value = bet
+  placeConfirmText.value = ''
+  placeSingleDialog.value = true
+}
+
+function confirmPlaceSingle() {
+  if (placeConfirmText.value !== 'CONFIRM') return
+  const bet = placeSingleTarget.value
+  placeSingleDialog.value = false
+  placeConfirmText.value = ''
+  placeSingleTarget.value = null
+  if (bet) placeSingleBet(bet)
 }
 
 async function placeBets() {
@@ -1019,6 +1359,40 @@ onMounted(() => {
   color: #81c784;
   pointer-events: auto;
 }
+.place-single-btn {
+  width: 28px;
+  height: 22px;
+  border: 1px solid rgba(76,175,80,0.4);
+  border-radius: 4px;
+  background: rgba(76,175,80,0.12);
+  color: #81c784;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.place-single-btn:hover {
+  background: rgba(76,175,80,0.3);
+  border-color: #81c784;
+}
+.place-single-btn:disabled {
+  opacity: 0.4;
+  cursor: wait;
+}
+.rating-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 24px;
+  text-align: center;
+  border-radius: 4px;
+  padding: 1px 4px;
+  background: rgba(255,255,255,0.07);
+}
+.rating-badge.c-green { color: #81c784; }
+.rating-badge.c-yellow { color: #ffd54f; }
+.rating-badge.c-red { color: #ef9a9a; }
+.rating-badge.c-grey { color: #999; }
 
 /* Thinking Logs */
 .thinking-output {
