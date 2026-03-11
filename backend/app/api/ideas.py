@@ -17,6 +17,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from typing import Optional, List
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -341,31 +342,38 @@ async def suggest_ideas(
         akm_key = await get_setting_value(db, "akm_advisor_api_key")
         akm_url = (await get_setting_value(db, "akm_advisor_url") or "").rstrip("/")
         if akm_key and akm_url:
-            headers = {"X-Agent-Key": akm_key}
+            agent_headers = {"X-Agent-Key": akm_key}
+            # Derive base URL for data API (leads/deals)
+            parsed = urlparse(akm_url)
+            akm_base = f"{parsed.scheme}://{parsed.netloc}"
+            data_headers = {"Authorization": f"Bearer {akm_key}"}
             akm_parts = []
             try:
                 async with httpx.AsyncClient(timeout=15, verify=False) as client:
-                    # AKM project context (always fetch if any akm type selected)
-                    try:
-                        r = await client.get(f"{akm_url}/context", headers=headers)
-                        if r.status_code == 200:
-                            ctx = r.json()
-                            akm_parts.append(
-                                f"Project: {ctx.get('name', '?')} ({ctx.get('key', '?')})\n"
-                                f"Description: {ctx.get('description', 'N/A')}\n"
-                                f"Issues: {ctx.get('total_issues', 0)} total, "
-                                f"{ctx.get('open_issues', 0)} open, "
-                                f"{ctx.get('in_progress_issues', 0)} in progress"
-                            )
-                    except Exception:
-                        pass
+                    # AKM project context
+                    if "projects" in body.akm_context_types:
+                        try:
+                            r = await client.get(f"{akm_url}/context", headers=agent_headers)
+                            if r.status_code == 200:
+                                ctx = r.json()
+                                akm_parts.append(
+                                    f"### Project\n"
+                                    f"Project: {ctx.get('name', '?')} ({ctx.get('key', '?')})\n"
+                                    f"Description: {ctx.get('description', 'N/A')}\n"
+                                    f"Issues: {ctx.get('total_issues', 0)} total, "
+                                    f"{ctx.get('open_issues', 0)} open, "
+                                    f"{ctx.get('in_progress_issues', 0)} in progress\n"
+                                    f"Team: {', '.join(m.get('name', '?') for m in ctx.get('team_members', []))}"
+                                )
+                        except Exception:
+                            pass
 
                     # AKM issues
                     if "issues" in body.akm_context_types:
                         try:
                             r = await client.get(
                                 f"{akm_url}/issues",
-                                headers=headers,
+                                headers=agent_headers,
                                 params={"include_done": "false", "limit": 50},
                             )
                             if r.status_code == 200:
@@ -382,7 +390,7 @@ async def suggest_ideas(
                     # AKM epics
                     if "epics" in body.akm_context_types:
                         try:
-                            r = await client.get(f"{akm_url}/epics", headers=headers)
+                            r = await client.get(f"{akm_url}/epics", headers=agent_headers)
                             if r.status_code == 200:
                                 epics = r.json().get("items", [])
                                 if epics:
@@ -400,7 +408,7 @@ async def suggest_ideas(
                         try:
                             r = await client.get(
                                 f"{akm_url}/sprints",
-                                headers=headers,
+                                headers=agent_headers,
                                 params={"active_only": "true"},
                             )
                             if r.status_code == 200:
@@ -412,6 +420,54 @@ async def suggest_ideas(
                                         for s in sprints
                                     )
                                     akm_parts.append(f"### Active Sprints\n{sprints_text}")
+                        except Exception:
+                            pass
+
+                    # AKM leads pipeline
+                    if "leads" in body.akm_context_types:
+                        try:
+                            r = await client.get(
+                                f"{akm_base}/api/v1/data/leads",
+                                headers=data_headers,
+                                params={"limit": 50, "page": 1},
+                            )
+                            if r.status_code == 200:
+                                data = r.json()
+                                items = data.get("items", data) if isinstance(data, dict) else data
+                                if items:
+                                    leads_text = "\n".join(
+                                        f"- {ld.get('name', ld.get('title', 'N/A'))} "
+                                        f"[{ld.get('status', '?')}] "
+                                        f"{ld.get('company', ld.get('email', ''))}"
+                                        for ld in (items if isinstance(items, list) else [])[:50]
+                                    )
+                                    akm_parts.append(
+                                        f"### Leads Pipeline ({data.get('total', len(items))} total)\n{leads_text}"
+                                    )
+                        except Exception:
+                            pass
+
+                    # AKM deals pipeline
+                    if "deals" in body.akm_context_types:
+                        try:
+                            r = await client.get(
+                                f"{akm_base}/api/v1/data/deals",
+                                headers=data_headers,
+                                params={"limit": 50, "page": 1},
+                            )
+                            if r.status_code == 200:
+                                data = r.json()
+                                items = data.get("items", data) if isinstance(data, dict) else data
+                                if items:
+                                    deals_text = "\n".join(
+                                        f"- {dl.get('name', dl.get('title', 'N/A'))} "
+                                        f"[{dl.get('status', '?')}] "
+                                        f"{dl.get('amount', '')} {dl.get('currency', '')}".strip()
+                                        for dl in (items if isinstance(items, list) else [])[:50]
+                                    )
+                                    akm_parts.append(
+                                        f"### Deals Pipeline ({data.get('total', len(items))} total)\n{deals_text}"
+                                    )
                         except Exception:
                             pass
 

@@ -1000,3 +1000,312 @@ INFO:     127.0.0.1:64059 - "GET /api/chat/available-models HTTP/1.1" 200 OK
 2026-03-11 00:45:58,134 INFO [telethon.network.mtprotosender] Disconnecting from 149.154.167.51:443/TcpFull...
 2026-03-11 00:45:58,139 INFO [telethon.network.mtprotosender] Disconnection from 149.154.167.51:443/TcpFull complete!
 2026-03-11 00:45:58,145 ERROR [app.services.telegram_service] Watchdog: failed to restore d95ca303-ce44-4f20-87fb-33920210c8c2: Client not authenticated. Complete auth flow first.
+WARNING:  WatchFiles detected changes in 'app/api/chat.py', 'app/api/ideas.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+2026-03-11 00:45:59,659 INFO [ollama_watchdog] Ollama watchdog stopped
+2026-03-11 00:45:59,660 INFO [app.services.telegram_service] Telegram watchdog cancelled
+2026-03-11 00:45:59,660 INFO [app.services.telegram_service] Telegram watchdog stopped
+2026-03-11 00:45:59,660 INFO [app.services.backup_scheduler] Backup scheduler cancelled
+2026-03-11 00:45:59,660 INFO [app.services.backup_scheduler] Backup scheduler stopped
+INFO:     Application shutdown complete.
+INFO:     Finished server process [88885]
+WARNING:  WatchFiles detected changes in 'app/services/agent_chat_engine.py', 'app/services/protocol_service.py', 'app/llm/base.py'. Reloading...
+INFO:     Started server process [90862]
+INFO:     Waiting for application startup.
+2026-03-11 00:46:01,302 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-03-11 00:46:01,319 INFO [ollama_watchdog] Ollama watchdog started (interval=30s)
+2026-03-11 00:46:01,331 INFO [telethon.crypto.aes] libssl detected, it will be used for encryption
+2026-03-11 00:46:01,491 INFO [telethon.network.mtprotosender] Connecting to 149.154.167.51:443/TcpFull...
+2026-03-11 00:46:01,676 INFO [telethon.network.mtprotosender] Connection to 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:46:02,477 INFO [telethon.network.mtprotosender] Disconnecting from 149.154.167.51:443/TcpFull...
+2026-03-11 00:46:02,477 INFO [telethon.network.mtprotosender] Disconnection from 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:46:02,479 ERROR [app.services.telegram_service] Failed to restore Telegram listener d95ca303-ce44-4f20-87fb-33920210c8c2: Client not authenticated. Complete auth flow first.
+2026-03-11 00:46:02,486 INFO [app.services.telegram_service] Telegram watchdog started (interval=15s)
+2026-03-11 00:46:02,487 INFO [app.services.backup_scheduler] Backup scheduler task created
+2026-03-11 00:46:02,487 INFO [app.services.backup_scheduler] Backup scheduler started
+INFO:     Application startup complete.
+INFO:     Started server process [90918]
+INFO:     Waiting for application startup.
+2026-03-11 00:46:03,716 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-03-11 00:46:03,727 INFO [ollama_watchdog] Ollama watchdog started (interval=30s)
+2026-03-11 00:46:03,732 INFO [telethon.crypto.aes] libssl detected, it will be used for encryption
+2026-03-11 00:46:03,859 INFO [telethon.network.mtprotosender] Connecting to 149.154.167.51:443/TcpFull...
+2026-03-11 00:46:04,090 INFO [telethon.network.mtprotosender] Connection to 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:46:04,946 INFO [telethon.network.mtprotosender] Disconnecting from 149.154.167.51:443/TcpFull...
+2026-03-11 00:46:04,946 INFO [telethon.network.mtprotosender] Disconnection from 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:46:04,948 ERROR [app.services.telegram_service] Failed to restore Telegram listener d95ca303-ce44-4f20-87fb-33920210c8c2: Client not authenticated. Complete auth flow first.
+2026-03-11 00:46:04,952 INFO [app.services.telegram_service] Telegram watchdog started (interval=15s)
+2026-03-11 00:46:04,952 INFO [app.services.backup_scheduler] Backup scheduler task created
+2026-03-11 00:46:04,952 INFO [app.services.backup_scheduler] Backup scheduler started
+INFO:     Application startup complete.
+2026-03-11 00:46:04,979 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64085 - "GET /api/ollama/status HTTP/1.1" 200 OK
+2026-03-11 00:46:05,034 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64092 - "GET /api/ollama/models HTTP/1.1" 200 OK
+2026-03-11 00:46:05,037 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64095 - "GET /api/ollama/running HTTP/1.1" 200 OK
+2026-03-11 00:46:05,055 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64105 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64100 - "GET /api/agents HTTP/1.1" 200 OK
+2026-03-11 00:46:13,889 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-03-11 00:46:13,903 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+2026-03-11 00:46:15,082 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64129 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+2026-03-11 00:46:25,064 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64138 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+2026-03-11 00:46:29,960 WARNING [app.services.telegram_service] Watchdog: d95ca303-ce44-4f20-87fb-33920210c8c2 marked active but no client — restoring
+2026-03-11 00:46:29,966 INFO [telethon.network.mtprotosender] Connecting to 149.154.167.51:443/TcpFull...
+2026-03-11 00:46:30,141 INFO [telethon.network.mtprotosender] Connection to 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:46:30,907 INFO [telethon.network.mtprotosender] Disconnecting from 149.154.167.51:443/TcpFull...
+2026-03-11 00:46:30,908 INFO [telethon.network.mtprotosender] Disconnection from 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:46:30,911 ERROR [app.services.telegram_service] Watchdog: failed to restore d95ca303-ce44-4f20-87fb-33920210c8c2: Client not authenticated. Complete auth flow first.
+2026-03-11 00:46:34,045 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64148 - "GET /api/ollama/status HTTP/1.1" 200 OK
+2026-03-11 00:46:34,098 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64158 - "GET /api/ollama/running HTTP/1.1" 200 OK
+2026-03-11 00:46:34,112 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64157 - "GET /api/ollama/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64159 - "GET /api/agents HTTP/1.1" 200 OK
+2026-03-11 00:46:35,070 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64167 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+2026-03-11 00:46:43,943 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-03-11 00:46:43,952 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+2026-03-11 00:46:45,097 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64177 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+2026-03-11 00:46:45,897 WARNING [app.services.telegram_service] Watchdog: d95ca303-ce44-4f20-87fb-33920210c8c2 marked active but no client — restoring
+2026-03-11 00:46:45,901 INFO [telethon.network.mtprotosender] Connecting to 149.154.167.51:443/TcpFull...
+2026-03-11 00:46:46,085 INFO [telethon.network.mtprotosender] Connection to 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:46:46,854 INFO [telethon.network.mtprotosender] Disconnecting from 149.154.167.51:443/TcpFull...
+2026-03-11 00:46:46,855 INFO [telethon.network.mtprotosender] Disconnection from 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:46:46,860 ERROR [app.services.telegram_service] Watchdog: failed to restore d95ca303-ce44-4f20-87fb-33920210c8c2: Client not authenticated. Complete auth flow first.
+2026-03-11 00:46:55,034 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64187 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+2026-03-11 00:47:01,870 WARNING [app.services.telegram_service] Watchdog: d95ca303-ce44-4f20-87fb-33920210c8c2 marked active but no client — restoring
+2026-03-11 00:47:01,874 INFO [telethon.network.mtprotosender] Connecting to 149.154.167.51:443/TcpFull...
+2026-03-11 00:47:02,054 INFO [telethon.network.mtprotosender] Connection to 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:47:02,902 INFO [telethon.network.mtprotosender] Disconnecting from 149.154.167.51:443/TcpFull...
+2026-03-11 00:47:02,902 INFO [telethon.network.mtprotosender] Disconnection from 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:47:02,904 ERROR [app.services.telegram_service] Watchdog: failed to restore d95ca303-ce44-4f20-87fb-33920210c8c2: Client not authenticated. Complete auth flow first.
+INFO:     127.0.0.1:64199 - "GET /api/ollama/status HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:64202 - "POST /api/auth/refresh HTTP/1.1" 200 OK
+2026-03-11 00:47:04,007 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64207 - "GET /api/ollama/status HTTP/1.1" 200 OK
+2026-03-11 00:47:04,073 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64216 - "GET /api/ollama/running HTTP/1.1" 200 OK
+2026-03-11 00:47:04,077 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64215 - "GET /api/ollama/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64218 - "GET /api/agents HTTP/1.1" 200 OK
+2026-03-11 00:47:05,019 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64225 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+2026-03-11 00:47:13,938 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-03-11 00:47:13,950 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+2026-03-11 00:47:15,053 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64236 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+2026-03-11 00:47:17,920 WARNING [app.services.telegram_service] Watchdog: d95ca303-ce44-4f20-87fb-33920210c8c2 marked active but no client — restoring
+2026-03-11 00:47:17,928 INFO [telethon.network.mtprotosender] Connecting to 149.154.167.51:443/TcpFull...
+2026-03-11 00:47:18,127 INFO [telethon.network.mtprotosender] Connection to 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:47:18,946 INFO [telethon.network.mtprotosender] Disconnecting from 149.154.167.51:443/TcpFull...
+2026-03-11 00:47:18,946 INFO [telethon.network.mtprotosender] Disconnection from 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:47:18,948 ERROR [app.services.telegram_service] Watchdog: failed to restore d95ca303-ce44-4f20-87fb-33920210c8c2: Client not authenticated. Complete auth flow first.
+2026-03-11 00:47:25,069 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64245 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+2026-03-11 00:47:33,965 WARNING [app.services.telegram_service] Watchdog: d95ca303-ce44-4f20-87fb-33920210c8c2 marked active but no client — restoring
+2026-03-11 00:47:34,006 INFO [telethon.network.mtprotosender] Connecting to 149.154.167.51:443/TcpFull...
+2026-03-11 00:47:34,022 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64253 - "GET /api/ollama/status HTTP/1.1" 200 OK
+2026-03-11 00:47:34,068 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64265 - "GET /api/ollama/running HTTP/1.1" 200 OK
+2026-03-11 00:47:34,079 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64264 - "GET /api/ollama/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64266 - "GET /api/agents HTTP/1.1" 200 OK
+2026-03-11 00:47:34,188 INFO [telethon.network.mtprotosender] Connection to 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:47:35,040 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64273 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+2026-03-11 00:47:35,055 INFO [telethon.network.mtprotosender] Disconnecting from 149.154.167.51:443/TcpFull...
+2026-03-11 00:47:35,056 INFO [telethon.network.mtprotosender] Disconnection from 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:47:35,057 ERROR [app.services.telegram_service] Watchdog: failed to restore d95ca303-ce44-4f20-87fb-33920210c8c2: Client not authenticated. Complete auth flow first.
+2026-03-11 00:47:43,970 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-03-11 00:47:43,980 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+2026-03-11 00:47:45,041 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64287 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+2026-03-11 00:47:50,064 WARNING [app.services.telegram_service] Watchdog: d95ca303-ce44-4f20-87fb-33920210c8c2 marked active but no client — restoring
+2026-03-11 00:47:50,069 INFO [telethon.network.mtprotosender] Connecting to 149.154.167.51:443/TcpFull...
+2026-03-11 00:47:50,246 INFO [telethon.network.mtprotosender] Connection to 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:47:51,043 INFO [telethon.network.mtprotosender] Disconnecting from 149.154.167.51:443/TcpFull...
+2026-03-11 00:47:51,044 INFO [telethon.network.mtprotosender] Disconnection from 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:47:51,046 ERROR [app.services.telegram_service] Watchdog: failed to restore d95ca303-ce44-4f20-87fb-33920210c8c2: Client not authenticated. Complete auth flow first.
+2026-03-11 00:47:55,087 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64297 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+2026-03-11 00:48:04,012 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64304 - "GET /api/ollama/status HTTP/1.1" 200 OK
+2026-03-11 00:48:04,072 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64315 - "GET /api/ollama/running HTTP/1.1" 200 OK
+2026-03-11 00:48:04,078 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64311 - "GET /api/ollama/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64314 - "GET /api/agents HTTP/1.1" 200 OK
+2026-03-11 00:48:05,046 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64323 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+2026-03-11 00:48:06,064 WARNING [app.services.telegram_service] Watchdog: d95ca303-ce44-4f20-87fb-33920210c8c2 marked active but no client — restoring
+2026-03-11 00:48:06,076 INFO [telethon.network.mtprotosender] Connecting to 149.154.167.51:443/TcpFull...
+2026-03-11 00:48:06,269 INFO [telethon.network.mtprotosender] Connection to 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:48:07,115 INFO [telethon.network.mtprotosender] Disconnecting from 149.154.167.51:443/TcpFull...
+2026-03-11 00:48:07,115 INFO [telethon.network.mtprotosender] Disconnection from 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:48:07,117 ERROR [app.services.telegram_service] Watchdog: failed to restore d95ca303-ce44-4f20-87fb-33920210c8c2: Client not authenticated. Complete auth flow first.
+2026-03-11 00:48:14,006 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-03-11 00:48:14,016 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+2026-03-11 00:48:15,048 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64338 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+2026-03-11 00:48:22,128 WARNING [app.services.telegram_service] Watchdog: d95ca303-ce44-4f20-87fb-33920210c8c2 marked active but no client — restoring
+2026-03-11 00:48:22,132 INFO [telethon.network.mtprotosender] Connecting to 149.154.167.51:443/TcpFull...
+2026-03-11 00:48:22,309 INFO [telethon.network.mtprotosender] Connection to 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:48:23,115 INFO [telethon.network.mtprotosender] Disconnecting from 149.154.167.51:443/TcpFull...
+2026-03-11 00:48:23,116 INFO [telethon.network.mtprotosender] Disconnection from 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:48:23,118 ERROR [app.services.telegram_service] Watchdog: failed to restore d95ca303-ce44-4f20-87fb-33920210c8c2: Client not authenticated. Complete auth flow first.
+2026-03-11 00:48:25,079 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64349 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+2026-03-11 00:48:34,058 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64358 - "GET /api/ollama/status HTTP/1.1" 200 OK
+2026-03-11 00:48:34,133 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64364 - "GET /api/ollama/models HTTP/1.1" 200 OK
+2026-03-11 00:48:34,136 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64366 - "GET /api/ollama/running HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64369 - "GET /api/agents HTTP/1.1" 200 OK
+2026-03-11 00:48:35,080 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64376 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+2026-03-11 00:48:38,129 WARNING [app.services.telegram_service] Watchdog: d95ca303-ce44-4f20-87fb-33920210c8c2 marked active but no client — restoring
+2026-03-11 00:48:38,131 INFO [telethon.network.mtprotosender] Connecting to 149.154.167.51:443/TcpFull...
+2026-03-11 00:48:38,407 INFO [telethon.network.mtprotosender] Connection to 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:48:39,289 INFO [telethon.network.mtprotosender] Disconnecting from 149.154.167.51:443/TcpFull...
+2026-03-11 00:48:39,289 INFO [telethon.network.mtprotosender] Disconnection from 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:48:39,294 ERROR [app.services.telegram_service] Watchdog: failed to restore d95ca303-ce44-4f20-87fb-33920210c8c2: Client not authenticated. Complete auth flow first.
+2026-03-11 00:48:44,067 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-03-11 00:48:44,079 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+2026-03-11 00:48:45,103 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64391 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+2026-03-11 00:48:54,311 WARNING [app.services.telegram_service] Watchdog: d95ca303-ce44-4f20-87fb-33920210c8c2 marked active but no client — restoring
+2026-03-11 00:48:54,314 INFO [telethon.network.mtprotosender] Connecting to 149.154.167.51:443/TcpFull...
+2026-03-11 00:48:54,529 INFO [telethon.network.mtprotosender] Connection to 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:48:55,116 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64400 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+2026-03-11 00:48:55,362 INFO [telethon.network.mtprotosender] Disconnecting from 149.154.167.51:443/TcpFull...
+2026-03-11 00:48:55,362 INFO [telethon.network.mtprotosender] Disconnection from 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:48:55,364 ERROR [app.services.telegram_service] Watchdog: failed to restore d95ca303-ce44-4f20-87fb-33920210c8c2: Client not authenticated. Complete auth flow first.
+2026-03-11 00:49:05,019 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64409 - "GET /api/ollama/status HTTP/1.1" 200 OK
+2026-03-11 00:49:05,079 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64414 - "GET /api/ollama/models HTTP/1.1" 200 OK
+2026-03-11 00:49:05,081 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64417 - "GET /api/ollama/running HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64420 - "GET /api/agents HTTP/1.1" 200 OK
+2026-03-11 00:49:05,980 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64427 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+2026-03-11 00:49:10,374 WARNING [app.services.telegram_service] Watchdog: d95ca303-ce44-4f20-87fb-33920210c8c2 marked active but no client — restoring
+2026-03-11 00:49:10,379 INFO [telethon.network.mtprotosender] Connecting to 149.154.167.51:443/TcpFull...
+2026-03-11 00:49:10,563 INFO [telethon.network.mtprotosender] Connection to 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:49:11,348 INFO [telethon.network.mtprotosender] Disconnecting from 149.154.167.51:443/TcpFull...
+2026-03-11 00:49:11,348 INFO [telethon.network.mtprotosender] Disconnection from 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:49:11,350 ERROR [app.services.telegram_service] Watchdog: failed to restore d95ca303-ce44-4f20-87fb-33920210c8c2: Client not authenticated. Complete auth flow first.
+2026-03-11 00:49:14,114 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-03-11 00:49:14,122 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+2026-03-11 00:49:16,027 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64441 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+2026-03-11 00:49:26,029 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64449 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+2026-03-11 00:49:26,356 WARNING [app.services.telegram_service] Watchdog: d95ca303-ce44-4f20-87fb-33920210c8c2 marked active but no client — restoring
+2026-03-11 00:49:26,359 INFO [telethon.network.mtprotosender] Connecting to 149.154.167.51:443/TcpFull...
+2026-03-11 00:49:26,537 INFO [telethon.network.mtprotosender] Connection to 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:49:27,336 INFO [telethon.network.mtprotosender] Disconnecting from 149.154.167.51:443/TcpFull...
+2026-03-11 00:49:27,336 INFO [telethon.network.mtprotosender] Disconnection from 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:49:27,338 ERROR [app.services.telegram_service] Watchdog: failed to restore d95ca303-ce44-4f20-87fb-33920210c8c2: Client not authenticated. Complete auth flow first.
+2026-03-11 00:49:35,083 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64457 - "GET /api/ollama/status HTTP/1.1" 200 OK
+2026-03-11 00:49:35,150 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64463 - "GET /api/ollama/models HTTP/1.1" 200 OK
+2026-03-11 00:49:35,157 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64465 - "GET /api/ollama/running HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64468 - "GET /api/agents HTTP/1.1" 200 OK
+2026-03-11 00:49:36,051 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64475 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+2026-03-11 00:49:42,348 WARNING [app.services.telegram_service] Watchdog: d95ca303-ce44-4f20-87fb-33920210c8c2 marked active but no client — restoring
+2026-03-11 00:49:42,351 INFO [telethon.network.mtprotosender] Connecting to 149.154.167.51:443/TcpFull...
+2026-03-11 00:49:42,536 INFO [telethon.network.mtprotosender] Connection to 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:49:43,380 INFO [telethon.network.mtprotosender] Disconnecting from 149.154.167.51:443/TcpFull...
+2026-03-11 00:49:43,380 INFO [telethon.network.mtprotosender] Disconnection from 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:49:43,381 ERROR [app.services.telegram_service] Watchdog: failed to restore d95ca303-ce44-4f20-87fb-33920210c8c2: Client not authenticated. Complete auth flow first.
+2026-03-11 00:49:44,149 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-03-11 00:49:44,159 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+2026-03-11 00:49:46,080 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64488 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+2026-03-11 00:49:56,099 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64500 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+2026-03-11 00:49:58,392 WARNING [app.services.telegram_service] Watchdog: d95ca303-ce44-4f20-87fb-33920210c8c2 marked active but no client — restoring
+2026-03-11 00:49:58,396 INFO [telethon.network.mtprotosender] Connecting to 149.154.167.51:443/TcpFull...
+2026-03-11 00:49:58,586 INFO [telethon.network.mtprotosender] Connection to 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:49:59,369 INFO [telethon.network.mtprotosender] Disconnecting from 149.154.167.51:443/TcpFull...
+2026-03-11 00:49:59,370 INFO [telethon.network.mtprotosender] Disconnection from 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:49:59,371 ERROR [app.services.telegram_service] Watchdog: failed to restore d95ca303-ce44-4f20-87fb-33920210c8c2: Client not authenticated. Complete auth flow first.
+2026-03-11 00:50:05,000 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64509 - "GET /api/ollama/status HTTP/1.1" 200 OK
+2026-03-11 00:50:05,054 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64517 - "GET /api/ollama/running HTTP/1.1" 200 OK
+2026-03-11 00:50:05,057 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64514 - "GET /api/ollama/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64520 - "GET /api/agents HTTP/1.1" 200 OK
+2026-03-11 00:50:06,068 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64527 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+2026-03-11 00:50:14,190 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-03-11 00:50:14,204 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+2026-03-11 00:50:14,379 WARNING [app.services.telegram_service] Watchdog: d95ca303-ce44-4f20-87fb-33920210c8c2 marked active but no client — restoring
+2026-03-11 00:50:14,383 INFO [telethon.network.mtprotosender] Connecting to 149.154.167.51:443/TcpFull...
+2026-03-11 00:50:14,562 INFO [telethon.network.mtprotosender] Connection to 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:50:15,317 INFO [telethon.network.mtprotosender] Disconnecting from 149.154.167.51:443/TcpFull...
+2026-03-11 00:50:15,317 INFO [telethon.network.mtprotosender] Disconnection from 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:50:15,319 ERROR [app.services.telegram_service] Watchdog: failed to restore d95ca303-ce44-4f20-87fb-33920210c8c2: Client not authenticated. Complete auth flow first.
+2026-03-11 00:50:16,073 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64541 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+2026-03-11 00:50:26,210 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64550 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+WARNING:  WatchFiles detected changes in 'app/api/ideas.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+2026-03-11 00:50:29,576 INFO [ollama_watchdog] Ollama watchdog stopped
+2026-03-11 00:50:29,577 INFO [app.services.telegram_service] Telegram watchdog cancelled
+2026-03-11 00:50:29,577 INFO [app.services.telegram_service] Telegram watchdog stopped
+2026-03-11 00:50:29,578 INFO [app.services.backup_scheduler] Backup scheduler cancelled
+2026-03-11 00:50:29,578 INFO [app.services.backup_scheduler] Backup scheduler stopped
+INFO:     Application shutdown complete.
+INFO:     Finished server process [90918]
+INFO:     Started server process [93944]
+INFO:     Waiting for application startup.
+2026-03-11 00:50:31,249 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-03-11 00:50:31,263 INFO [ollama_watchdog] Ollama watchdog started (interval=30s)
+2026-03-11 00:50:31,275 INFO [telethon.crypto.aes] libssl detected, it will be used for encryption
+2026-03-11 00:50:31,436 INFO [telethon.network.mtprotosender] Connecting to 149.154.167.51:443/TcpFull...
+2026-03-11 00:50:31,619 INFO [telethon.network.mtprotosender] Connection to 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:50:32,392 INFO [telethon.network.mtprotosender] Disconnecting from 149.154.167.51:443/TcpFull...
+2026-03-11 00:50:32,392 INFO [telethon.network.mtprotosender] Disconnection from 149.154.167.51:443/TcpFull complete!
+2026-03-11 00:50:32,394 ERROR [app.services.telegram_service] Failed to restore Telegram listener d95ca303-ce44-4f20-87fb-33920210c8c2: Client not authenticated. Complete auth flow first.
+2026-03-11 00:50:32,398 INFO [app.services.telegram_service] Telegram watchdog started (interval=15s)
+2026-03-11 00:50:32,399 INFO [app.services.backup_scheduler] Backup scheduler task created
+2026-03-11 00:50:32,399 INFO [app.services.backup_scheduler] Backup scheduler started
+INFO:     Application startup complete.
+2026-03-11 00:50:35,044 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64563 - "GET /api/ollama/status HTTP/1.1" 200 OK
+2026-03-11 00:50:35,117 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+2026-03-11 00:50:35,117 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64571 - "GET /api/ollama/running HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64568 - "GET /api/ollama/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64576 - "GET /api/agents HTTP/1.1" 200 OK
+2026-03-11 00:50:36,237 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64583 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+12:50:36 AM [vite] (client) hmr update /src/views/IdeasView.vue
+INFO:     127.0.0.1:64591 - "GET /api/ideas?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64594 - "GET /api/settings/system HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64589 - "GET /api/agents HTTP/1.1" 200 OK
+2026-03-11 00:50:41,460 INFO [httpx] HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-03-11 00:50:41,483 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+2026-03-11 00:50:46,183 INFO [httpx] HTTP Request: GET http://localhost:11434/api/ps "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:64607 - "GET /api/chat/available-models HTTP/1.1" 200 OK
+/bin/sh: line 1: 83367 Killed: 9               PYTHONPATH=. OLLAMA_BASE_URL=http://localhost:11434 CHROMADB_URL=http://localhost:4800 .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 4700 --reload
+/bin/sh: line 1: 83370 Killed: 9               VITE_BACKEND_URL=http://localhost:4700 npm run dev -- --host 0.0.0.0 --port 4200

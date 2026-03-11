@@ -555,9 +555,12 @@ const contextOptions = [
 ]
 
 const akmContextOptions = [
+  { value: 'projects', label: 'Projects' },
   { value: 'issues', label: 'Issues' },
   { value: 'epics', label: 'Epics' },
   { value: 'sprints', label: 'Sprints' },
+  { value: 'leads', label: 'Leads' },
+  { value: 'deals', label: 'Deals' },
 ]
 
 // Restore remembered checkbox selections
