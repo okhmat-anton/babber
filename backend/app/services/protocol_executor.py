@@ -21,6 +21,8 @@ import json
 import re
 from typing import Optional
 
+from app.services.response_styles import get_response_style_prompt
+
 
 # ── Constants ──────────────────────────────────────────────
 
@@ -198,6 +200,7 @@ def format_protocol_prompt(
     description = protocol.get("description", "")
     proto_type = protocol.get("type", "standard")
     steps = protocol.get("steps", [])
+    response_style = protocol.get("response_style")
 
     sections = []
 
@@ -206,6 +209,12 @@ def format_protocol_prompt(
     if description:
         sections.append(f"_{description}_")
     sections.append("")
+
+    # Response style instructions (injected before protocol-specific content)
+    style_prompt = get_response_style_prompt(response_style)
+    if style_prompt:
+        sections.append(style_prompt)
+        sections.append("")
 
     # Protocol type info
     if proto_type == "orchestrator":

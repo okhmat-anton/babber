@@ -174,6 +174,7 @@ class MongoThinkingProtocol(BaseModel):
     description: str = ""
     type: str = "standard"  # standard, orchestrator, loop
     steps: List[Dict[str, Any]] = Field(default_factory=list)
+    response_style: Optional[str] = None  # humanized, formal, casual, technical, concise, creative, academic
     is_default: bool = False
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

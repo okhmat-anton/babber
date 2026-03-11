@@ -1,0 +1,27 @@
+{
+  "name": "humanize_text",
+  "display_name": "Humanize Text",
+  "description": "Rewrite AI-sounding text to sound natural and human",
+  "description_for_agent": "Rewrite text to remove signs of AI-generated writing. Checks for 24 common AI patterns (significance inflation, AI vocabulary, em dash overuse, sycophantic tone, filler phrases, etc.) and rewrites the text to sound natural, with personality and soul. Pass the text to humanize and optionally a tone (neutral, casual, formal).",
+  "category": "general",
+  "version": "1.0.0",
+  "entry_point": "main.py",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string",
+        "description": "Text to humanize (remove AI writing patterns)"
+      },
+      "tone": {
+        "type": "string",
+        "description": "Target tone: neutral, casual, or formal",
+        "default": "neutral"
+      }
+    },
+    "required": [
+      "text"
+    ]
+  },
+  "output_schema": {}
+}

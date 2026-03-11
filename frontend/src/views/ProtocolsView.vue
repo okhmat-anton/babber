@@ -17,6 +17,10 @@
                 <span class="text-subtitle-1 font-weight-bold">{{ p.name }}</span>
                 <v-chip v-if="p.is_default" size="x-small" color="amber" variant="tonal">default</v-chip>
                 <v-chip size="x-small" :color="p.type === 'orchestrator' ? 'orange' : p.type === 'loop' ? 'green' : 'blue-grey'" variant="tonal">{{ p.type || 'standard' }}</v-chip>
+                <v-chip v-if="p.response_style" size="x-small" :color="styleColor(p.response_style)" variant="tonal">
+                  <v-icon start size="12">{{ styleIcon(p.response_style) }}</v-icon>
+                  {{ p.response_style }}
+                </v-chip>
               </div>
               <div class="text-caption text-grey mt-1">{{ p.description || 'No description' }}</div>
               <div class="text-caption text-grey mt-1">{{ stepsCount(p) }} steps · {{ loopsCount(p) }} loops{{ delegateCount(p) ? ' · ' + delegateCount(p) + ' delegates' : '' }}</div>
@@ -103,6 +107,34 @@
                       {{ item.value === 'orchestrator' ? 'mdi-crown' : 'mdi-head-cog' }}
                     </v-icon>
                     {{ item.title }}
+                  </template>
+                </v-select>
+              </div>
+              <div class="d-flex ga-3 mb-4">
+                <v-select
+                  v-model="form.response_style"
+                  :items="responseStyles"
+                  item-title="name"
+                  item-value="key"
+                  label="Response Style"
+                  density="compact"
+                  hide-details
+                  variant="outlined"
+                  clearable
+                  placeholder="Default (no style)"
+                  prepend-inner-icon="mdi-format-text-variant"
+                >
+                  <template #selection="{ item }">
+                    <v-icon size="16" class="mr-1" :color="item.raw.color">{{ item.raw.icon }}</v-icon>
+                    {{ item.raw.name }}
+                  </template>
+                  <template #item="{ item, props }">
+                    <v-list-item v-bind="props">
+                      <template #prepend>
+                        <v-icon :color="item.raw.color" size="20">{{ item.raw.icon }}</v-icon>
+                      </template>
+                      <v-list-item-subtitle>{{ item.raw.description }}</v-list-item-subtitle>
+                    </v-list-item>
                   </template>
                 </v-select>
               </div>
@@ -326,6 +358,7 @@ const saving = ref(false)
 const deleteDialog = ref(false)
 const deleteTarget = ref(null)
 const modelRoles = ref([])  // [{role, label}]
+const responseStyles = ref([])  // [{key, name, description, icon, color}]
 
 const modelRoleItems = computed(() => modelRoles.value.filter(r => r.role !== 'base'))
 
@@ -336,6 +369,7 @@ const form = ref({
   name: '',
   description: '',
   type: 'standard',
+  response_style: null,
   steps: [],
 })
 
@@ -379,6 +413,15 @@ const stepsCount = (p) => {
 const loopsCount = (p) => (p.steps || []).filter(s => s.type === 'loop').length
 const delegateCount = (p) => (p.steps || []).filter(s => s.type === 'delegate').length
 
+const styleColor = (key) => {
+  const s = responseStyles.value.find(rs => rs.key === key)
+  return s ? s.color : 'grey'
+}
+const styleIcon = (key) => {
+  const s = responseStyles.value.find(rs => rs.key === key)
+  return s ? s.icon : 'mdi-format-text-variant'
+}
+
 // Protocols available for delegation (all standard protocols, excluding the one being edited)
 const delegatableProtocols = computed(() =>
   protocols.value.filter(p => p.type !== 'orchestrator' && p.id !== editingId.value)
@@ -387,12 +430,14 @@ const delegatableProtocols = computed(() =>
 const load = async () => {
   loading.value = true
   try {
-    const [protoRes, rolesRes] = await Promise.all([
+    const [protoRes, rolesRes, stylesRes] = await Promise.all([
       api.get('/protocols'),
       api.get('/settings/model-roles/available').catch(() => ({ data: [] })),
+      api.get('/protocols/response-styles').catch(() => ({ data: [] })),
     ])
     protocols.value = protoRes.data
     modelRoles.value = rolesRes.data
+    responseStyles.value = stylesRes.data
   } finally { loading.value = false }
 }
 
@@ -402,7 +447,7 @@ const selectProtocol = (p) => {
 
 const openCreate = () => {
   editingId.value = null
-  form.value = { name: '', description: '', type: 'standard', steps: [] }
+  form.value = { name: '', description: '', type: 'standard', response_style: null, steps: [] }
   formDialog.value = true
 }
 
@@ -412,6 +457,7 @@ const openEdit = (p) => {
     name: p.name,
     description: p.description,
     type: p.type || 'standard',
+    response_style: p.response_style || null,
     steps: JSON.parse(JSON.stringify(p.steps || [])),
   }
   formDialog.value = true

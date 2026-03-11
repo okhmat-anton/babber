@@ -1561,6 +1561,101 @@ SYSTEM_SKILLS = [
             },
         },
     },
+    # ── Humanize Text ──────────────────────────────────────
+    {
+        "name": "humanize_text",
+        "display_name": "Humanize Text",
+        "description": "Rewrite AI-sounding text to sound natural and human",
+        "description_for_agent": (
+            "Rewrite text to remove signs of AI-generated writing. "
+            "Checks for 24 common AI patterns (significance inflation, AI vocabulary, "
+            "em dash overuse, sycophantic tone, filler phrases, etc.) and rewrites "
+            "the text to sound natural, with personality and soul. "
+            "Pass the text to humanize and optionally a tone (neutral, casual, formal)."
+        ),
+        "category": "general",
+        "code": (
+            "import httpx\n"
+            "from app.config import settings\n"
+            "from app.database import get_mongodb\n"
+            "from app.mongodb.services import ModelConfigService\n"
+            "async def execute(text, tone='neutral', **kwargs):\n"
+            "    db = get_mongodb()\n"
+            "    mc_svc = ModelConfigService(db)\n"
+            "    # Try to find a model with 'base' role\n"
+            "    mc = await mc_svc.find_one({'role': 'base'})\n"
+            "    model_id = mc.model_id if mc else 'llama3.1:8b'\n"
+            "    system_prompt = (\n"
+            "        'You are a writing editor that identifies and removes signs of AI-generated text. '\n"
+            "        'Your job: take the input text and rewrite it to sound human and natural.\\n\\n'\n"
+            "        '## The 24 AI Patterns to Remove\\n'\n"
+            "        '### Content\\n'\n"
+            "        '1. No significance inflation — no grandiose claims about importance\\n'\n"
+            "        '2. No notability name-dropping — no inserting famous names without substance\\n'\n"
+            "        '3. No superficial -ing openers — no \"Understanding the landscape\" style starts\\n'\n"
+            "        '4. No promotional language — no \"game-changing\" or \"revolutionary\"\\n'\n"
+            "        '5. No vague attributions — no \"experts say\" without specifics\\n'\n"
+            "        '6. No formulaic challenges — no \"The challenge lies in...\"\\n'\n"
+            "        '### Language\\n'\n"
+            "        '7. No AI vocabulary — avoid: Additionally, Crucial, Delve, Enhance, Foster, '\n"
+            "        'Landscape (metaphorical), Pivotal, Showcase, Tapestry, Testament, Underscore, '\n"
+            "        'Vibrant, Multifaceted, Comprehensive, Leverage, Innovative, Utilize, Navigate '\n"
+            "        '(metaphorical), Paradigm, Robust\\n'\n"
+            "        '8. Use simple verbs — is/are/has/shows/means\\n'\n"
+            "        '9. No negative parallelisms — no \"not just X but Y\"\\n'\n"
+            "        '10. No rule-of-three — vary groupings\\n'\n"
+            "        '11. No synonym cycling — say it once, clearly\\n'\n"
+            "        '12. No false ranges — no \"from X to Y\" for fake comprehensiveness\\n'\n"
+            "        '### Style\\n'\n"
+            "        '13. Minimal em dashes — at most one per 500 words\\n'\n"
+            "        '14. No bold-for-emphasis overuse\\n'\n"
+            "        '15. No inline-header lists with bold lead-ins\\n'\n"
+            "        '16. Sentence case headings\\n'\n"
+            "        '17. No gratuitous emoji\\n'\n"
+            "        '18. Straight quotes\\n'\n"
+            "        '### Communication\\n'\n"
+            "        '19. No chatbot artifacts like \"Great question!\"\\n'\n"
+            "        '20. No cutoff disclaimers\\n'\n"
+            "        '21. No sycophantic tone — no praising the user\\n'\n"
+            "        '### Filler\\n'\n"
+            "        '22. No filler phrases like \"It\\'s important to note\"\\n'\n"
+            "        '23. No excessive hedging\\n'\n"
+            "        '24. No generic conclusions like \"In conclusion\"\\n\\n'\n"
+            "        '### Soul\\n'\n"
+            "        '- Vary sentence length\\n'\n"
+            "        '- Have opinions when appropriate\\n'\n"
+            "        '- Use first person naturally\\n'\n"
+            "        '- Acknowledge complexity\\n'\n"
+            "        '- Be specific, not generic\\n\\n'\n"
+            "        'Tone: ' + tone + '\\n\\n'\n"
+            "        'Process: Identify AI patterns → rewrite → preserve meaning → add soul → '\n"
+            "        'anti-AI audit (ask \"what makes this obviously AI?\") → second rewrite.\\n\\n'\n"
+            "        'Output ONLY the rewritten text. No explanations, no preamble.'\n"
+            "    )\n"
+            "    ollama_url = settings.OLLAMA_BASE_URL\n"
+            "    async with httpx.AsyncClient(timeout=120) as client:\n"
+            "        resp = await client.post(\n"
+            "            f'{ollama_url}/api/chat',\n"
+            "            json={'model': model_id, 'messages': [\n"
+            "                {'role': 'system', 'content': system_prompt},\n"
+            "                {'role': 'user', 'content': text},\n"
+            "            ], 'stream': False},\n"
+            "        )\n"
+            "        if resp.status_code != 200:\n"
+            "            return {'error': f'LLM error {resp.status_code}: {resp.text[:500]}'}\n"
+            "        data = resp.json()\n"
+            "        result = data.get('message', {}).get('content', '')\n"
+            "    return {'original_length': len(text), 'humanized_length': len(result), 'text': result}\n"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "Text to humanize (remove AI writing patterns)"},
+                "tone": {"type": "string", "description": "Target tone: neutral, casual, or formal", "default": "neutral"},
+            },
+            "required": ["text"],
+        },
+    },
 ]
 
 

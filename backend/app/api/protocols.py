@@ -25,6 +25,7 @@ from app.database import get_mongodb
 from app.core.dependencies import get_current_user
 from app.mongodb.models import MongoThinkingProtocol
 from app.mongodb.services import ThinkingProtocolService
+from app.services.response_styles import get_response_styles_list, RESPONSE_STYLES
 
 router = APIRouter(prefix="/api/protocols", tags=["thinking-protocols"], dependencies=[Depends(get_current_user)])
 
@@ -56,6 +57,7 @@ class ProtocolCreate(BaseModel):
     description: str = ""
     type: str = "standard"  # standard, orchestrator
     steps: list[StepBase] = []
+    response_style: str | None = None  # humanized, formal, casual, technical, concise, creative, academic
 
 
 class ProtocolUpdate(BaseModel):
@@ -63,6 +65,7 @@ class ProtocolUpdate(BaseModel):
     description: str | None = None
     type: str | None = None
     steps: list[StepBase] | None = None
+    response_style: str | None = None
 
 
 class ProtocolResponse(BaseModel):
@@ -71,6 +74,7 @@ class ProtocolResponse(BaseModel):
     description: str
     type: str
     steps: list
+    response_style: str | None = None
     is_default: bool
     created_at: datetime
     updated_at: datetime
@@ -97,6 +101,7 @@ def _to_response(p: MongoThinkingProtocol) -> dict:
         "description": p.description or "",
         "type": p.type or "standard",
         "steps": p.steps or [],
+        "response_style": p.response_style,
         "is_default": p.is_default,
         "created_at": p.created_at,
         "updated_at": p.updated_at,
@@ -104,6 +109,12 @@ def _to_response(p: MongoThinkingProtocol) -> dict:
 
 
 # ---------- Endpoints ----------
+
+@router.get("/response-styles")
+async def list_response_styles():
+    """Return available response style presets for protocol configuration."""
+    return get_response_styles_list()
+
 
 @router.get("")
 async def list_protocols(db: AsyncIOMotorDatabase = Depends(get_mongodb)):
@@ -133,6 +144,7 @@ async def create_protocol(body: ProtocolCreate, db: AsyncIOMotorDatabase = Depen
         description=body.description,
         type=body.type if body.type in PROTOCOL_TYPES else "standard",
         steps=steps_raw,
+        response_style=body.response_style if body.response_style in RESPONSE_STYLES else None,
     )
     created = await protocol_service.create(p)
     return _to_response(created)
@@ -156,6 +168,8 @@ async def update_protocol(protocol_id: str, body: ProtocolUpdate, db: AsyncIOMot
         steps_raw = [s.model_dump() for s in body.steps]
         steps_raw = _assign_ids(steps_raw)
         update_data["steps"] = steps_raw
+    if body.response_style is not None:
+        update_data["response_style"] = body.response_style if body.response_style in RESPONSE_STYLES else None
     
     update_data["updated_at"] = datetime.now(timezone.utc)
     updated = await protocol_service.update(protocol_id, update_data)
