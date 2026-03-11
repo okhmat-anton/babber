@@ -134,7 +134,6 @@ class UpdateVideoRequest(BaseModel):
     category: Optional[str] = None
     title: Optional[str] = None
     agent_id: Optional[str] = None
-    tags: Optional[list[str]] = None
     linked_fact_ids: Optional[list[str]] = None
     linked_analysis_ids: Optional[list[str]] = None
     linked_idea_ids: Optional[list[str]] = None
@@ -165,7 +164,6 @@ async def update_watched_video(
 class AddVideoRequest(BaseModel):
     url: str
     category: Optional[str] = None
-    tags: Optional[list[str]] = None
 
 
 @router.post("", response_model=WatchedVideoResponse, status_code=201)
@@ -189,7 +187,7 @@ async def add_video(
         return _to_response(existing)
 
     platform, _ = _detect_video_platform(url)
-    record = MongoWatchedVideo(url=url, platform=platform or "unknown", category=body.category or None, tags=body.tags or [])
+    record = MongoWatchedVideo(url=url, platform=platform or "unknown", category=body.category or None)
     created = await svc.create(record)
     return _to_response(created)
 

@@ -11,9 +11,17 @@
       <div class="popup-section">
         <div class="popup-section-label">Personal</div>
         <div class="popup-actions">
+          <button class="popup-btn" @click="emit('save', 'notes')" title="Save to Notes">
+            <v-icon size="14">mdi-notebook-outline</v-icon>
+            <span>Notes</span>
+          </button>
           <button class="popup-btn" @click="emit('save', 'goals')" title="Add as Goal">
             <v-icon size="14">mdi-flag-outline</v-icon>
             <span>Goals</span>
+          </button>
+          <button class="popup-btn" @click="emit('save', 'ideas')" title="Add as Idea">
+            <v-icon size="14">mdi-lightbulb-outline</v-icon>
+            <span>Ideas</span>
           </button>
           <button class="popup-btn" @click="emit('save', 'dreams')" title="Add as Dream">
             <v-icon size="14">mdi-creation-outline</v-icon>
@@ -26,14 +34,6 @@
       <div class="popup-section">
         <div class="popup-section-label">Global</div>
         <div class="popup-actions">
-          <button class="popup-btn" @click="emit('save', 'global_note')" title="Save as Note">
-            <v-icon size="14">mdi-note-text-outline</v-icon>
-            <span>Note</span>
-          </button>
-          <button class="popup-btn" @click="emit('save', 'global_idea')" title="Save as Idea">
-            <v-icon size="14">mdi-lightbulb-on-outline</v-icon>
-            <span>Idea</span>
-          </button>
           <button class="popup-btn" @click="emit('save', 'global_fact')" title="Save as Global Fact">
             <v-icon size="14">mdi-check-decagram</v-icon>
             <span>Fact</span>
@@ -41,6 +41,10 @@
           <button class="popup-btn" @click="emit('save', 'global_analysis')" title="Create Analysis Topic">
             <v-icon size="14">mdi-chart-line</v-icon>
             <span>Analysis</span>
+          </button>
+          <button class="popup-btn" @click="emit('save', 'global_idea')" title="Save as Idea">
+            <v-icon size="14">mdi-lightbulb-on-outline</v-icon>
+            <span>Idea</span>
           </button>
         </div>
       </div>

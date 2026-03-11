@@ -20,7 +20,6 @@ class MongoWatchedVideo(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)  # Extra platform-specific data
     agent_id: Optional[str] = None  # Which agent requested the transcript
     category: Optional[str] = None  # User-defined category for grouping
-    tags: List[str] = Field(default_factory=list)
     credits_used: int = 1
     error: Optional[str] = None  # Error message if fetch failed
     # Cross-linking

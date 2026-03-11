@@ -59,18 +59,6 @@
       />
     </div>
 
-    <!-- Tag filter -->
-    <div v-if="allTags.length" class="d-flex align-center ga-1 mb-3 flex-wrap">
-      <v-icon size="18" class="mr-1 text-grey">mdi-tag-multiple</v-icon>
-      <v-chip
-        v-for="tag in allTags" :key="tag"
-        :color="selectedTags.includes(tag) ? 'cyan' : 'default'"
-        :variant="selectedTags.includes(tag) ? 'flat' : 'outlined'"
-        size="small" @click="toggleTag(tag)"
-      >{{ tag }}</v-chip>
-      <v-btn v-if="selectedTags.length" variant="text" size="x-small" color="grey" @click="selectedTags = []">Clear</v-btn>
-    </div>
-
     <!-- Topics grouped by category -->
     <div v-if="!filterCategory && groupedTopics.length > 1">
       <div v-for="group in groupedTopics" :key="group.category" class="mb-6">
@@ -108,9 +96,6 @@
               <template #item.category="{ item }">
                 <v-chip v-if="item.category" size="small" variant="tonal" color="indigo">{{ item.category }}</v-chip>
               </template>
-              <template #item.tags="{ item }">
-                <div class="d-flex ga-1 flex-wrap"><v-chip v-for="t in (item.tags || [])" :key="t" size="x-small" variant="tonal" color="cyan">{{ t }}</v-chip></div>
-              </template>
               <template #item.fact_ids="{ item }">
                 <v-chip size="small" variant="tonal" color="teal">{{ item.fact_ids?.length || 0 }} facts</v-chip>
               </template>
@@ -134,7 +119,7 @@
         <v-data-table
           v-model="selectedItems"
           :headers="headers"
-          :items="tagFilteredTopics"
+          :items="topics"
           :loading="loading"
           show-select
           return-object
@@ -165,12 +150,6 @@
 
           <template #item.category="{ item }">
             <v-chip v-if="item.category" size="small" variant="tonal" color="indigo">{{ item.category }}</v-chip>
-          </template>
-
-          <template #item.tags="{ item }">
-            <div class="d-flex ga-1 flex-wrap">
-              <v-chip v-for="t in (item.tags || [])" :key="t" size="x-small" variant="tonal" color="cyan">{{ t }}</v-chip>
-            </div>
           </template>
 
           <template #item.fact_ids="{ item }">
@@ -360,6 +339,9 @@
       </v-card>
     </v-dialog>
 
+    <!-- Connect Fact Dialog -->
+    <v-dialog v-model="connectFactDialog" max-width="700" scrollable>
+
     <!-- Delete Confirmation Dialog -->
     <v-dialog v-model="deleteDialog" max-width="400">
       <v-card>
@@ -439,16 +421,12 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, inject, watch } from 'vue'
+import { ref, computed, onMounted, inject } from 'vue'
 import api from '../api'
 import { useAgentsStore } from '../stores/agents'
 import { useChatStore } from '../stores/chat'
 
 const showSnackbar = inject('showSnackbar')
-const dataRefreshSignal = inject('dataRefreshSignal', reactive({ type: '', timestamp: 0 }))
-watch(() => dataRefreshSignal.timestamp, () => {
-  if (dataRefreshSignal.type === 'analysis') loadTopics()
-})
 const agentsStore = useAgentsStore()
 const chatStore = useChatStore()
 
@@ -488,12 +466,9 @@ const statuses = [
   { value: 'archived', label: 'Archived', color: 'brown', icon: 'mdi-archive-outline' },
 ]
 
-const selectedTags = ref([])
-
 const headers = [
   { title: 'Status', key: 'status', width: 120 },
   { title: 'Title', key: 'title' },
-  { title: 'Tags', key: 'tags', width: 160, sortable: false },
   { title: 'Agent', key: 'agent_id', width: 150 },
   { title: 'Category', key: 'category', width: 140 },
   { title: 'Facts', key: 'fact_ids', width: 100 },
@@ -501,23 +476,6 @@ const headers = [
   { title: 'Created', key: 'created_at', width: 140 },
   { title: 'Actions', key: 'actions', sortable: false, width: 100 },
 ]
-
-const allTags = computed(() => {
-  const tags = new Set()
-  topics.value.forEach(i => (i.tags || []).forEach(t => tags.add(t)))
-  return [...tags].sort()
-})
-
-const tagFilteredTopics = computed(() => {
-  if (!selectedTags.value.length) return topics.value
-  return topics.value.filter(i => (i.tags || []).some(t => selectedTags.value.includes(t)))
-})
-
-function toggleTag(tag) {
-  const idx = selectedTags.value.indexOf(tag)
-  if (idx >= 0) selectedTags.value.splice(idx, 1)
-  else selectedTags.value.push(tag)
-}
 
 const agentOptions = computed(() => agents.value)
 
@@ -528,7 +486,7 @@ const categoryOptions = computed(() => {
 
 const groupedTopics = computed(() => {
   const groups = {}
-  for (const t of tagFilteredTopics.value) {
+  for (const t of topics.value) {
     const cat = t.category || ''
     if (!groups[cat]) groups[cat] = []
     groups[cat].push(t)
