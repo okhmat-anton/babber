@@ -8,6 +8,10 @@ All endpoints require authentication and polymarket_api_key setting.
 """
 import logging
 import uuid
+import hmac
+import hashlib
+import base64
+import time
 from datetime import datetime, timezone
 from typing import Optional, List
 
@@ -53,6 +57,57 @@ def _clob_headers(creds: dict) -> dict:
         headers["POLY_API_SECRET"] = creds["api_secret"]
         headers["POLY_PASSPHRASE"] = creds["passphrase"]
     return headers
+
+
+async def _get_active_vpn(db) -> dict | None:
+    """Get the currently active VPN proxy config, or None."""
+    vpn = await db["polymarket_vpns"].find_one({"is_active": True})
+    return vpn
+
+
+def _build_proxy_url(vpn: dict) -> str:
+    """Build proxy URL from VPN config."""
+    protocol = vpn.get("protocol", "socks5")
+    host = vpn.get("host", "")
+    port = vpn.get("port", 1080)
+    username = vpn.get("username", "")
+    password = vpn.get("password", "")
+    if username and password:
+        return f"{protocol}://{username}:{password}@{host}:{port}"
+    return f"{protocol}://{host}:{port}"
+
+
+def _make_httpx_client(vpn: dict | None = None, timeout: int = 15) -> httpx.AsyncClient:
+    """Create an httpx.AsyncClient, optionally with proxy."""
+    kwargs = {"timeout": timeout, "verify": False}
+    if vpn and vpn.get("host"):
+        proxy_url = _build_proxy_url(vpn)
+        kwargs["proxy"] = proxy_url
+        logger.info("Using VPN proxy: %s (%s)", vpn.get('name', '?'), vpn.get('host', '?'))
+    return httpx.AsyncClient(**kwargs)
+
+
+def _build_hmac_signature(secret: str, timestamp: int, method: str, request_path: str, body: str = "") -> str:
+    """Build HMAC signature for Polymarket L2 auth."""
+    b64_secret = base64.urlsafe_b64decode(secret)
+    message = f"{timestamp}{method}{request_path}"
+    if body:
+        message += body
+    h = hmac.new(b64_secret, message.encode("utf-8"), hashlib.sha256)
+    return base64.urlsafe_b64encode(h.digest()).decode("utf-8")
+
+
+def _clob_l2_headers(creds: dict, method: str, request_path: str, body: str = "") -> dict:
+    """Build L2 authenticated headers with HMAC signing for CLOB API."""
+    timestamp = int(time.time())
+    sig = _build_hmac_signature(creds["api_secret"], timestamp, method, request_path, body)
+    return {
+        "Content-Type": "application/json",
+        "POLY_API_KEY": creds["api_key"],
+        "POLY_PASSPHRASE": creds["passphrase"],
+        "POLY_TIMESTAMP": str(timestamp),
+        "POLY_SIGNATURE": sig,
+    }
 
 
 def _parse_outcome_prices(raw) -> dict:
@@ -165,6 +220,131 @@ async def get_orderbook(token_id: str, db: AsyncIOMotorDatabase = Depends(get_mo
         raise HTTPException(status_code=502, detail=str(e))
 
 
+# ─── VPN Management ───
+
+class VpnConfig(BaseModel):
+    name: str
+    protocol: str = "socks5"  # socks5, socks5h, http, https
+    host: str
+    port: int = 1080
+    username: str = ""
+    password: str = ""
+    is_active: bool = False
+
+
+@router.get("/vpns")
+async def list_vpns(db: AsyncIOMotorDatabase = Depends(get_mongodb)):
+    """List all VPN configurations."""
+    cursor = db["polymarket_vpns"].find().sort("created_at", -1)
+    items = []
+    async for doc in cursor:
+        doc["_id"] = str(doc["_id"]) if "_id" in doc else None
+        # Mask password in response
+        if doc.get("password"):
+            doc["password_set"] = True
+            doc["password"] = "***"
+        else:
+            doc["password_set"] = False
+        items.append(doc)
+    return {"items": items}
+
+
+@router.post("/vpns")
+async def create_vpn(
+    body: VpnConfig,
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Create a new VPN configuration."""
+    vpn_id = str(uuid.uuid4())
+    doc = {
+        "id": vpn_id,
+        **body.dict(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    # If this is set as active, deactivate others
+    if body.is_active:
+        await db["polymarket_vpns"].update_many({}, {"$set": {"is_active": False}})
+    await db["polymarket_vpns"].insert_one(doc)
+    return {"id": vpn_id, "success": True}
+
+
+@router.patch("/vpns/{vpn_id}")
+async def update_vpn(
+    vpn_id: str,
+    body: VpnConfig,
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Update a VPN configuration."""
+    existing = await db["polymarket_vpns"].find_one({"id": vpn_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="VPN not found")
+
+    update = body.dict()
+    # If password is "***" (masked), keep the old one
+    if update.get("password") == "***":
+        update["password"] = existing.get("password", "")
+
+    # If setting as active, deactivate others
+    if update.get("is_active"):
+        await db["polymarket_vpns"].update_many(
+            {"id": {"$ne": vpn_id}},
+            {"$set": {"is_active": False}},
+        )
+
+    await db["polymarket_vpns"].update_one(
+        {"id": vpn_id},
+        {"$set": update},
+    )
+    return {"success": True}
+
+
+@router.delete("/vpns/{vpn_id}")
+async def delete_vpn(
+    vpn_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Delete a VPN configuration."""
+    result = await db["polymarket_vpns"].delete_one({"id": vpn_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="VPN not found")
+    return {"success": True}
+
+
+@router.post("/vpns/{vpn_id}/activate")
+async def activate_vpn(
+    vpn_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Set a VPN as the active proxy. Use vpn_id='none' to disable all."""
+    await db["polymarket_vpns"].update_many({}, {"$set": {"is_active": False}})
+    if vpn_id != "none":
+        result = await db["polymarket_vpns"].update_one(
+            {"id": vpn_id},
+            {"$set": {"is_active": True}},
+        )
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="VPN not found")
+    return {"success": True}
+
+
+@router.post("/vpns/{vpn_id}/test")
+async def test_vpn(
+    vpn_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Test a VPN connection by making a request through it."""
+    vpn = await db["polymarket_vpns"].find_one({"id": vpn_id})
+    if not vpn:
+        raise HTTPException(status_code=404, detail="VPN not found")
+    try:
+        async with _make_httpx_client(vpn, timeout=10) as client:
+            r = await client.get("https://httpbin.org/ip")
+            data = r.json()
+            return {"success": True, "ip": data.get("origin", "unknown"), "status": r.status_code}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
 # ─── Authenticated endpoints (need API key) ───
 
 async def _require_creds(db) -> dict:
@@ -198,8 +378,9 @@ async def place_bet(body: PlaceBetRequest, db: AsyncIOMotorDatabase = Depends(ge
         "size": str(body.size),
         "type": "GTC",  # Good Till Cancel
     }
+    vpn = await _get_active_vpn(db)
     try:
-        async with httpx.AsyncClient(timeout=30, verify=False) as client:
+        async with _make_httpx_client(vpn, timeout=30) as client:
             r = await client.post(
                 f"{CLOB_API}/order",
                 json=order,
@@ -220,8 +401,9 @@ async def place_bet(body: PlaceBetRequest, db: AsyncIOMotorDatabase = Depends(ge
 async def get_positions(db: AsyncIOMotorDatabase = Depends(get_mongodb)):
     """Get current open positions / balances."""
     creds = await _require_creds(db)
+    vpn = await _get_active_vpn(db)
     try:
-        async with httpx.AsyncClient(timeout=15, verify=False) as client:
+        async with _make_httpx_client(vpn) as client:
             r = await client.get(
                 f"{CLOB_API}/positions",
                 headers=_clob_headers(creds),
@@ -243,8 +425,9 @@ async def get_orders(
     params = {}
     if status:
         params["status"] = status
+    vpn = await _get_active_vpn(db)
     try:
-        async with httpx.AsyncClient(timeout=15, verify=False) as client:
+        async with _make_httpx_client(vpn) as client:
             r = await client.get(
                 f"{CLOB_API}/orders",
                 headers=_clob_headers(creds),
@@ -259,17 +442,24 @@ async def get_orders(
 
 @router.get("/balance")
 async def get_balance(db: AsyncIOMotorDatabase = Depends(get_mongodb)):
-    """Get USDC balance."""
+    """Get USDC balance via /balance-allowance with L2 HMAC auth."""
     creds = await _require_creds(db)
+    request_path = "/balance-allowance"
+    params = "?asset_type=COLLATERAL&signature_type=0"
+    headers = _clob_l2_headers(creds, "GET", request_path)
+    vpn = await _get_active_vpn(db)
     try:
-        async with httpx.AsyncClient(timeout=15, verify=False) as client:
+        async with _make_httpx_client(vpn) as client:
             r = await client.get(
-                f"{CLOB_API}/balance",
-                headers=_clob_headers(creds),
+                f"{CLOB_API}{request_path}{params}",
+                headers=headers,
             )
             if r.status_code != 200:
                 raise HTTPException(status_code=r.status_code, detail=f"API error: {r.text[:500]}")
-            return r.json()
+            data = r.json()
+            # Return in a consistent format: {balance: "123.45"}
+            balance_val = data.get("balance") or data.get("available") or data.get("allowance") or "0"
+            return {"balance": balance_val}
     except httpx.HTTPError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -613,13 +803,14 @@ async def place_session_bets(
         raise HTTPException(status_code=400, detail="Polymarket API credentials not configured")
 
     headers = _clob_headers(creds)
+    vpn = await _get_active_vpn(db)
     results = []
 
     for bet in doc.get("bets", []):
         if not bet.get("selected") or not bet.get("token_id"):
             continue
         try:
-            async with httpx.AsyncClient(timeout=30, verify=False) as client:
+            async with _make_httpx_client(vpn, timeout=30) as client:
                 r = await client.post(f"{CLOB_API}/order", headers=headers, json={
                     "tokenID": bet["token_id"],
                     "side": "BUY",
@@ -711,8 +902,9 @@ async def place_single_bet(
         raise HTTPException(status_code=400, detail=f"Bet #{bet_number} has no token_id")
 
     headers = _clob_headers(creds)
+    vpn = await _get_active_vpn(db)
     try:
-        async with httpx.AsyncClient(timeout=30, verify=False) as client:
+        async with _make_httpx_client(vpn, timeout=30) as client:
             r = await client.post(f"{CLOB_API}/order", headers=headers, json={
                 "tokenID": bet["token_id"],
                 "side": "BUY",
