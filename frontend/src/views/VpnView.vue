@@ -14,36 +14,74 @@
         <v-icon start size="16">mdi-shield-off-outline</v-icon>
         No active VPN
       </v-chip>
-      <v-btn variant="tonal" class="mr-2" @click="openBulkDialog" prepend-icon="mdi-playlist-plus">
-        Import List
-      </v-btn>
-      <v-btn color="primary" @click="openVpnDialog()" prepend-icon="mdi-plus">
-        Add VPN
-      </v-btn>
     </div>
 
-    <!-- Stats bar -->
-    <v-row dense class="mb-4">
-      <v-col cols="auto">
-        <v-chip variant="tonal" size="small">Total: {{ vpns.length }}</v-chip>
-      </v-col>
-      <v-col cols="auto">
-        <v-chip variant="tonal" color="success" size="small">Working: {{ workingCount }}</v-chip>
-      </v-col>
-      <v-col cols="auto">
-        <v-chip variant="tonal" color="error" size="small">Failed: {{ failedCount }}</v-chip>
-      </v-col>
-      <v-col cols="auto">
-        <v-btn size="small" variant="tonal" @click="testAll" :loading="testingAll" prepend-icon="mdi-lan-check">
-          Test All
+    <!-- Tabs -->
+    <v-tabs v-model="activeTab" class="mb-4">
+      <v-tab value="proxies">
+        <v-icon start>mdi-vpn</v-icon>
+        Proxies
+      </v-tab>
+      <v-tab value="logs">
+        <v-icon start>mdi-text-box-search-outline</v-icon>
+        Logs
+        <v-badge v-if="logErrorCount > 0" :content="logErrorCount" color="error" inline class="ml-2" />
+      </v-tab>
+    </v-tabs>
+
+    <!-- ═══ Proxies Tab ═══ -->
+    <div v-show="activeTab === 'proxies'">
+      <div class="d-flex align-center mb-4 ga-2">
+        <v-btn variant="tonal" @click="openBulkDialog" prepend-icon="mdi-playlist-plus">
+          Import List
         </v-btn>
-      </v-col>
-      <v-col cols="auto" v-if="failedCount > 0">
-        <v-btn size="small" variant="tonal" color="error" @click="deleteDead" :loading="deletingDead" prepend-icon="mdi-delete-sweep">
-          Delete Failed
+        <v-btn color="primary" @click="openVpnDialog()" prepend-icon="mdi-plus">
+          Add VPN
         </v-btn>
-      </v-col>
-    </v-row>
+      </div>
+
+      <!-- Stats bar -->
+      <v-row dense class="mb-4">
+        <v-col cols="auto">
+          <v-chip variant="tonal" size="small">Total: {{ filteredVpns.length }}<span v-if="countryFilter"> / {{ vpns.length }}</span></v-chip>
+        </v-col>
+        <v-col cols="auto">
+          <v-chip variant="tonal" color="success" size="small">Working: {{ workingCount }}</v-chip>
+        </v-col>
+        <v-col cols="auto">
+          <v-chip variant="tonal" color="error" size="small">Failed: {{ failedCount }}</v-chip>
+        </v-col>
+        <v-col cols="auto">
+          <v-chip variant="tonal" color="grey" size="small">Unknown: {{ unknownCount }}</v-chip>
+        </v-col>
+        <v-col cols="auto" v-if="countries.length > 1">
+          <v-select
+            v-model="countryFilter"
+            :items="countryOptions"
+            label="Country"
+            variant="outlined"
+            density="compact"
+            clearable
+            hide-details
+            style="min-width: 160px"
+          />
+        </v-col>
+        <v-col cols="auto">
+          <v-btn size="small" variant="tonal" @click="testAll" :loading="testingAll" prepend-icon="mdi-lan-check">
+            Test All
+          </v-btn>
+        </v-col>
+        <v-col cols="auto" v-if="failedCount > 0">
+          <v-btn size="small" variant="tonal" color="error" @click="deleteDead" :loading="deletingDead" prepend-icon="mdi-delete-sweep">
+            Delete Failed
+          </v-btn>
+        </v-col>
+        <v-col cols="auto" v-if="vpns.length > 0">
+          <v-btn size="small" variant="tonal" color="error" @click="deleteAll" :loading="deletingAll" prepend-icon="mdi-delete-alert">
+            Delete All
+          </v-btn>
+        </v-col>
+      </v-row>
 
     <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-4" />
 
@@ -56,8 +94,14 @@
       <v-btn variant="tonal" @click="openBulkDialog" prepend-icon="mdi-playlist-plus">Import List</v-btn>
     </div>
 
+    <div v-if="!loading && vpns.length && !filteredVpns.length" class="text-center text-medium-emphasis py-8">
+      <v-icon size="60" class="mb-4">mdi-filter-off-outline</v-icon>
+      <div class="text-h6 mb-2">No proxies match filter</div>
+      <v-btn variant="tonal" size="small" @click="countryFilter = null" prepend-icon="mdi-filter-remove">Clear filter</v-btn>
+    </div>
+
     <!-- VPN Table -->
-    <v-card v-if="vpns.length" variant="outlined">
+    <v-card v-if="filteredVpns.length" variant="outlined">
       <v-table density="compact" hover>
         <thead>
           <tr>
@@ -66,6 +110,7 @@
             <th>Protocol</th>
             <th>Host</th>
             <th>Port</th>
+            <th>Country</th>
             <th>Auth</th>
             <th>Status</th>
             <th>IP</th>
@@ -74,7 +119,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="vpn in vpns" :key="vpn.id" :class="vpn.is_active ? 'bg-success-darken-4' : ''">
+          <tr v-for="vpn in filteredVpns" :key="vpn.id" :class="vpn.is_active ? 'bg-success-darken-4' : ''">
             <td>
               <v-icon :color="vpn.is_active ? 'success' : 'grey'" size="20">
                 {{ vpn.is_active ? 'mdi-shield-check' : 'mdi-shield-outline' }}
@@ -84,6 +129,13 @@
             <td><v-chip size="x-small" variant="outlined">{{ vpn.protocol }}</v-chip></td>
             <td>{{ vpn.host }}</td>
             <td>{{ vpn.port }}</td>
+            <td>
+              <v-chip v-if="vpn.country_code" size="x-small" variant="tonal">
+                {{ vpn.country_code }}
+                <v-tooltip activator="parent" v-if="vpn.country">{{ vpn.country }}</v-tooltip>
+              </v-chip>
+              <span v-else class="text-medium-emphasis">—</span>
+            </td>
             <td>
               <v-icon v-if="vpn.username" size="16" color="success">mdi-account-check</v-icon>
               <span v-else class="text-medium-emphasis">—</span>
@@ -270,23 +322,13 @@
           />
           <v-alert v-if="bulkResult" :type="bulkResult.added > 0 ? 'success' : 'warning'" variant="tonal" density="compact" class="mt-3">
             Parsed: {{ bulkResult.total_parsed }} |
-            Added (working): {{ bulkResult.added }} |
-            Failed: {{ bulkResult.failed }}
+            Added: {{ bulkResult.added }}
+            <template v-if="bulkResult.duplicates"> | Duplicates: {{ bulkResult.duplicates }}</template>
+            <template v-if="bulkResult.skipped"> | Skipped: {{ bulkResult.skipped }}</template>
           </v-alert>
-          <v-expansion-panels v-if="bulkResult && bulkResult.details?.length" variant="accordion" class="mt-3">
-            <v-expansion-panel title="Details">
-              <v-expansion-panel-text>
-                <div v-for="(d, i) in bulkResult.details" :key="i" class="text-body-2 mb-1">
-                  <v-icon :color="d.success ? 'success' : 'error'" size="16" class="mr-1">
-                    {{ d.success ? 'mdi-check-circle' : 'mdi-close-circle' }}
-                  </v-icon>
-                  {{ d.proxy }}
-                  <span v-if="d.ip" class="text-medium-emphasis"> — {{ d.ip }}</span>
-                  <span v-if="d.error" class="text-error"> — {{ d.error }}</span>
-                </div>
-              </v-expansion-panel-text>
-            </v-expansion-panel>
-          </v-expansion-panels>
+          <v-alert v-if="bulkResult && bulkResult.added > 0" type="info" variant="tonal" density="compact" class="mt-2">
+            Proxies added with "unknown" status. Use <strong>Test All</strong> to verify them.
+          </v-alert>
         </v-card-text>
         <v-card-actions>
           <v-spacer />
@@ -298,19 +340,91 @@
             :disabled="!bulkText.trim()"
             @click="doBulkImport"
           >
-            Import & Test
+            Import All
           </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
+    </div>
+
+    <!-- ═══ Logs Tab ═══ -->
+    <div v-show="activeTab === 'logs'">
+      <div class="d-flex align-center mb-4 ga-2">
+        <v-btn-toggle v-model="logLevelFilter" mandatory density="compact" variant="outlined" divided>
+          <v-btn value="all" size="small">All</v-btn>
+          <v-btn value="error" size="small" color="error">Errors</v-btn>
+          <v-btn value="warning" size="small" color="warning">Warnings</v-btn>
+          <v-btn value="success" size="small" color="success">Success</v-btn>
+          <v-btn value="info" size="small" color="info">Info</v-btn>
+        </v-btn-toggle>
+        <v-spacer />
+        <v-btn size="small" variant="tonal" @click="loadLogs" :loading="loadingLogs" prepend-icon="mdi-refresh">
+          Refresh
+        </v-btn>
+        <v-btn size="small" variant="tonal" color="error" @click="clearLogs" :loading="clearingLogs" prepend-icon="mdi-delete-sweep">
+          Clear
+        </v-btn>
+      </div>
+
+      <v-progress-linear v-if="loadingLogs" indeterminate color="primary" class="mb-4" />
+
+      <div v-if="!loadingLogs && !logs.length" class="text-center text-medium-emphasis py-12">
+        <v-icon size="60" class="mb-4">mdi-text-box-check-outline</v-icon>
+        <div class="text-h6 mb-2">No logs yet</div>
+        <div>VPN operation logs will appear here after testing or importing proxies.</div>
+      </div>
+
+      <v-card v-if="logs.length" variant="outlined">
+        <v-table density="compact" hover>
+          <thead>
+            <tr>
+              <th style="width: 40px"></th>
+              <th>Time</th>
+              <th>Message</th>
+              <th>Proxy</th>
+              <th style="width: 40px"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template v-for="log in logs" :key="log.id">
+              <tr @click="expandedLog = expandedLog === log.id ? null : log.id" style="cursor: pointer">
+                <td>
+                  <v-icon :color="logLevelColor(log.level)" size="18">{{ logLevelIcon(log.level) }}</v-icon>
+                </td>
+                <td class="text-medium-emphasis" style="font-size: 0.8rem; white-space: nowrap">
+                  {{ formatLogDate(log.created_at) }}
+                </td>
+                <td>{{ log.message }}</td>
+                <td>
+                  <v-chip v-if="log.proxy" size="x-small" variant="outlined">{{ log.proxy }}</v-chip>
+                </td>
+                <td>
+                  <v-icon v-if="log.details" size="16">
+                    {{ expandedLog === log.id ? 'mdi-chevron-up' : 'mdi-chevron-down' }}
+                  </v-icon>
+                </td>
+              </tr>
+              <tr v-if="expandedLog === log.id && log.details">
+                <td colspan="5" class="pa-3" style="background: rgba(255,255,255,0.03)">
+                  <pre style="font-size: 0.8rem; white-space: pre-wrap; max-height: 300px; overflow-y: auto">{{ JSON.stringify(log.details, null, 2) }}</pre>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </v-table>
+      </v-card>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, inject } from 'vue'
+import { ref, computed, onMounted, inject, watch } from 'vue'
 import api from '@src/api'
 
 const showSnackbar = inject('showSnackbar')
+
+// Tabs
+const activeTab = ref('proxies')
 
 // State
 const vpns = ref([])
@@ -329,6 +443,8 @@ const activating = ref(null)
 const deleting = ref(null)
 const testingAll = ref(false)
 const deletingDead = ref(false)
+const deletingAll = ref(false)
+const countryFilter = ref(null)
 
 // Bulk import
 const bulkDialog = ref(false)
@@ -337,10 +453,32 @@ const bulkProtocol = ref('http')
 const bulkImporting = ref(false)
 const bulkResult = ref(null)
 
+// Logs
+const logs = ref([])
+const loadingLogs = ref(false)
+const clearingLogs = ref(false)
+const logLevelFilter = ref('all')
+const expandedLog = ref(null)
+const logErrorCount = ref(0)
+
 // Computed
 const activeVpn = computed(() => vpns.value.find(v => v.is_active))
 const workingCount = computed(() => vpns.value.filter(v => v.status === 'working').length)
 const failedCount = computed(() => vpns.value.filter(v => v.status === 'failed').length)
+const unknownCount = computed(() => vpns.value.filter(v => v.status === 'unknown' || !v.status).length)
+const countries = computed(() => {
+  const set = new Set()
+  vpns.value.forEach(v => { if (v.country_code) set.add(v.country_code) })
+  return [...set].sort()
+})
+const countryOptions = computed(() => countries.value.map(c => {
+  const full = vpns.value.find(v => v.country_code === c)?.country || c
+  return { title: `${c} — ${full}`, value: c }
+}))
+const filteredVpns = computed(() => {
+  if (!countryFilter.value) return vpns.value
+  return vpns.value.filter(v => v.country_code === countryFilter.value)
+})
 
 // Methods
 function formatDate(d) {
@@ -443,11 +581,14 @@ async function testVpn(vpnId) {
   try {
     const { data } = await api.post(`/vpn/${vpnId}/test`)
     if (data.success) {
-      showSnackbar(`VPN working! IP: ${data.ip}`, 'success')
+      let msg = `VPN working! IP: ${data.ip}`
+      if (data.new_protocol) msg += ` (protocol changed to ${data.new_protocol})`
+      showSnackbar(msg, 'success')
     } else {
       showSnackbar(`VPN test failed: ${data.error}`, 'error')
     }
     await loadVpns()
+    loadLogErrorCount()
   } catch (e) {
     showSnackbar(e.response?.data?.detail || 'VPN test failed', 'error')
   } finally {
@@ -459,8 +600,11 @@ async function testAll() {
   testingAll.value = true
   try {
     const { data } = await api.post('/vpn/test-all')
-    showSnackbar(`Tested ${data.total}: ${data.working} working, ${data.failed} failed`, data.working > 0 ? 'success' : 'warning')
+    let msg = `Tested ${data.total}: ${data.working} working, ${data.failed} failed`
+    if (data.protocol_changes > 0) msg += `, ${data.protocol_changes} protocol(s) auto-fixed`
+    showSnackbar(msg, data.working > 0 ? 'success' : 'warning')
     await loadVpns()
+    loadLogErrorCount()
   } catch (e) {
     showSnackbar('Failed to test VPNs', 'error')
   } finally {
@@ -479,6 +623,20 @@ async function deleteDead() {
     showSnackbar('Failed to delete dead VPNs', 'error')
   } finally {
     deletingDead.value = false
+  }
+}
+
+async function deleteAll() {
+  if (!confirm('Delete ALL VPN proxies? This cannot be undone.')) return
+  deletingAll.value = true
+  try {
+    const { data } = await api.delete('/vpn/all')
+    showSnackbar(`Deleted ${data.deleted} VPN(s)`, 'success')
+    await loadVpns()
+  } catch (e) {
+    showSnackbar('Failed to delete VPNs', 'error')
+  } finally {
+    deletingAll.value = false
   }
 }
 
@@ -505,9 +663,12 @@ async function doBulkImport() {
     })
     bulkResult.value = data
     if (data.added > 0) {
-      showSnackbar(`Added ${data.added} working VPN(s)`, 'success')
+      showSnackbar(`Added ${data.added} proxy(ies). Use "Test All" to verify.`, 'success')
+      loadVpns()
+    } else if (data.duplicates > 0) {
+      showSnackbar(`All ${data.duplicates} proxies already exist`, 'warning')
     } else {
-      showSnackbar('No working proxies found', 'warning')
+      showSnackbar('No valid proxies found in the input', 'warning')
     }
   } catch (e) {
     showSnackbar(e.response?.data?.detail || 'Import failed', 'error')
@@ -518,5 +679,68 @@ async function doBulkImport() {
 
 onMounted(() => {
   loadVpns()
+  loadLogErrorCount()
+})
+
+// ─── Logs ───
+
+function logLevelColor(level) {
+  return { error: 'error', warning: 'warning', success: 'success', info: 'info' }[level] || 'grey'
+}
+function logLevelIcon(level) {
+  return {
+    error: 'mdi-alert-circle',
+    warning: 'mdi-alert',
+    success: 'mdi-check-circle',
+    info: 'mdi-information',
+  }[level] || 'mdi-circle-small'
+}
+function formatLogDate(d) {
+  if (!d) return '—'
+  return new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+async function loadLogErrorCount() {
+  try {
+    const { data } = await api.get('/vpn/logs', { params: { level: 'error', limit: 1000 } })
+    logErrorCount.value = (data.items || []).length
+  } catch { logErrorCount.value = 0 }
+}
+
+async function loadLogs() {
+  loadingLogs.value = true
+  try {
+    const params = {}
+    if (logLevelFilter.value !== 'all') params.level = logLevelFilter.value
+    const { data } = await api.get('/vpn/logs', { params })
+    logs.value = data.items || []
+  } catch (e) {
+    showSnackbar('Failed to load VPN logs', 'error')
+  } finally {
+    loadingLogs.value = false
+  }
+}
+
+async function clearLogs() {
+  if (!confirm('Clear all VPN logs?')) return
+  clearingLogs.value = true
+  try {
+    await api.delete('/vpn/logs')
+    logs.value = []
+    logErrorCount.value = 0
+    showSnackbar('VPN logs cleared', 'success')
+  } catch (e) {
+    showSnackbar('Failed to clear logs', 'error')
+  } finally {
+    clearingLogs.value = false
+  }
+}
+
+watch(activeTab, (val) => {
+  if (val === 'logs') loadLogs()
+})
+
+watch(logLevelFilter, () => {
+  if (activeTab.value === 'logs') loadLogs()
 })
 </script>

@@ -23,6 +23,28 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/vpn", tags=["vpn"])
 
 COLLECTION = "system_vpns"
+VPN_LOGS_COLLECTION = "vpn_logs"
+
+
+async def _write_vpn_log(
+    db,
+    level: str,
+    message: str,
+    details: dict | None = None,
+    proxy: str = "",
+):
+    """Write a log entry to the vpn_logs collection."""
+    try:
+        await db[VPN_LOGS_COLLECTION].insert_one({
+            "id": str(uuid.uuid4()),
+            "level": level,
+            "message": message,
+            "proxy": proxy,
+            "details": details,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as exc:
+        logger.warning(f"Failed to write VPN log: {exc}")
 
 
 # ─── Models ───
@@ -178,17 +200,65 @@ def _parse_proxy_line(line: str, default_protocol: str = "socks5") -> dict | Non
     return None
 
 
+ALL_PROTOCOLS = ["socks5", "socks5h", "http", "https"]
+
+
 async def _test_single_proxy(vpn_dict: dict, timeout: int = 8) -> dict:
-    """Test a single proxy and return result with IP or error."""
+    """Test a single proxy and return result with IP, country or error."""
     try:
         async with make_httpx_client(vpn_dict, timeout=timeout) as client:
             r = await client.get("http://httpbin.org/ip")
             if r.status_code == 200:
                 data = r.json()
-                return {"success": True, "ip": data.get("origin", "unknown")}
+                ip = data.get("origin", "unknown")
+                # Try to get country from ip-api.com (no proxy, direct)
+                country = ""
+                country_code = ""
+                try:
+                    async with httpx.AsyncClient(timeout=5) as direct:
+                        geo = await direct.get(f"http://ip-api.com/json/{ip}?fields=country,countryCode")
+                        if geo.status_code == 200:
+                            geo_data = geo.json()
+                            country = geo_data.get("country", "")
+                            country_code = geo_data.get("countryCode", "")
+                except Exception:
+                    pass
+                return {"success": True, "ip": ip, "country": country, "country_code": country_code}
             return {"success": False, "error": f"HTTP {r.status_code}"}
     except Exception as exc:
         return {"success": False, "error": str(exc)[:200]}
+
+
+async def _test_with_protocol_fallback(vpn_dict: dict, timeout: int = 10) -> dict:
+    """
+    Test a proxy. If it fails and port is not 80/443,
+    try all other protocols before giving up.
+    Returns dict with success, ip, error, and optionally new_protocol.
+    """
+    port = vpn_dict.get("port", 0)
+    current_proto = vpn_dict.get("protocol", "socks5")
+
+    # Try current protocol first
+    result = await _test_single_proxy(vpn_dict, timeout=timeout)
+    if result["success"]:
+        return result
+
+    # If port is 80 or 443, protocol is obvious — no fallback
+    if port in (80, 443):
+        return result
+
+    # Try other protocols
+    original_error = result.get("error", "unknown")
+    for proto in ALL_PROTOCOLS:
+        if proto == current_proto:
+            continue
+        trial = {**vpn_dict, "protocol": proto}
+        result = await _test_single_proxy(trial, timeout=timeout)
+        if result["success"]:
+            result["new_protocol"] = proto
+            return result
+
+    return {"success": False, "error": original_error}
 
 
 # ─── Endpoints ───
@@ -232,6 +302,65 @@ async def create_vpn(
         await db[COLLECTION].update_many({}, {"$set": {"is_active": False}})
     await db[COLLECTION].insert_one(doc)
     return {"id": vpn_id, "success": True}
+
+
+# ─── Logs (must be before /{vpn_id} routes) ───
+
+@router.get("/logs")
+async def list_vpn_logs(
+    level: Optional[str] = None,
+    limit: int = 200,
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+    _user: MongoUser = Depends(get_current_user),
+):
+    """List VPN operation logs."""
+    query = {}
+    if level:
+        query["level"] = level
+    cursor = db[VPN_LOGS_COLLECTION].find(query).sort("created_at", -1).limit(limit)
+    items = []
+    async for doc in cursor:
+        doc.pop("_id", None)
+        items.append(doc)
+    return {"items": items}
+
+
+@router.delete("/logs")
+async def clear_vpn_logs(
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+    _user: MongoUser = Depends(get_current_user),
+):
+    """Clear all VPN logs."""
+    result = await db[VPN_LOGS_COLLECTION].delete_many({})
+    return {"deleted": result.deleted_count}
+
+
+@router.delete("/dead")
+async def delete_dead_vpns(
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+    _user: MongoUser = Depends(get_current_user),
+):
+    """Delete all VPNs with status 'failed'."""
+    result = await db[COLLECTION].delete_many({"status": "failed"})
+    await _write_vpn_log(
+        db, "info",
+        f"Deleted {result.deleted_count} failed proxy(ies)",
+    )
+    return {"deleted": result.deleted_count}
+
+
+@router.delete("/all")
+async def delete_all_vpns(
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+    _user: MongoUser = Depends(get_current_user),
+):
+    """Delete all VPN configurations."""
+    result = await db[COLLECTION].delete_many({})
+    await _write_vpn_log(
+        db, "info",
+        f"Deleted all proxies ({result.deleted_count} total)",
+    )
+    return {"deleted": result.deleted_count}
 
 
 @router.patch("/{vpn_id}")
@@ -296,22 +425,45 @@ async def test_vpn(
     if not vpn:
         raise HTTPException(status_code=404, detail="VPN not found")
 
-    result = await _test_single_proxy(vpn)
+    result = await _test_with_protocol_fallback(vpn)
     now = datetime.now(timezone.utc).isoformat()
+    proxy_label = f"{vpn.get('host')}:{vpn.get('port')}"
+
+    update_fields = {
+        "status": "working" if result["success"] else "failed",
+        "last_tested": now,
+        "last_ip": result.get("ip") if result["success"] else None,
+        "country": result.get("country", "") if result["success"] else None,
+        "country_code": result.get("country_code", "") if result["success"] else None,
+    }
+    if result.get("new_protocol"):
+        update_fields["protocol"] = result["new_protocol"]
 
     await db[COLLECTION].update_one(
         {"id": vpn_id},
-        {"$set": {
-            "status": "working" if result["success"] else "failed",
-            "last_tested": now,
-            "last_ip": result.get("ip") if result["success"] else None,
-        }},
+        {"$set": update_fields},
     )
+
+    if not result["success"]:
+        await _write_vpn_log(
+            db, "error",
+            f"Proxy test failed: {result.get('error', 'unknown')}",
+            {"vpn_id": vpn_id, "error": result.get("error")},
+            proxy=proxy_label,
+        )
+    elif result.get("new_protocol"):
+        await _write_vpn_log(
+            db, "info",
+            f"Protocol auto-changed: {vpn.get('protocol')} -> {result['new_protocol']}",
+            {"vpn_id": vpn_id},
+            proxy=proxy_label,
+        )
 
     return {
         "success": result["success"],
         "ip": result.get("ip"),
         "error": result.get("error"),
+        "new_protocol": result.get("new_protocol"),
     }
 
 
@@ -322,63 +474,62 @@ async def bulk_import_vpns(
     _user: MongoUser = Depends(get_current_user),
 ):
     """
-    Parse a list of proxies (one per line), auto-test each,
-    and add working ones to the database.
+    Parse a list of proxies (one per line) and add them ALL
+    to the database with status 'unknown'. No pre-testing.
+    Use /test-all afterwards to verify them.
     """
     lines = body.text.strip().split("\n")
     parsed = []
+    skipped = 0
     for line in lines:
         p = _parse_proxy_line(line, body.default_protocol)
         if p:
             parsed.append(p)
+        elif line.strip() and not line.strip().startswith("#"):
+            skipped += 1
 
     if not parsed:
         raise HTTPException(status_code=400, detail="No valid proxy lines found")
 
-    # Test all in parallel (max 20 concurrent)
-    sem = asyncio.Semaphore(20)
-
-    async def test_with_sem(proxy_dict):
-        async with sem:
-            result = await _test_single_proxy(proxy_dict, timeout=10)
-            return {**proxy_dict, **result}
-
-    results = await asyncio.gather(*[test_with_sem(p) for p in parsed])
-
     added = 0
-    failed = 0
-    details = []
+    duplicates = 0
     now = datetime.now(timezone.utc).isoformat()
 
-    for r in results:
-        label = f"{r['host']}:{r['port']}"
-        if r.get("success"):
-            vpn_id = str(uuid.uuid4())
-            await db[COLLECTION].insert_one({
-                "id": vpn_id,
-                "name": label,
-                "protocol": r["protocol"],
-                "host": r["host"],
-                "port": r["port"],
-                "username": r.get("username", ""),
-                "password": r.get("password", ""),
-                "is_active": False,
-                "status": "working",
-                "last_tested": now,
-                "last_ip": r.get("ip"),
-                "created_at": now,
-            })
-            added += 1
-            details.append({"proxy": label, "success": True, "ip": r.get("ip")})
-        else:
-            failed += 1
-            details.append({"proxy": label, "success": False, "error": r.get("error", "")[:200]})
+    for p in parsed:
+        label = f"{p['host']}:{p['port']}"
+        # Check for duplicate (same host:port)
+        existing = await db[COLLECTION].find_one({"host": p["host"], "port": p["port"]})
+        if existing:
+            duplicates += 1
+            continue
+        vpn_id = str(uuid.uuid4())
+        await db[COLLECTION].insert_one({
+            "id": vpn_id,
+            "name": label,
+            "protocol": p["protocol"],
+            "host": p["host"],
+            "port": p["port"],
+            "username": p.get("username", ""),
+            "password": p.get("password", ""),
+            "is_active": False,
+            "status": "unknown",
+            "last_tested": None,
+            "last_ip": None,
+            "created_at": now,
+        })
+        added += 1
+
+    await _write_vpn_log(
+        db, "info",
+        f"Bulk import: {added} added, {duplicates} duplicates, {skipped} unparseable",
+        {"total_lines": len(lines), "parsed": len(parsed), "added": added, "duplicates": duplicates, "skipped": skipped},
+    )
 
     return {
         "total_parsed": len(parsed),
         "added": added,
-        "failed": failed,
-        "details": details,
+        "duplicates": duplicates,
+        "skipped": skipped,
     }
 
 
@@ -398,32 +549,52 @@ async def test_all_vpns(
 
     sem = asyncio.Semaphore(20)
     now = datetime.now(timezone.utc).isoformat()
+    errors_detail = []
+
+    protocol_changes = []
 
     async def test_one(vpn_doc):
         async with sem:
-            result = await _test_single_proxy(vpn_doc, timeout=10)
+            result = await _test_with_protocol_fallback(vpn_doc, timeout=10)
             status = "working" if result["success"] else "failed"
+            update_fields = {
+                "status": status,
+                "last_tested": now,
+                "last_ip": result.get("ip") if result["success"] else None,
+                "country": result.get("country", "") if result["success"] else None,
+                "country_code": result.get("country_code", "") if result["success"] else None,
+            }
+            # If a different protocol worked, update it
+            if result.get("new_protocol"):
+                update_fields["protocol"] = result["new_protocol"]
+                protocol_changes.append({
+                    "proxy": f"{vpn_doc.get('host')}:{vpn_doc.get('port')}",
+                    "old": vpn_doc.get('protocol'),
+                    "new": result["new_protocol"],
+                })
             await db[COLLECTION].update_one(
                 {"id": vpn_doc["id"]},
-                {"$set": {
-                    "status": status,
-                    "last_tested": now,
-                    "last_ip": result.get("ip") if result["success"] else None,
-                }},
+                {"$set": update_fields},
             )
+            if not result["success"]:
+                errors_detail.append({
+                    "proxy": f"{vpn_doc.get('host')}:{vpn_doc.get('port')}",
+                    "error": result.get("error", "unknown"),
+                })
             return result["success"]
 
     results = await asyncio.gather(*[test_one(v) for v in vpns])
     working = sum(1 for r in results if r)
+    failed = len(vpns) - working
 
-    return {"total": len(vpns), "working": working, "failed": len(vpns) - working}
+    # Write log entry
+    level = "success" if failed == 0 else ("warning" if working > 0 else "error")
+    log_details = {"total": len(vpns), "working": working, "failed": failed, "errors": errors_detail[:50]}
+    if protocol_changes:
+        log_details["protocol_changes"] = protocol_changes
+    msg = f"Test all: {working}/{len(vpns)} working, {failed} failed"
+    if protocol_changes:
+        msg += f", {len(protocol_changes)} protocol(s) auto-fixed"
+    await _write_vpn_log(db, level, msg, log_details)
 
-
-@router.delete("/dead")
-async def delete_dead_vpns(
-    db: AsyncIOMotorDatabase = Depends(get_mongodb),
-    _user: MongoUser = Depends(get_current_user),
-):
-    """Delete all VPNs with status 'failed'."""
-    result = await db[COLLECTION].delete_many({"status": "failed"})
-    return {"deleted": result.deleted_count}
+    return {"total": len(vpns), "working": working, "failed": failed, "protocol_changes": len(protocol_changes)}
