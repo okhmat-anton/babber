@@ -680,194 +680,27 @@
         </v-card-text>
       </v-card>
 
-      <!-- VPN Proxy Settings -->
-      <v-card variant="outlined" max-width="800" class="mt-6">
-        <v-card-title class="text-body-1 font-weight-bold d-flex align-center">
+      <!-- VPN Proxy Toggle -->
+      <v-card variant="outlined" max-width="600" class="mt-6">
+        <v-card-title class="text-body-1 font-weight-bold">
           <v-icon class="mr-2" size="20">mdi-vpn</v-icon>
           VPN Proxy
-          <v-spacer />
-          <v-chip v-if="activeVpn" color="success" size="small" variant="tonal" class="mr-2">
-            <v-icon start size="14">mdi-shield-check</v-icon>
-            {{ activeVpn.name }}
-          </v-chip>
-          <v-chip v-else color="warning" size="small" variant="tonal" class="mr-2">
-            <v-icon start size="14">mdi-shield-off-outline</v-icon>
-            No VPN
-          </v-chip>
-          <v-btn size="small" variant="tonal" color="primary" @click="openVpnDialog()" prepend-icon="mdi-plus">
-            Add VPN
-          </v-btn>
         </v-card-title>
         <v-card-text>
           <p class="text-body-2 text-medium-emphasis mb-4">
-            Configure VPN/proxy connections to route Polymarket API calls through. Only one VPN can be active at a time.
+            Route Polymarket API calls (bets, positions, balance) through the active system VPN proxy.
+            Manage VPN proxies in the <router-link to="/vpn" class="text-primary">VPN settings page</router-link>.
           </p>
-
-          <v-progress-linear v-if="vpnsLoading" indeterminate color="primary" class="mb-4" />
-
-          <div v-if="!vpnsLoading && !vpns.length" class="text-center text-medium-emphasis py-6">
-            <v-icon size="48" class="mb-2">mdi-vpn</v-icon>
-            <div>No VPN proxies configured</div>
-          </div>
-
-          <v-list v-if="vpns.length" density="compact" class="bg-transparent">
-            <v-list-item
-              v-for="vpn in vpns"
-              :key="vpn.id"
-              :class="vpn.is_active ? 'border-s-4 border-success' : ''"
-              rounded="lg"
-              class="mb-2"
-            >
-              <template #prepend>
-                <v-icon :color="vpn.is_active ? 'success' : 'grey'" class="mr-3">
-                  {{ vpn.is_active ? 'mdi-shield-check' : 'mdi-shield-outline' }}
-                </v-icon>
-              </template>
-
-              <v-list-item-title class="font-weight-medium">
-                {{ vpn.name }}
-                <v-chip size="x-small" variant="outlined" class="ml-2">{{ vpn.protocol }}</v-chip>
-              </v-list-item-title>
-              <v-list-item-subtitle>
-                {{ vpn.host }}:{{ vpn.port }}
-                <span v-if="vpn.username"> &middot; user: {{ vpn.username }}</span>
-                <span v-if="vpn.password_set"> &middot; <v-icon size="12">mdi-lock</v-icon></span>
-              </v-list-item-subtitle>
-
-              <template #append>
-                <div class="d-flex align-center ga-1">
-                  <v-btn
-                    v-if="!vpn.is_active"
-                    size="x-small"
-                    variant="tonal"
-                    color="success"
-                    @click="activateVpn(vpn.id)"
-                    :loading="vpnActivating === vpn.id"
-                    title="Activate"
-                  >
-                    <v-icon>mdi-power</v-icon>
-                  </v-btn>
-                  <v-btn
-                    v-else
-                    size="x-small"
-                    variant="tonal"
-                    color="warning"
-                    @click="deactivateVpn()"
-                    :loading="vpnActivating === vpn.id"
-                    title="Deactivate"
-                  >
-                    <v-icon>mdi-power-off</v-icon>
-                  </v-btn>
-                  <v-btn
-                    size="x-small"
-                    variant="tonal"
-                    @click="testVpn(vpn.id)"
-                    :loading="vpnTesting === vpn.id"
-                    title="Test connection"
-                  >
-                    <v-icon>mdi-connection</v-icon>
-                  </v-btn>
-                  <v-btn
-                    size="x-small"
-                    variant="tonal"
-                    @click="openVpnDialog(vpn)"
-                    title="Edit"
-                  >
-                    <v-icon>mdi-pencil</v-icon>
-                  </v-btn>
-                  <v-btn
-                    size="x-small"
-                    variant="tonal"
-                    color="error"
-                    @click="deleteVpn(vpn)"
-                    :loading="vpnDeleting === vpn.id"
-                    title="Delete"
-                  >
-                    <v-icon>mdi-delete</v-icon>
-                  </v-btn>
-                </div>
-              </template>
-            </v-list-item>
-          </v-list>
+          <v-switch
+            v-model="vpnEnabled"
+            label="Use VPN for Polymarket"
+            color="primary"
+            density="compact"
+            hide-details
+            @update:model-value="toggleVpn"
+          />
         </v-card-text>
       </v-card>
-
-      <!-- VPN Add/Edit Dialog -->
-      <v-dialog v-model="vpnDialog" max-width="500" persistent>
-        <v-card>
-          <v-card-title>{{ vpnEditing ? 'Edit VPN' : 'Add VPN' }}</v-card-title>
-          <v-card-text>
-            <v-text-field
-              v-model="vpnForm.name"
-              label="Name"
-              variant="outlined"
-              density="compact"
-              class="mb-3"
-              placeholder="e.g. US Proxy, EU SOCKS"
-            />
-            <v-select
-              v-model="vpnForm.protocol"
-              :items="['socks5', 'socks5h', 'http', 'https']"
-              label="Protocol"
-              variant="outlined"
-              density="compact"
-              class="mb-3"
-            />
-            <v-row dense class="mb-3">
-              <v-col cols="8">
-                <v-text-field
-                  v-model="vpnForm.host"
-                  label="Host"
-                  variant="outlined"
-                  density="compact"
-                  placeholder="proxy.example.com"
-                />
-              </v-col>
-              <v-col cols="4">
-                <v-text-field
-                  v-model.number="vpnForm.port"
-                  label="Port"
-                  variant="outlined"
-                  density="compact"
-                  type="number"
-                  placeholder="1080"
-                />
-              </v-col>
-            </v-row>
-            <v-text-field
-              v-model="vpnForm.username"
-              label="Username (optional)"
-              variant="outlined"
-              density="compact"
-              class="mb-3"
-              autocomplete="off"
-            />
-            <v-text-field
-              v-model="vpnForm.password"
-              label="Password (optional)"
-              variant="outlined"
-              density="compact"
-              :append-inner-icon="showVpnPassword ? 'mdi-eye-off' : 'mdi-eye'"
-              :type="showVpnPassword ? 'text' : 'password'"
-              @click:append-inner="showVpnPassword = !showVpnPassword"
-              autocomplete="off"
-            />
-          </v-card-text>
-          <v-card-actions>
-            <v-spacer />
-            <v-btn variant="text" @click="vpnDialog = false">Cancel</v-btn>
-            <v-btn
-              color="primary"
-              variant="flat"
-              :loading="vpnSaving"
-              :disabled="!vpnForm.name || !vpnForm.host || !vpnForm.port"
-              @click="saveVpn"
-            >
-              {{ vpnEditing ? 'Update' : 'Create' }}
-            </v-btn>
-          </v-card-actions>
-        </v-card>
-      </v-dialog>
     </div>
 
   </div>
@@ -944,19 +777,8 @@ const settingsForm = ref({
   polymarket_passphrase: '',
 })
 
-// VPN
-const vpns = ref([])
-const vpnsLoading = ref(false)
-const vpnDialog = ref(false)
-const vpnEditing = ref(null) // vpn id if editing, null if creating
-const vpnForm = ref({ name: '', protocol: 'socks5', host: '', port: 1080, username: '', password: '' })
-const vpnSaving = ref(false)
-const vpnTesting = ref(null) // vpn id being tested
-const vpnActivating = ref(null) // vpn id being activated
-const vpnDeleting = ref(null) // vpn id being deleted
-const showVpnPassword = ref(false)
-
-const activeVpn = computed(() => vpns.value.find(v => v.is_active))
+// VPN toggle
+const vpnEnabled = ref(false)
 
 // Computed
 const configured = computed(() => {
@@ -981,8 +803,8 @@ watch(activeTab, (tab) => {
       polymarket_api_secret: s.polymarket_api_secret?.value || '',
       polymarket_passphrase: s.polymarket_passphrase?.value || '',
     }
+    vpnEnabled.value = s.polymarket_vpn_enabled?.value === 'true'
     settingsSaved.value = false
-    loadVpns()
   }
 })
 
@@ -1174,110 +996,14 @@ async function saveSettings() {
   }
 }
 
-// VPN Methods
-async function loadVpns() {
-  vpnsLoading.value = true
+// VPN toggle method
+async function toggleVpn(val) {
   try {
-    const { data } = await api.get('/addons/polymarket/vpns')
-    vpns.value = data.items || []
+    await settingsStore.updateSystemSetting('polymarket_vpn_enabled', val ? 'true' : 'false')
+    showSnackbar(val ? 'VPN enabled for Polymarket' : 'VPN disabled for Polymarket', 'success')
   } catch (e) {
-    console.error('Failed to load VPNs:', e)
-  } finally {
-    vpnsLoading.value = false
-  }
-}
-
-function openVpnDialog(vpn = null) {
-  if (vpn) {
-    vpnEditing.value = vpn.id
-    vpnForm.value = {
-      name: vpn.name,
-      protocol: vpn.protocol,
-      host: vpn.host,
-      port: vpn.port,
-      username: vpn.username || '',
-      password: vpn.password || '',
-    }
-  } else {
-    vpnEditing.value = null
-    vpnForm.value = { name: '', protocol: 'socks5', host: '', port: 1080, username: '', password: '' }
-  }
-  showVpnPassword.value = false
-  vpnDialog.value = true
-}
-
-async function saveVpn() {
-  vpnSaving.value = true
-  try {
-    if (vpnEditing.value) {
-      await api.patch(`/addons/polymarket/vpns/${vpnEditing.value}`, vpnForm.value)
-      showSnackbar('VPN updated', 'success')
-    } else {
-      await api.post('/addons/polymarket/vpns', vpnForm.value)
-      showSnackbar('VPN created', 'success')
-    }
-    vpnDialog.value = false
-    await loadVpns()
-  } catch (e) {
-    showSnackbar(e.response?.data?.detail || 'Failed to save VPN', 'error')
-  } finally {
-    vpnSaving.value = false
-  }
-}
-
-async function deleteVpn(vpn) {
-  if (!confirm(`Delete VPN "${vpn.name}"?`)) return
-  vpnDeleting.value = vpn.id
-  try {
-    await api.delete(`/addons/polymarket/vpns/${vpn.id}`)
-    showSnackbar('VPN deleted', 'success')
-    await loadVpns()
-  } catch (e) {
-    showSnackbar(e.response?.data?.detail || 'Failed to delete VPN', 'error')
-  } finally {
-    vpnDeleting.value = null
-  }
-}
-
-async function activateVpn(vpnId) {
-  vpnActivating.value = vpnId
-  try {
-    await api.post(`/addons/polymarket/vpns/${vpnId}/activate`)
-    showSnackbar('VPN activated', 'success')
-    await loadVpns()
-  } catch (e) {
-    showSnackbar(e.response?.data?.detail || 'Failed to activate VPN', 'error')
-  } finally {
-    vpnActivating.value = null
-  }
-}
-
-async function deactivateVpn() {
-  vpnActivating.value = activeVpn.value?.id
-  try {
-    await api.post('/addons/polymarket/vpns/none/activate')
-    showSnackbar('VPN deactivated', 'success')
-    await loadVpns()
-  } catch (e) {
-    showSnackbar(e.response?.data?.detail || 'Failed to deactivate VPN', 'error')
-  } finally {
-    vpnActivating.value = null
-  }
-}
-
-async function testVpn(vpnId) {
-  vpnTesting.value = vpnId
-  try {
-    const { data } = await api.post(`/addons/polymarket/vpns/${vpnId}/test`)
-    if (data.success) {
-      showSnackbar(`VPN working! IP: ${data.ip}`, 'success')
-    } else {
-      showSnackbar(`VPN test failed: ${data.error}`, 'error')
-    }
-  } catch (e) {
-    showSnackbar(e.response?.data?.detail || 'VPN test failed', 'error')
-  } finally {
-    vpnTesting.value = null
+    showSnackbar('Failed to update VPN setting', 'error')
+    vpnEnabled.value = !val
   }
 }
 
@@ -1289,8 +1015,8 @@ onMounted(async () => {
   await Promise.all([
     settingsStore.fetchSystemSettings(),
     refreshAll(),
-    loadVpns(),
   ])
+  vpnEnabled.value = settingsStore.systemSettings.polymarket_vpn_enabled?.value === 'true'
 })
 </script>
 

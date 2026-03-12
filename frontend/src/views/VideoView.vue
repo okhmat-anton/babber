@@ -1,11 +1,11 @@
 <template>
   <div>
     <!-- Header -->
-    <div class="d-flex align-center mb-6">
+    <div class="d-flex align-center mb-4">
       <div class="text-h4 font-weight-bold">Video Analysis</div>
       <v-spacer />
       <v-btn
-        v-if="selectedItems.length"
+        v-if="selectedItems.length && activeTab === 'videos'"
         color="deep-purple"
         variant="tonal"
         prepend-icon="mdi-forum"
@@ -14,15 +14,27 @@
       >
         Discuss ({{ selectedItems.length }})
       </v-btn>
-      <v-btn color="primary" prepend-icon="mdi-plus" @click="openAddDialog">
+      <v-btn v-if="activeTab === 'videos'" color="primary" prepend-icon="mdi-plus" @click="openAddDialog">
         Add Video
       </v-btn>
     </div>
+
+    <!-- Tabs -->
+    <v-tabs v-model="activeTab" class="mb-4" density="compact">
+      <v-tab value="videos" prepend-icon="mdi-video-outline">Videos</v-tab>
+      <v-tab value="logs" prepend-icon="mdi-text-box-search-outline">
+        Transcript Logs
+        <v-chip v-if="logErrorCount > 0" size="x-small" color="error" variant="flat" class="ml-2">{{ logErrorCount }}</v-chip>
+      </v-tab>
+    </v-tabs>
 
     <!-- Error alert -->
     <v-alert v-if="errorMsg" type="error" closable class="mb-4" @click:close="errorMsg = null">
       {{ errorMsg }}
     </v-alert>
+
+    <!-- ========== VIDEOS TAB ========== -->
+    <div v-show="activeTab === 'videos'">
 
     <!-- Filters -->
     <div class="d-flex align-center ga-3 mb-4 flex-wrap">
@@ -390,11 +402,85 @@
         </v-card-text>
       </v-card>
     </v-dialog>
+    </div>
+
+    <!-- ========== TRANSCRIPT LOGS TAB ========== -->
+    <div v-show="activeTab === 'logs'">
+      <div class="d-flex align-center ga-3 mb-4">
+        <v-btn-toggle v-model="logLevelFilter" density="compact" variant="outlined" @update:model-value="loadLogs">
+          <v-btn value="" size="small">All</v-btn>
+          <v-btn value="error" size="small" color="error">
+            <v-icon size="16" class="mr-1">mdi-alert-circle</v-icon> Errors
+          </v-btn>
+          <v-btn value="warning" size="small" color="orange">
+            <v-icon size="16" class="mr-1">mdi-alert</v-icon> Warnings
+          </v-btn>
+          <v-btn value="success" size="small" color="success">
+            <v-icon size="16" class="mr-1">mdi-check-circle</v-icon> Success
+          </v-btn>
+          <v-btn value="info" size="small">
+            <v-icon size="16" class="mr-1">mdi-information</v-icon> Info
+          </v-btn>
+        </v-btn-toggle>
+        <v-spacer />
+        <v-btn size="small" variant="tonal" prepend-icon="mdi-refresh" @click="loadLogs" :loading="loadingLogs">Refresh</v-btn>
+        <v-btn size="small" variant="tonal" color="error" prepend-icon="mdi-delete-sweep" @click="clearLogs" :loading="clearingLogs" :disabled="!logs.length">Clear All</v-btn>
+      </div>
+
+      <v-card v-if="logs.length" variant="outlined">
+        <v-table density="compact" hover>
+          <thead>
+            <tr>
+              <th style="width: 50px">Level</th>
+              <th style="width: 170px">Time</th>
+              <th style="width: 100px">Platform</th>
+              <th>Message</th>
+              <th>URL</th>
+              <th style="width: 60px"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="log in logs" :key="log.id">
+              <td>
+                <v-icon
+                  :color="logLevelColor(log.level)"
+                  size="20"
+                >{{ logLevelIcon(log.level) }}</v-icon>
+              </td>
+              <td class="text-caption">{{ formatLogDate(log.created_at) }}</td>
+              <td>
+                <v-chip v-if="log.platform" :color="platformColor(log.platform)" size="x-small" variant="tonal">{{ log.platform }}</v-chip>
+              </td>
+              <td class="font-weight-medium">{{ log.message }}</td>
+              <td class="text-caption text-truncate" style="max-width: 300px;">{{ log.url }}</td>
+              <td>
+                <v-btn v-if="log.details" icon size="x-small" variant="text" @click="expandedLog = expandedLog === log.id ? null : log.id">
+                  <v-icon>{{ expandedLog === log.id ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
+                </v-btn>
+              </td>
+            </tr>
+            <tr v-if="expandedLog" v-for="log in logs.filter(l => l.id === expandedLog)" :key="'d-' + log.id">
+              <td colspan="6" class="pa-0">
+                <pre class="pa-3 text-caption" style="background: rgba(255,255,255,0.03); white-space: pre-wrap; max-height: 300px; overflow-y: auto; border-top: 1px solid rgba(255,255,255,0.08);">{{ log.details }}</pre>
+              </td>
+            </tr>
+          </tbody>
+        </v-table>
+      </v-card>
+
+      <div v-else-if="!loadingLogs" class="text-center text-medium-emphasis py-12">
+        <v-icon size="64" class="mb-3">mdi-text-box-check-outline</v-icon>
+        <div class="text-h6 mb-2">No transcript logs</div>
+        <div>Logs will appear here when you fetch video transcripts.</div>
+      </div>
+
+      <v-progress-linear v-if="loadingLogs" indeterminate color="primary" class="mt-4" />
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, inject } from 'vue'
+import { ref, computed, onMounted, inject, watch } from 'vue'
 import api from '../api'
 import { useChatStore } from '../stores/chat'
 import { useAgentsStore } from '../stores/agents'
@@ -436,6 +522,17 @@ const addDialog = ref(false)
 const addUrl = ref('')
 const addCategory = ref(null)
 const transcriptContainerRef = ref(null)
+
+// Tabs
+const activeTab = ref('videos')
+
+// Transcript logs
+const logs = ref([])
+const loadingLogs = ref(false)
+const clearingLogs = ref(false)
+const logLevelFilter = ref('')
+const expandedLog = ref(null)
+const logErrorCount = ref(0)
 
 const platforms = [
   { value: 'youtube', label: 'YouTube', color: 'red', icon: 'mdi-youtube' },
@@ -482,7 +579,11 @@ const groupedHistory = computed(() => {
 })
 
 onMounted(async () => {
-  await Promise.all([loadHistory(), loadAgents()])
+  await Promise.all([loadHistory(), loadAgents(), loadLogErrorCount()])
+})
+
+watch(activeTab, (val) => {
+  if (val === 'logs') loadLogs()
 })
 
 async function loadAgents() {
@@ -510,6 +611,62 @@ async function loadHistory() {
   } finally {
     loadingHistory.value = false
   }
+}
+
+// ── Transcript Logs ──
+
+async function loadLogErrorCount() {
+  try {
+    const { data } = await api.get('/watched-videos/logs/transcript', { params: { level: 'error', limit: 500 } })
+    logErrorCount.value = (data.items || []).length
+  } catch { /* ignore */ }
+}
+
+async function loadLogs() {
+  loadingLogs.value = true
+  try {
+    const params = { limit: 200 }
+    if (logLevelFilter.value) params.level = logLevelFilter.value
+    const { data } = await api.get('/watched-videos/logs/transcript', { params })
+    logs.value = data.items || []
+  } catch (e) {
+    console.error('Failed to load transcript logs:', e)
+  } finally {
+    loadingLogs.value = false
+  }
+}
+
+async function clearLogs() {
+  if (!confirm('Clear all transcript logs?')) return
+  clearingLogs.value = true
+  try {
+    await api.delete('/watched-videos/logs/transcript')
+    logs.value = []
+    logErrorCount.value = 0
+    showSnackbar?.('Logs cleared', 'success')
+  } catch (e) {
+    showSnackbar?.('Failed to clear logs', 'error')
+  } finally {
+    clearingLogs.value = false
+  }
+}
+
+function logLevelColor(level) {
+  return { error: 'error', warning: 'orange', success: 'success', info: 'blue-grey' }[level] || 'grey'
+}
+
+function logLevelIcon(level) {
+  return {
+    error: 'mdi-alert-circle',
+    warning: 'mdi-alert',
+    success: 'mdi-check-circle',
+    info: 'mdi-information-outline',
+  }[level] || 'mdi-circle-small'
+}
+
+function formatLogDate(dt) {
+  if (!dt) return ''
+  return new Date(dt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
 async function addVideo() {
@@ -579,8 +736,10 @@ async function fetchTranscriptForCurrent() {
       transcript.value = data.transcript || ''
     }
     await loadHistory()
+    loadLogErrorCount()
   } catch (e) {
     errorMsg.value = e.response?.data?.detail || 'Failed to fetch transcript'
+    loadLogErrorCount()
   } finally {
     fetching.value = false
   }
@@ -605,8 +764,10 @@ async function fetchTranscriptForItem(item) {
       }
     }
     showSnackbar?.('Transcript fetched', 'success')
+    loadLogErrorCount()
   } catch (e) {
     errorMsg.value = e.response?.data?.detail || 'Failed to fetch transcript'
+    loadLogErrorCount()
   } finally {
     fetchingId.value = null
   }

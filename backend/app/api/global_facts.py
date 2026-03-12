@@ -26,7 +26,7 @@ router = APIRouter(prefix="/api/facts", tags=["global-facts"])
 # ── Schemas ──────────────────────────────────────────
 
 class GlobalFactCreate(BaseModel):
-    agent_id: str
+    agent_ids: List[str] = []  # Empty = global (all agents), non-empty = specific agents
     type: str = "fact"
     content: str
     source: str = "user"
@@ -42,6 +42,7 @@ def _fact_to_response(f: MongoAgentFact) -> dict:
     return {
         "id": f.id,
         "agent_id": f.agent_id,
+        "agent_ids": getattr(f, 'agent_ids', []) or [],
         "type": f.type,
         "content": f.content,
         "source": f.source,
@@ -94,17 +95,24 @@ async def create_global_fact(
     _user=Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_mongodb),
 ):
-    """Create a fact with an explicit agent_id."""
-    # Verify agent exists
-    agent = await AgentService(db).get_by_id(body.agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    """Create a fact. agent_ids=[] means global (all agents), otherwise specific agents."""
+    # Verify all agents exist if specified
+    if body.agent_ids:
+        agent_svc = AgentService(db)
+        for aid in body.agent_ids:
+            agent = await agent_svc.get_by_id(aid)
+            if not agent:
+                raise HTTPException(status_code=404, detail=f"Agent not found: {aid}")
 
     if body.type not in ("fact", "hypothesis"):
         raise HTTPException(status_code=400, detail="type must be 'fact' or 'hypothesis'")
 
+    # Determine agent_id for backward compat
+    agent_id = body.agent_ids[0] if body.agent_ids else "__global__"
+
     fact = MongoAgentFact(
-        agent_id=body.agent_id,
+        agent_id=agent_id,
+        agent_ids=body.agent_ids,
         type=body.type,
         content=body.content.strip(),
         source=body.source,
@@ -137,6 +145,18 @@ async def update_global_fact(
     for field in ("type", "content", "source", "verified", "confidence", "category", "tags"):
         if field in body and body[field] is not None:
             update_data[field] = body[field]
+
+    # Handle agent_ids update
+    if "agent_ids" in body:
+        agent_ids = body["agent_ids"] or []
+        if agent_ids:
+            agent_svc = AgentService(db)
+            for aid in agent_ids:
+                agent = await agent_svc.get_by_id(aid)
+                if not agent:
+                    raise HTTPException(status_code=404, detail=f"Agent not found: {aid}")
+        update_data["agent_ids"] = agent_ids
+        update_data["agent_id"] = agent_ids[0] if agent_ids else "__global__"
 
     if "type" in update_data and update_data["type"] not in ("fact", "hypothesis"):
         raise HTTPException(status_code=400, detail="type must be 'fact' or 'hypothesis'")

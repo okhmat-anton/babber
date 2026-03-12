@@ -244,6 +244,7 @@ const addonsNav = ref([])
 const settingsNav = [
   { path: '/settings', icon: 'mdi-cog', title: 'Settings' },
   { path: '/backups', icon: 'mdi-backup-restore', title: 'Backups' },
+  { path: '/vpn', icon: 'mdi-vpn', title: 'VPN' },
 ]
 
 onMounted(() => {

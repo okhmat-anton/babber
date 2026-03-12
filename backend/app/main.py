@@ -52,6 +52,7 @@ from app.api.global_events import router as global_events_router
 from app.api.ideas import router as ideas_router
 from app.api.notes import router as notes_router
 from app.api.backups import router as backups_router
+from app.api.vpn import router as vpn_router
 from app.api.addons import router as addons_api_router
 
 from app.services.ollama_watchdog import start_watchdog, stop_watchdog
@@ -216,6 +217,7 @@ app.include_router(global_events_router)
 app.include_router(ideas_router)
 app.include_router(notes_router)
 app.include_router(backups_router)
+app.include_router(vpn_router)
 app.include_router(addons_api_router)
 
 # Register addon routers (from addons/ directory)

@@ -1,8 +1,10 @@
 """Watched Videos API — CRUD endpoints for video transcripts fetched via ScrapeCreators."""
 import logging
 import httpx
+import uuid as _uuid
+from datetime import datetime, timezone
 from uuid import UUID
-from typing import Optional
+from typing import Optional, List
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +19,34 @@ from app.mongodb.models.watched_video import MongoWatchedVideo
 from app.mongodb.services import WatchedVideoService
 from app.schemas.common import MessageResponse
 from app.api.settings import get_setting_value
+
+TRANSCRIPT_LOGS_COLLECTION = "transcript_logs"
+
+
+async def _write_transcript_log(
+    db: AsyncIOMotorDatabase,
+    url: str,
+    platform: str = "",
+    level: str = "info",
+    message: str = "",
+    details: str = "",
+    video_id: str = "",
+):
+    """Write a transcript operation log entry."""
+    doc = {
+        "_id": str(_uuid.uuid4()),
+        "url": url,
+        "platform": platform,
+        "video_id": video_id,
+        "level": level,  # info, warning, error, success
+        "message": message,
+        "details": details[:5000] if details else "",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        await db[TRANSCRIPT_LOGS_COLLECTION].insert_one(doc)
+    except Exception as e:
+        logger.error("Failed to write transcript log: %s", e)
 
 router = APIRouter(prefix="/api/watched-videos", tags=["watched-videos"])
 
@@ -230,17 +260,22 @@ async def fetch_video_transcript(
     if body.video_id:
         existing = await svc.get_by_id(body.video_id)
         if not existing:
+            await _write_transcript_log(db, body.url or "", level="error", message="Video not found", details=f"video_id={body.video_id}")
             raise HTTPException(status_code=404, detail="Video not found")
     elif body.url:
         existing = await svc.get_by_url(body.url.strip())
 
     url = (existing.url if existing else (body.url or "")).strip()
     if not url:
+        await _write_transcript_log(db, "", level="error", message="URL or video_id is required")
         raise HTTPException(status_code=400, detail="URL or video_id is required")
+
+    await _write_transcript_log(db, url, level="info", message="Transcript fetch started", details=f"force={body.force}, video_id={body.video_id}")
 
     # Return cached transcript if already fetched (unless force regenerate)
     if existing and existing.transcript and not body.force:
         logger.info("Returning cached transcript for %s (len=%d)", url, len(existing.transcript))
+        await _write_transcript_log(db, url, platform=existing.platform, level="info", message="Returning cached transcript", details=f"length={len(existing.transcript)}")
         return FetchTranscriptResponse(
             id=existing.id, url=existing.url, platform=existing.platform,
             video_id=existing.video_id, transcript=existing.transcript,
@@ -250,10 +285,12 @@ async def fetch_video_transcript(
     # Get API key
     api_key = await get_setting_value(db, "scrapecreators_api_key")
     if not api_key:
+        await _write_transcript_log(db, url, level="error", message="ScrapeCreators API key not configured")
         raise HTTPException(status_code=400, detail="ScrapeCreators API key not configured. Add it in Settings.")
 
     platform, api_path = _detect_video_platform(url)
     if not platform:
+        await _write_transcript_log(db, url, level="error", message="Unsupported video URL", details=f"Could not detect platform from URL")
         raise HTTPException(status_code=400, detail="Unsupported video URL")
 
     params = {"url": url}
@@ -264,6 +301,7 @@ async def fetch_video_transcript(
     timeout_str = await get_setting_value(db, "transcript_fetch_timeout")
     timeout_sec = int(timeout_str) if timeout_str and timeout_str.isdigit() else 120
     logger.info("Fetching transcript from ScrapeCreators: platform=%s, url=%s, timeout=%ds", platform, url, timeout_sec)
+    await _write_transcript_log(db, url, platform=platform, level="info", message="Calling ScrapeCreators API", details=f"endpoint={api_path}, timeout={timeout_sec}s, params={params}")
 
     try:
         async with httpx.AsyncClient(timeout=timeout_sec) as client:
@@ -273,10 +311,12 @@ async def fetch_video_transcript(
                 headers={"x-api-key": api_key},
             )
         logger.info("ScrapeCreators response: status=%d, content_length=%d", resp.status_code, len(resp.content))
+        await _write_transcript_log(db, url, platform=platform, level="info", message=f"ScrapeCreators response: HTTP {resp.status_code}", details=f"content_length={len(resp.content)}")
         if resp.status_code != 200:
             error_detail = resp.text[:500]
             error_msg = f"HTTP {resp.status_code}: {error_detail}"
             logger.warning("ScrapeCreators API error for %s: %s", url, error_msg)
+            await _write_transcript_log(db, url, platform=platform, level="error", message=f"ScrapeCreators API error", details=f"status={resp.status_code}\n{error_detail}")
             if existing:
                 await svc.collection.update_one({"_id": existing.id}, {"$set": {"error": error_msg}})
             else:
@@ -286,24 +326,30 @@ async def fetch_video_transcript(
         data = resp.json()
     except httpx.TimeoutException as e:
         logger.error("ScrapeCreators timeout after %ds for %s: %s", timeout_sec, url, e)
+        await _write_transcript_log(db, url, platform=platform or "", level="error", message=f"Timeout after {timeout_sec}s", details=str(e))
         raise HTTPException(status_code=504, detail=f"ScrapeCreators request timed out after {timeout_sec}s. Increase 'transcript_fetch_timeout' in Settings.")
     except httpx.HTTPError as e:
         logger.error("ScrapeCreators HTTP error for %s: %s", url, e)
+        await _write_transcript_log(db, url, platform=platform or "", level="error", message="HTTP request error", details=str(e))
         raise HTTPException(status_code=502, detail=f"ScrapeCreators request failed: {e}")
 
     transcript_text, video_id, segments, lang = _parse_transcript_response(platform, data)
     logger.info("Parsed transcript: platform=%s, has_text=%s, video_id=%s, lang=%s, segments=%d",
                platform, bool(transcript_text), video_id, lang, len(segments) if segments else 0)
+    await _write_transcript_log(db, url, platform=platform, level="info", message="Parsed response", details=f"has_text={bool(transcript_text)}, video_id={video_id}, lang={lang}, segments={len(segments) if segments else 0}, response_keys={list(data.keys())}")
 
     if not transcript_text:
         error_msg = "No transcript available"
         logger.warning("No transcript text for %s (response keys: %s)", url, list(data.keys()))
+        await _write_transcript_log(db, url, platform=platform, level="error", message="No transcript text in response", details=f"response_keys={list(data.keys())}\nraw_sample={str(data)[:2000]}")
         if existing:
             await svc.collection.update_one({"_id": existing.id}, {"$set": {"error": error_msg, "video_id": video_id, "language": lang}})
         else:
             record = MongoWatchedVideo(url=url, platform=platform, video_id=video_id, language=lang, error=error_msg)
             await svc.create(record)
         raise HTTPException(status_code=404, detail="No transcript available for this video")
+
+    await _write_transcript_log(db, url, platform=platform, video_id=video_id or "", level="success", message="Transcript fetched successfully", details=f"length={len(transcript_text)}, lang={lang}")
 
     # Update existing record or create new one
     if existing:
@@ -417,6 +463,40 @@ async def get_full_transcript(
     if not video:
         raise HTTPException(status_code=404, detail="Watched video not found")
     return {"id": video.id, "transcript": video.transcript or ""}
+
+
+# ── Transcript Logs ──────────────────────────────────────────────────
+
+@router.get("/logs/transcript")
+async def get_transcript_logs(
+    limit: int = Query(100, ge=1, le=500),
+    level: Optional[str] = Query(None, description="Filter by level: info, warning, error, success"),
+    url: Optional[str] = Query(None, description="Filter by URL substring"),
+    _user: MongoUser = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Get transcript operation logs for debugging."""
+    filt = {}
+    if level:
+        filt["level"] = level
+    if url:
+        filt["url"] = {"$regex": url, "$options": "i"}
+    cursor = db[TRANSCRIPT_LOGS_COLLECTION].find(filt).sort("created_at", -1).limit(limit)
+    items = []
+    async for doc in cursor:
+        doc["id"] = doc.pop("_id")
+        items.append(doc)
+    return {"items": items, "total": len(items)}
+
+
+@router.delete("/logs/transcript")
+async def clear_transcript_logs(
+    _user: MongoUser = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Clear all transcript logs."""
+    result = await db[TRANSCRIPT_LOGS_COLLECTION].delete_many({})
+    return {"deleted": result.deleted_count}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────

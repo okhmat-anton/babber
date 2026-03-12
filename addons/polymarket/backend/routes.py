@@ -24,6 +24,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.database import get_mongodb
 from app.core.dependencies import get_current_user
 from app.api.settings import get_setting_value
+from app.api.vpn import get_active_vpn as _system_get_active_vpn, make_httpx_client
 
 logger = logging.getLogger("addon.polymarket")
 
@@ -60,31 +61,16 @@ def _clob_headers(creds: dict) -> dict:
 
 
 async def _get_active_vpn(db) -> dict | None:
-    """Get the currently active VPN proxy config, or None."""
-    vpn = await db["polymarket_vpns"].find_one({"is_active": True})
-    return vpn
-
-
-def _build_proxy_url(vpn: dict) -> str:
-    """Build proxy URL from VPN config."""
-    protocol = vpn.get("protocol", "socks5")
-    host = vpn.get("host", "")
-    port = vpn.get("port", 1080)
-    username = vpn.get("username", "")
-    password = vpn.get("password", "")
-    if username and password:
-        return f"{protocol}://{username}:{password}@{host}:{port}"
-    return f"{protocol}://{host}:{port}"
+    """Get the active system VPN if VPN is enabled in Polymarket settings."""
+    vpn_enabled = await get_setting_value(db, "polymarket_vpn_enabled")
+    if vpn_enabled != "true":
+        return None
+    return await _system_get_active_vpn(db)
 
 
 def _make_httpx_client(vpn: dict | None = None, timeout: int = 15) -> httpx.AsyncClient:
-    """Create an httpx.AsyncClient, optionally with proxy."""
-    kwargs = {"timeout": timeout, "verify": False}
-    if vpn and vpn.get("host"):
-        proxy_url = _build_proxy_url(vpn)
-        kwargs["proxy"] = proxy_url
-        logger.info("Using VPN proxy: %s (%s)", vpn.get('name', '?'), vpn.get('host', '?'))
-    return httpx.AsyncClient(**kwargs)
+    """Create an httpx.AsyncClient, optionally with proxy from system VPN."""
+    return make_httpx_client(vpn, timeout)
 
 
 def _build_hmac_signature(secret: str, timestamp: int, method: str, request_path: str, body: str = "") -> str:
@@ -219,130 +205,6 @@ async def get_orderbook(token_id: str, db: AsyncIOMotorDatabase = Depends(get_mo
     except httpx.HTTPError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
-
-# ─── VPN Management ───
-
-class VpnConfig(BaseModel):
-    name: str
-    protocol: str = "socks5"  # socks5, socks5h, http, https
-    host: str
-    port: int = 1080
-    username: str = ""
-    password: str = ""
-    is_active: bool = False
-
-
-@router.get("/vpns")
-async def list_vpns(db: AsyncIOMotorDatabase = Depends(get_mongodb)):
-    """List all VPN configurations."""
-    cursor = db["polymarket_vpns"].find().sort("created_at", -1)
-    items = []
-    async for doc in cursor:
-        doc["_id"] = str(doc["_id"]) if "_id" in doc else None
-        # Mask password in response
-        if doc.get("password"):
-            doc["password_set"] = True
-            doc["password"] = "***"
-        else:
-            doc["password_set"] = False
-        items.append(doc)
-    return {"items": items}
-
-
-@router.post("/vpns")
-async def create_vpn(
-    body: VpnConfig,
-    db: AsyncIOMotorDatabase = Depends(get_mongodb),
-):
-    """Create a new VPN configuration."""
-    vpn_id = str(uuid.uuid4())
-    doc = {
-        "id": vpn_id,
-        **body.dict(),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    # If this is set as active, deactivate others
-    if body.is_active:
-        await db["polymarket_vpns"].update_many({}, {"$set": {"is_active": False}})
-    await db["polymarket_vpns"].insert_one(doc)
-    return {"id": vpn_id, "success": True}
-
-
-@router.patch("/vpns/{vpn_id}")
-async def update_vpn(
-    vpn_id: str,
-    body: VpnConfig,
-    db: AsyncIOMotorDatabase = Depends(get_mongodb),
-):
-    """Update a VPN configuration."""
-    existing = await db["polymarket_vpns"].find_one({"id": vpn_id})
-    if not existing:
-        raise HTTPException(status_code=404, detail="VPN not found")
-
-    update = body.dict()
-    # If password is "***" (masked), keep the old one
-    if update.get("password") == "***":
-        update["password"] = existing.get("password", "")
-
-    # If setting as active, deactivate others
-    if update.get("is_active"):
-        await db["polymarket_vpns"].update_many(
-            {"id": {"$ne": vpn_id}},
-            {"$set": {"is_active": False}},
-        )
-
-    await db["polymarket_vpns"].update_one(
-        {"id": vpn_id},
-        {"$set": update},
-    )
-    return {"success": True}
-
-
-@router.delete("/vpns/{vpn_id}")
-async def delete_vpn(
-    vpn_id: str,
-    db: AsyncIOMotorDatabase = Depends(get_mongodb),
-):
-    """Delete a VPN configuration."""
-    result = await db["polymarket_vpns"].delete_one({"id": vpn_id})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="VPN not found")
-    return {"success": True}
-
-
-@router.post("/vpns/{vpn_id}/activate")
-async def activate_vpn(
-    vpn_id: str,
-    db: AsyncIOMotorDatabase = Depends(get_mongodb),
-):
-    """Set a VPN as the active proxy. Use vpn_id='none' to disable all."""
-    await db["polymarket_vpns"].update_many({}, {"$set": {"is_active": False}})
-    if vpn_id != "none":
-        result = await db["polymarket_vpns"].update_one(
-            {"id": vpn_id},
-            {"$set": {"is_active": True}},
-        )
-        if result.matched_count == 0:
-            raise HTTPException(status_code=404, detail="VPN not found")
-    return {"success": True}
-
-
-@router.post("/vpns/{vpn_id}/test")
-async def test_vpn(
-    vpn_id: str,
-    db: AsyncIOMotorDatabase = Depends(get_mongodb),
-):
-    """Test a VPN connection by making a request through it."""
-    vpn = await db["polymarket_vpns"].find_one({"id": vpn_id})
-    if not vpn:
-        raise HTTPException(status_code=404, detail="VPN not found")
-    try:
-        async with _make_httpx_client(vpn, timeout=10) as client:
-            r = await client.get("https://httpbin.org/ip")
-            data = r.json()
-            return {"success": True, "ip": data.get("origin", "unknown"), "status": r.status_code}
-    except Exception as exc:
-        return {"success": False, "error": str(exc)}
 
 
 # ─── Authenticated endpoints (need API key) ───

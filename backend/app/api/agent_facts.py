@@ -72,6 +72,7 @@ def _fact_to_response(f: MongoAgentFact) -> dict:
     return {
         "id": f.id,
         "agent_id": f.agent_id,
+        "agent_ids": getattr(f, 'agent_ids', []) or [],
         "type": f.type,
         "content": f.content,
         "source": f.source,
@@ -95,19 +96,21 @@ async def list_facts(
     type: Optional[str] = Query(None, description="Filter by type: fact or hypothesis"),
     verified: Optional[bool] = Query(None, description="Filter by verified status"),
     search: Optional[str] = Query(None, description="Text search in content"),
+    include_global: bool = Query(False, description="Include global facts"),
     limit: int = Query(200, ge=1, le=500),
     skip: int = Query(0, ge=0),
     _user=Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_mongodb),
 ):
-    """List all facts & hypotheses for an agent."""
+    """List all facts & hypotheses for an agent (also includes global facts assigned to this agent)."""
     await _get_agent_or_404(agent_id, db)
     svc = AgentFactService(db)
 
     if search:
         items = await svc.search_by_text(agent_id, search, limit=limit)
     else:
-        items = await svc.get_by_agent(agent_id, fact_type=type, verified=verified, limit=limit, skip=skip)
+        items = await svc.get_by_agent(agent_id, fact_type=type, verified=verified,
+                                        limit=limit, skip=skip, include_global=include_global)
 
     return {
         "items": [_fact_to_response(f) for f in items],

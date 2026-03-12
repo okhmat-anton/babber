@@ -105,7 +105,12 @@
                 <div class="text-truncate" style="max-width: 500px;">{{ item.content }}</div>
               </template>
               <template #item.agent_id="{ item }">
-                <v-chip size="small" variant="tonal" color="blue">{{ agentName(item.agent_id) }}</v-chip>
+                <v-chip v-if="isGlobalFact(item)" size="small" variant="tonal" color="teal">
+                  <v-icon start size="14">mdi-earth</v-icon> Global
+                </v-chip>
+                <span v-else>
+                  <v-chip v-for="aid in (item.agent_ids && item.agent_ids.length ? item.agent_ids : [item.agent_id])" :key="aid" size="small" variant="tonal" color="blue" class="mr-1">{{ agentName(aid) }}</v-chip>
+                </span>
               </template>
               <template #item.category="{ item }">
                 <v-chip v-if="item.category" size="small" variant="tonal" color="indigo">{{ item.category }}</v-chip>
@@ -156,9 +161,12 @@
           </template>
 
           <template #item.agent_id="{ item }">
-            <v-chip size="small" variant="tonal" color="blue">
-              {{ agentName(item.agent_id) }}
+            <v-chip v-if="isGlobalFact(item)" size="small" variant="tonal" color="teal">
+              <v-icon start size="14">mdi-earth</v-icon> Global
             </v-chip>
+            <span v-else>
+              <v-chip v-for="aid in (item.agent_ids && item.agent_ids.length ? item.agent_ids : [item.agent_id])" :key="aid" size="small" variant="tonal" color="blue" class="mr-1">{{ agentName(aid) }}</v-chip>
+            </span>
           </template>
 
           <template #item.category="{ item }">
@@ -229,16 +237,31 @@
       <v-card>
         <v-card-title>{{ editingFact ? 'Edit Fact' : 'New Fact' }}</v-card-title>
         <v-card-text>
+          <!-- Global toggle -->
+          <v-switch
+            v-model="formGlobal"
+            label="Global (all agents)"
+            color="teal"
+            density="compact"
+            class="mb-2"
+            :disabled="!!editingFact"
+            hide-details
+          />
+          <!-- Multi-agent selector (hidden when global) -->
           <v-select
-            v-model="formData.agent_id"
+            v-if="!formGlobal"
+            v-model="formData.agent_ids"
             :items="agentOptions"
             item-title="name"
             item-value="id"
-            label="Agent"
+            label="Agents"
             variant="outlined"
             density="compact"
             class="mb-3"
             prepend-inner-icon="mdi-robot"
+            multiple
+            chips
+            closable-chips
             :disabled="!!editingFact"
           />
           <v-select
@@ -331,8 +354,9 @@ const searchQuery = ref('')
 const formDialog = ref(false)
 const editingFact = ref(null)
 const saving = ref(false)
+const formGlobal = ref(true)
 const formData = ref({
-  agent_id: null, type: 'fact', content: '', source: 'user',
+  agent_ids: [], type: 'fact', content: '', source: 'user',
   verified: false, confidence: 0.8, category: '', tags: [],
 })
 
@@ -364,7 +388,7 @@ const groupedFacts = computed(() => {
 const headers = [
   { title: 'Type', key: 'type', width: 130 },
   { title: 'Content', key: 'content' },
-  { title: 'Agent', key: 'agent_id', width: 150 },
+  { title: 'Agent', key: 'agent_id', width: 200 },
   { title: 'Category', key: 'category', width: 140 },
   { title: 'Links', key: 'links', width: 80, sortable: false },
   { title: 'Verified', key: 'verified', width: 90 },
@@ -381,9 +405,6 @@ async function loadAgents() {
   try {
     await agentsStore.fetchAgents()
     agents.value = agentsStore.agents
-    if (agents.value.length && !formData.value.agent_id) {
-      formData.value.agent_id = agents.value[0].id
-    }
   } catch (e) {
     console.error('Failed to load agents:', e)
   }
@@ -414,8 +435,9 @@ function debouncedLoad() {
 
 function openCreateDialog() {
   editingFact.value = null
+  formGlobal.value = true
   formData.value = {
-    agent_id: agents.value.length ? agents.value[0].id : null,
+    agent_ids: [],
     type: 'fact', content: '', source: 'user',
     verified: false, confidence: 0.8, category: '', tags: [],
   }
@@ -424,8 +446,10 @@ function openCreateDialog() {
 
 function editFact(item) {
   editingFact.value = item
+  const agentIds = item.agent_ids || []
+  formGlobal.value = isGlobalFact(item)
   formData.value = {
-    agent_id: item.agent_id,
+    agent_ids: [...agentIds],
     type: item.type,
     content: item.content,
     source: item.source,
@@ -449,15 +473,20 @@ async function saveFact() {
         confidence: formData.value.confidence,
         category: formData.value.category || null,
         tags: formData.value.tags,
+        agent_ids: formGlobal.value ? [] : formData.value.agent_ids,
       })
       showSnackbar?.('Fact updated', 'success')
     } else {
-      if (!formData.value.agent_id) {
-        errorMsg.value = 'Please select an agent'
+      const payload = {
+        ...formData.value,
+        agent_ids: formGlobal.value ? [] : formData.value.agent_ids,
+      }
+      if (!formGlobal.value && (!payload.agent_ids || !payload.agent_ids.length)) {
+        errorMsg.value = 'Please select at least one agent or set as Global'
         saving.value = false
         return
       }
-      await api.post('/facts', formData.value)
+      await api.post('/facts', payload)
       showSnackbar?.('Fact created', 'success')
     }
     formDialog.value = false
@@ -500,6 +529,10 @@ async function doDeleteFact() {
 function agentName(agentId) {
   const a = agents.value.find(a => a.id === agentId)
   return a?.name || agentId?.substring(0, 8)
+}
+
+function isGlobalFact(item) {
+  return (!item.agent_ids || item.agent_ids.length === 0) && item.agent_id === '__global__'
 }
 
 function linkedCount(item) {

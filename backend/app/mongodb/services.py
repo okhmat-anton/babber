@@ -316,9 +316,21 @@ class AgentFactService(BaseMongoService[MongoAgentFact]):
         super().__init__(db, "agent_facts", MongoAgentFact)
 
     async def get_by_agent(self, agent_id: str, fact_type: str = None,
-                           verified: bool = None, limit: int = 200, skip: int = 0):
-        """Get facts/hypotheses for an agent with optional filters."""
-        filt = {"agent_id": agent_id}
+                           verified: bool = None, limit: int = 200, skip: int = 0,
+                           include_global: bool = False):
+        """Get facts/hypotheses for an agent with optional filters.
+        If include_global=True, also returns global facts (agent_ids=[])."""
+        if include_global:
+            filt = {"$or": [
+                {"agent_id": agent_id},
+                {"agent_ids": agent_id},
+                {"agent_ids": {"$size": 0}, "agent_id": "__global__"},
+            ]}
+        else:
+            filt = {"$or": [
+                {"agent_id": agent_id},
+                {"agent_ids": agent_id},
+            ]}
         if fact_type:
             filt["type"] = fact_type
         if verified is not None:
@@ -330,7 +342,10 @@ class AgentFactService(BaseMongoService[MongoAgentFact]):
     async def search_by_text(self, agent_id: str, query: str, limit: int = 20):
         """Simple text search on content field."""
         filt = {
-            "agent_id": agent_id,
+            "$or": [
+                {"agent_id": agent_id},
+                {"agent_ids": agent_id},
+            ],
             "content": {"$regex": query, "$options": "i"},
         }
         cursor = self.collection.find(filt).sort("created_at", -1).limit(limit)

@@ -19,7 +19,8 @@ class MongoAgentFact(BaseModel):
       - created_by: "agent" or "user"
     """
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    agent_id: str
+    agent_id: str = "__global__"  # Legacy single-agent field; "__global__" = global fact
+    agent_ids: List[str] = Field(default_factory=list)  # Empty = global (all agents), non-empty = specific agents
     type: str = "fact"  # "fact" or "hypothesis"
     content: str
     source: str = "conversation"  # conversation, web, analysis, observation, user

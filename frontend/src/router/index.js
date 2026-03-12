@@ -72,6 +72,7 @@ const routes = [
       { path: 'creator/ideas', redirect: '/ideas' },
       { path: 'creator/notes', redirect: '/notes' },
       { path: 'backups', name: 'Backups', component: () => import('../views/BackupsView.vue') },
+      { path: 'vpn', name: 'VPN', component: () => import('../views/VpnView.vue') },
 
       // Addons
       { path: 'addons', redirect: '/settings/addons' },
