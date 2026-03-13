@@ -446,8 +446,23 @@
         <v-card variant="outlined" color="error">
           <v-card-title class="text-error">Danger Zone</v-card-title>
           <v-card-text>
-            <v-btn color="error" variant="outlined" @click="$router.push('/projects')">
-              Delete this project from Projects list
+            <p class="mb-3">Permanently delete this project and all its code, tasks, and logs.</p>
+            <v-text-field
+              v-model="dangerDeleteConfirm"
+              label="Type DELETE to confirm"
+              variant="outlined"
+              density="compact"
+              style="max-width: 300px"
+              class="mb-3"
+            />
+            <v-btn
+              color="error"
+              variant="outlined"
+              :disabled="dangerDeleteConfirm !== 'DELETE'"
+              :loading="dangerDeleting"
+              @click="dangerDeleteProject"
+            >
+              Delete this project
             </v-btn>
           </v-card-text>
         </v-card>
@@ -1124,6 +1139,7 @@ async function deleteFileItem(item) {
       fileContent.value = ''
       originalContent.value = ''
     }
+    await loadFiles()
   } catch (e) { console.error(e) }
 }
 
@@ -1214,6 +1230,8 @@ watch([logLevel, logSource], loadLogs)
 const settingsForm = ref({})
 const settingsSaving = ref(false)
 const allAgents = ref([])
+const dangerDeleteConfirm = ref('')
+const dangerDeleting = ref(false)
 
 const agentOptions = computed(() =>
   allAgents.value.map(a => ({ title: a.name, value: String(a.id) }))
@@ -1255,6 +1273,19 @@ async function saveSettings() {
     const data = await store.updateProject(slug.value, payload)
     project.value = data
   } finally { settingsSaving.value = false }
+}
+
+async function dangerDeleteProject() {
+  if (dangerDeleteConfirm.value !== 'DELETE') return
+  dangerDeleting.value = true
+  try {
+    await store.deleteProject(slug.value)
+    router.push('/projects')
+  } catch (e) {
+    console.error('Failed to delete project', e)
+  } finally {
+    dangerDeleting.value = false
+  }
 }
 
 // ── Load project ──
