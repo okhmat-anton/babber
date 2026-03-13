@@ -25,6 +25,11 @@
       "key": "polymarket_passphrase",
       "description": "Polymarket API passphrase",
       "default": ""
+    },
+    {
+      "key": "polymarket_address",
+      "description": "Polymarket wallet/funder address (0x...)",
+      "default": ""
     }
   ],
   "protocols": ["gambling_addict"],

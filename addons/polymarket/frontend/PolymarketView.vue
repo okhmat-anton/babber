@@ -665,11 +665,21 @@
             label="Passphrase"
             variant="outlined"
             density="compact"
-            class="mb-4"
+            class="mb-3"
             :append-inner-icon="showPassphrase ? 'mdi-eye-off' : 'mdi-eye'"
             :type="showPassphrase ? 'text' : 'password'"
             @click:append-inner="showPassphrase = !showPassphrase"
             placeholder="Enter Polymarket passphrase"
+          />
+          <v-text-field
+            v-model="settingsForm.polymarket_address"
+            label="Wallet Address (Funder)"
+            variant="outlined"
+            density="compact"
+            class="mb-4"
+            placeholder="0x... your Polymarket funder/wallet address"
+            hint="The wallet address associated with your Polymarket profile"
+            persistent-hint
           />
           <v-btn color="primary" :loading="settingsSaving" @click="saveSettings" prepend-icon="mdi-content-save">
             Save Settings
@@ -775,6 +785,7 @@ const settingsForm = ref({
   polymarket_api_key: '',
   polymarket_api_secret: '',
   polymarket_passphrase: '',
+  polymarket_address: '',
 })
 
 // VPN toggle
@@ -802,6 +813,7 @@ watch(activeTab, (tab) => {
       polymarket_api_key: s.polymarket_api_key?.value || '',
       polymarket_api_secret: s.polymarket_api_secret?.value || '',
       polymarket_passphrase: s.polymarket_passphrase?.value || '',
+      polymarket_address: s.polymarket_address?.value || '',
     }
     vpnEnabled.value = s.polymarket_vpn_enabled?.value === 'true'
     settingsSaved.value = false
@@ -983,7 +995,7 @@ async function saveSettings() {
   settingsSaving.value = true
   settingsSaved.value = false
   try {
-    const keys = ['polymarket_api_key', 'polymarket_api_secret', 'polymarket_passphrase']
+    const keys = ['polymarket_api_key', 'polymarket_api_secret', 'polymarket_passphrase', 'polymarket_address']
     for (const key of keys) {
       await settingsStore.updateSystemSetting(key, settingsForm.value[key])
     }

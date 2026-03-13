@@ -19,12 +19,14 @@ async def execute():
     api_key = os.environ.get("POLYMARKET_API_KEY", "")
     api_secret = os.environ.get("POLYMARKET_API_SECRET", "")
     passphrase = os.environ.get("POLYMARKET_PASSPHRASE", "")
+    address = os.environ.get("POLYMARKET_ADDRESS", "")
     if not api_key:
         return {"error": "Polymarket API key not configured. Go to Settings to add it."}
 
     request_path = "/balance-allowance"
     params = "?asset_type=COLLATERAL&signature_type=0"
-    timestamp = int(time.time())
+    # Subtract 5 seconds to avoid clock skew rejection by Polymarket servers
+    timestamp = int(time.time()) - 5
     sig = _build_hmac_signature(api_secret, timestamp, "GET", request_path)
 
     headers = {
@@ -34,6 +36,8 @@ async def execute():
         "POLY_TIMESTAMP": str(timestamp),
         "POLY_SIGNATURE": sig,
     }
+    if address:
+        headers["POLY_ADDRESS"] = address
     try:
         async with httpx.AsyncClient(timeout=15, verify=False) as client:
             r = await client.get(f"{CLOB_API}{request_path}{params}", headers=headers)

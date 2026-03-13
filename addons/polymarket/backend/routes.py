@@ -43,10 +43,12 @@ async def _get_polymarket_creds(db) -> dict:
     api_key = await get_setting_value(db, "polymarket_api_key")
     api_secret = await get_setting_value(db, "polymarket_api_secret")
     passphrase = await get_setting_value(db, "polymarket_passphrase")
+    address = await get_setting_value(db, "polymarket_address")
     return {
         "api_key": api_key or "",
         "api_secret": api_secret or "",
         "passphrase": passphrase or "",
+        "address": address or "",
     }
 
 
@@ -85,15 +87,19 @@ def _build_hmac_signature(secret: str, timestamp: int, method: str, request_path
 
 def _clob_l2_headers(creds: dict, method: str, request_path: str, body: str = "") -> dict:
     """Build L2 authenticated headers with HMAC signing for CLOB API."""
-    timestamp = int(time.time())
+    # Subtract 5 seconds to avoid clock skew rejection by Polymarket servers
+    timestamp = int(time.time()) - 5
     sig = _build_hmac_signature(creds["api_secret"], timestamp, method, request_path, body)
-    return {
+    headers = {
         "Content-Type": "application/json",
         "POLY_API_KEY": creds["api_key"],
         "POLY_PASSPHRASE": creds["passphrase"],
         "POLY_TIMESTAMP": str(timestamp),
         "POLY_SIGNATURE": sig,
     }
+    if creds.get("address"):
+        headers["POLY_ADDRESS"] = creds["address"]
+    return headers
 
 
 def _parse_outcome_prices(raw) -> dict:
@@ -240,13 +246,15 @@ async def place_bet(body: PlaceBetRequest, db: AsyncIOMotorDatabase = Depends(ge
         "size": str(body.size),
         "type": "GTC",  # Good Till Cancel
     }
+    body_str = json.dumps(order)
+    headers = _clob_l2_headers(creds, "POST", "/order", body_str)
     vpn = await _get_active_vpn(db)
     try:
         async with _make_httpx_client(vpn, timeout=30) as client:
             r = await client.post(
                 f"{CLOB_API}/order",
-                json=order,
-                headers=_clob_headers(creds),
+                content=body_str,
+                headers=headers,
             )
             if r.status_code not in (200, 201):
                 raise HTTPException(status_code=r.status_code, detail=f"Order failed: {r.text[:500]}")
@@ -263,12 +271,13 @@ async def place_bet(body: PlaceBetRequest, db: AsyncIOMotorDatabase = Depends(ge
 async def get_positions(db: AsyncIOMotorDatabase = Depends(get_mongodb)):
     """Get current open positions / balances."""
     creds = await _require_creds(db)
+    headers = _clob_l2_headers(creds, "GET", "/positions")
     vpn = await _get_active_vpn(db)
     try:
         async with _make_httpx_client(vpn) as client:
             r = await client.get(
                 f"{CLOB_API}/positions",
-                headers=_clob_headers(creds),
+                headers=headers,
             )
             if r.status_code != 200:
                 raise HTTPException(status_code=r.status_code, detail=f"API error: {r.text[:500]}")
@@ -287,12 +296,13 @@ async def get_orders(
     params = {}
     if status:
         params["status"] = status
+    headers = _clob_l2_headers(creds, "GET", "/orders")
     vpn = await _get_active_vpn(db)
     try:
         async with _make_httpx_client(vpn) as client:
             r = await client.get(
                 f"{CLOB_API}/orders",
-                headers=_clob_headers(creds),
+                headers=headers,
                 params=params,
             )
             if r.status_code != 200:
@@ -664,7 +674,6 @@ async def place_session_bets(
     if not creds["api_key"]:
         raise HTTPException(status_code=400, detail="Polymarket API credentials not configured")
 
-    headers = _clob_headers(creds)
     vpn = await _get_active_vpn(db)
     results = []
 
@@ -672,13 +681,16 @@ async def place_session_bets(
         if not bet.get("selected") or not bet.get("token_id"):
             continue
         try:
+            order_body = {
+                "tokenID": bet["token_id"],
+                "side": "BUY",
+                "price": str(bet["odds"]),
+                "size": str(bet["amount"]),
+            }
+            body_str = json.dumps(order_body)
+            headers = _clob_l2_headers(creds, "POST", "/order", body_str)
             async with _make_httpx_client(vpn, timeout=30) as client:
-                r = await client.post(f"{CLOB_API}/order", headers=headers, json={
-                    "tokenID": bet["token_id"],
-                    "side": "BUY",
-                    "price": str(bet["odds"]),
-                    "size": str(bet["amount"]),
-                })
+                r = await client.post(f"{CLOB_API}/order", headers=headers, content=body_str)
                 success = r.status_code in (200, 201)
                 detail = r.json() if success else r.text[:300]
                 results.append({
@@ -763,16 +775,18 @@ async def place_single_bet(
     if not bet.get("token_id"):
         raise HTTPException(status_code=400, detail=f"Bet #{bet_number} has no token_id")
 
-    headers = _clob_headers(creds)
+    order_body = {
+        "tokenID": bet["token_id"],
+        "side": "BUY",
+        "price": str(bet["odds"]),
+        "size": str(bet["amount"]),
+    }
+    body_str = json.dumps(order_body)
+    headers = _clob_l2_headers(creds, "POST", "/order", body_str)
     vpn = await _get_active_vpn(db)
     try:
         async with _make_httpx_client(vpn, timeout=30) as client:
-            r = await client.post(f"{CLOB_API}/order", headers=headers, json={
-                "tokenID": bet["token_id"],
-                "side": "BUY",
-                "price": str(bet["odds"]),
-                "size": str(bet["amount"]),
-            })
+            r = await client.post(f"{CLOB_API}/order", headers=headers, content=body_str)
             success = r.status_code in (200, 201)
             detail = r.json() if success else r.text[:300]
     except Exception as exc:
