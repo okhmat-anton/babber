@@ -64,62 +64,88 @@
       <v-btn v-if="selectedTags.length" variant="text" size="x-small" color="grey" @click="selectedTags = []">Clear</v-btn>
     </div>
 
-    <!-- Events Table -->
-    <v-card>
-      <v-card-text class="pa-0">
-        <v-data-table
-          :headers="headers"
-          :items="tagFilteredEvents"
-          :loading="loading"
-          hover
+    <!-- Events grouped by type -->
+    <div v-if="filterType === 'all' && groupedEvents.length > 1">
+      <div v-for="group in groupedEvents" :key="group.event_type" class="mb-6">
+        <div class="text-subtitle-1 font-weight-bold mb-2 d-flex align-center">
+          <v-icon size="18" class="mr-2" :color="eventTypeColor(group.event_type)">{{ eventTypeIcon(group.event_type) }}</v-icon>
+          {{ group.event_type }}
+          <v-chip size="x-small" variant="tonal" class="ml-2">{{ group.items.length }}</v-chip>
+        </div>
+        <draggable
+          :list="group.items"
+          item-key="id"
+          handle=".drag-handle"
+          animation="200"
+          ghost-class="drag-ghost"
+          @end="onDragEnd(group.event_type)"
         >
-          <template #item.event_type="{ item }">
-            <v-chip :color="eventTypeColor(item.event_type)" size="small" variant="tonal">
-              <v-icon start size="14">{{ eventTypeIcon(item.event_type) }}</v-icon>
-              {{ item.event_type }}
-            </v-chip>
+          <template #item="{ element: event }">
+            <v-card variant="outlined" class="mb-1">
+              <v-card-text class="pa-2 d-flex align-center ga-2">
+                <div class="drag-handle">
+                  <v-icon size="18" color="grey">mdi-drag-vertical</v-icon>
+                </div>
+                <v-chip :color="eventTypeColor(event.event_type)" size="small" variant="tonal">
+                  <v-icon start size="14">{{ eventTypeIcon(event.event_type) }}</v-icon>
+                  {{ event.event_type }}
+                </v-chip>
+                <div class="flex-grow-1" style="min-width: 0;">
+                  <span class="font-weight-medium">{{ event.title }}</span>
+                  <div v-if="event.description" class="text-caption text-grey text-truncate" style="max-width: 350px;">{{ event.description }}</div>
+                </div>
+                <div v-if="event.tags && event.tags.length" class="d-flex ga-1 flex-wrap">
+                  <v-chip v-for="t in event.tags" :key="t" size="x-small" variant="tonal" color="cyan">{{ t }}</v-chip>
+                </div>
+                <v-chip size="x-small" variant="tonal" color="blue">{{ agentName(event.agent_id) }}</v-chip>
+                <v-chip :color="importanceColor(event.importance)" size="x-small" variant="flat">{{ event.importance }}</v-chip>
+                <span class="text-caption text-grey">{{ formatDate(event.event_date) }}</span>
+                <v-btn icon size="small" variant="text" @click.stop="editEvent(event)"><v-icon>mdi-pencil</v-icon></v-btn>
+                <v-btn icon size="small" variant="text" color="error" @click.stop="deleteEvent(event.id)"><v-icon>mdi-delete</v-icon></v-btn>
+              </v-card-text>
+            </v-card>
           </template>
+        </draggable>
+      </div>
+    </div>
 
-          <template #item.title="{ item }">
-            <div>
-              <span class="font-weight-medium">{{ item.title }}</span>
-              <div v-if="item.description" class="text-caption text-grey text-truncate" style="max-width: 350px;">
-                {{ item.description }}
+    <!-- Flat list -->
+    <div v-else>
+      <draggable
+        :list="tagFilteredEvents"
+        item-key="id"
+        handle=".drag-handle"
+        animation="200"
+        ghost-class="drag-ghost"
+        @end="onDragEndFlat"
+      >
+        <template #item="{ element: event }">
+          <v-card variant="outlined" class="mb-1">
+            <v-card-text class="pa-2 d-flex align-center ga-2">
+              <div class="drag-handle">
+                <v-icon size="18" color="grey">mdi-drag-vertical</v-icon>
               </div>
-            </div>
-          </template>
-
-          <template #item.agent_id="{ item }">
-            <v-chip size="small" variant="tonal" color="blue">
-              {{ agentName(item.agent_id) }}
-            </v-chip>
-          </template>
-
-          <template #item.importance="{ item }">
-            <v-chip :color="importanceColor(item.importance)" size="small" variant="flat">
-              {{ item.importance }}
-            </v-chip>
-          </template>
-
-          <template #item.event_date="{ item }">
-            {{ formatDate(item.event_date) }}
-          </template>
-
-          <template #item.tags="{ item }">
-            <div class="d-flex ga-1 flex-wrap"><v-chip v-for="t in (item.tags || [])" :key="t" size="x-small" variant="tonal" color="cyan">{{ t }}</v-chip></div>
-          </template>
-
-          <template #item.actions="{ item }">
-            <v-btn icon size="small" variant="text" @click.stop="editEvent(item)">
-              <v-icon>mdi-pencil</v-icon>
-            </v-btn>
-            <v-btn icon size="small" variant="text" color="error" @click.stop="deleteEvent(item.id)">
-              <v-icon>mdi-delete</v-icon>
-            </v-btn>
-          </template>
-        </v-data-table>
-      </v-card-text>
-    </v-card>
+              <v-chip :color="eventTypeColor(event.event_type)" size="small" variant="tonal">
+                <v-icon start size="14">{{ eventTypeIcon(event.event_type) }}</v-icon>
+                {{ event.event_type }}
+              </v-chip>
+              <div class="flex-grow-1" style="min-width: 0;">
+                <span class="font-weight-medium">{{ event.title }}</span>
+                <div v-if="event.description" class="text-caption text-grey text-truncate" style="max-width: 350px;">{{ event.description }}</div>
+              </div>
+              <div v-if="event.tags && event.tags.length" class="d-flex ga-1 flex-wrap">
+                <v-chip v-for="t in event.tags" :key="t" size="x-small" variant="tonal" color="cyan">{{ t }}</v-chip>
+              </div>
+              <v-chip size="x-small" variant="tonal" color="blue">{{ agentName(event.agent_id) }}</v-chip>
+              <v-chip :color="importanceColor(event.importance)" size="x-small" variant="flat">{{ event.importance }}</v-chip>
+              <span class="text-caption text-grey">{{ formatDate(event.event_date) }}</span>
+              <v-btn icon size="small" variant="text" @click.stop="editEvent(event)"><v-icon>mdi-pencil</v-icon></v-btn>
+              <v-btn icon size="small" variant="text" color="error" @click.stop="deleteEvent(event.id)"><v-icon>mdi-delete</v-icon></v-btn>
+            </v-card-text>
+          </v-card>
+        </template>
+      </draggable>
+    </div>
 
     <!-- Create/Edit Event Dialog -->
     <v-dialog v-model="formDialog" max-width="600">
@@ -206,6 +232,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, inject, watch } from 'vue'
+import draggable from 'vuedraggable'
 import api from '../api'
 import { useAgentsStore } from '../stores/agents'
 
@@ -260,6 +287,19 @@ const allTags = computed(() => {
 const tagFilteredEvents = computed(() => {
   if (!selectedTags.value.length) return events.value
   return events.value.filter(i => (i.tags || []).some(t => selectedTags.value.includes(t)))
+})
+
+const groupedEvents = computed(() => {
+  const groups = {}
+  const source = tagFilteredEvents.value
+  for (const e of source) {
+    const type = e.event_type || 'custom'
+    if (!groups[type]) groups[type] = []
+    groups[type].push(e)
+  }
+  return Object.entries(groups)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([type, items]) => ({ event_type: type, items }))
 })
 
 function toggleTag(tag) {
@@ -402,4 +442,43 @@ function formatDate(dt) {
   if (!dt) return ''
   return new Date(dt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
+
+async function onDragEnd(eventType) {
+  const group = groupedEvents.value.find(g => g.event_type === eventType)
+  if (!group) return
+  const ids = group.items.map(e => e.id)
+  try {
+    await api.post('/events/reorder', { ids })
+  } catch (e) {
+    showSnackbar?.('Failed to reorder', 'error')
+  }
+}
+
+async function onDragEndFlat() {
+  const items = tagFilteredEvents.value
+  const ids = items.map(e => e.id)
+  try {
+    await api.post('/events/reorder', { ids })
+  } catch (e) {
+    showSnackbar?.('Failed to reorder', 'error')
+  }
+}
 </script>
+
+<style scoped>
+.drag-handle {
+  cursor: grab;
+  opacity: 0.4;
+  transition: opacity 0.2s;
+}
+.drag-handle:hover {
+  opacity: 1;
+}
+.drag-handle:active {
+  cursor: grabbing;
+}
+.drag-ghost {
+  opacity: 0.3;
+  background: rgba(var(--v-theme-primary), 0.1);
+}
+</style>

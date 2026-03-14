@@ -335,7 +335,7 @@ class AgentFactService(BaseMongoService[MongoAgentFact]):
             filt["type"] = fact_type
         if verified is not None:
             filt["verified"] = verified
-        cursor = self.collection.find(filt).sort("created_at", -1).skip(skip).limit(limit)
+        cursor = self.collection.find(filt).sort([("sort_order", 1), ("created_at", -1)]).skip(skip).limit(limit)
         docs = await cursor.to_list(length=limit)
         return [self.model_class.from_mongo(doc) for doc in docs]
 
@@ -348,7 +348,7 @@ class AgentFactService(BaseMongoService[MongoAgentFact]):
             ],
             "content": {"$regex": query, "$options": "i"},
         }
-        cursor = self.collection.find(filt).sort("created_at", -1).limit(limit)
+        cursor = self.collection.find(filt).sort([("sort_order", 1), ("created_at", -1)]).limit(limit)
         docs = await cursor.to_list(length=limit)
         return [self.model_class.from_mongo(doc) for doc in docs]
 
@@ -362,7 +362,7 @@ class AgentFactService(BaseMongoService[MongoAgentFact]):
             filt["verified"] = verified
         if search:
             filt["content"] = {"$regex": search, "$options": "i"}
-        cursor = self.collection.find(filt).sort("created_at", -1).skip(skip).limit(limit)
+        cursor = self.collection.find(filt).sort([("sort_order", 1), ("created_at", -1)]).skip(skip).limit(limit)
         docs = await cursor.to_list(length=limit)
         return [self.model_class.from_mongo(doc) for doc in docs]
 
@@ -384,7 +384,7 @@ class AgentEventService(BaseMongoService[MongoAgentEvent]):
             filt["event_type"] = event_type
         if importance:
             filt["importance"] = importance
-        cursor = self.collection.find(filt).sort("event_date", -1).skip(skip).limit(limit)
+        cursor = self.collection.find(filt).sort([("sort_order", 1), ("event_date", -1)]).skip(skip).limit(limit)
         docs = await cursor.to_list(length=limit)
         return [self.model_class.from_mongo(doc) for doc in docs]
 
@@ -397,7 +397,7 @@ class AgentEventService(BaseMongoService[MongoAgentEvent]):
                 {"description": {"$regex": query, "$options": "i"}},
             ],
         }
-        cursor = self.collection.find(filt).sort("event_date", -1).limit(limit)
+        cursor = self.collection.find(filt).sort([("sort_order", 1), ("event_date", -1)]).limit(limit)
         docs = await cursor.to_list(length=limit)
         return [self.model_class.from_mongo(doc) for doc in docs]
 
@@ -414,7 +414,7 @@ class AgentEventService(BaseMongoService[MongoAgentEvent]):
                 {"title": {"$regex": search, "$options": "i"}},
                 {"description": {"$regex": search, "$options": "i"}},
             ]
-        cursor = self.collection.find(filt).sort("event_date", -1).skip(skip).limit(limit)
+        cursor = self.collection.find(filt).sort([("sort_order", 1), ("event_date", -1)]).skip(skip).limit(limit)
         docs = await cursor.to_list(length=limit)
         return [self.model_class.from_mongo(doc) for doc in docs]
 
@@ -570,7 +570,7 @@ class IdeaService(BaseMongoService[MongoIdea]):
             filt["status"] = status
         if source:
             filt["source"] = source
-        cursor = self.collection.find(filt).sort("created_at", -1).skip(skip).limit(limit)
+        cursor = self.collection.find(filt).sort([("sort_order", 1), ("created_at", -1)]).skip(skip).limit(limit)
         docs = await cursor.to_list(length=limit)
         return [self.model_class.from_mongo(doc) for doc in docs]
 
@@ -592,7 +592,7 @@ class IdeaService(BaseMongoService[MongoIdea]):
                 {"title": {"$regex": search, "$options": "i"}},
                 {"description": {"$regex": search, "$options": "i"}},
             ]
-        cursor = self.collection.find(filt).sort("created_at", -1).skip(skip).limit(limit)
+        cursor = self.collection.find(filt).sort([("sort_order", 1), ("created_at", -1)]).skip(skip).limit(limit)
         docs = await cursor.to_list(length=limit)
         return [self.model_class.from_mongo(doc) for doc in docs]
 
@@ -618,7 +618,7 @@ class NoteService(BaseMongoService[MongoNote]):
                 {"title": {"$regex": search, "$options": "i"}},
                 {"content": {"$regex": search, "$options": "i"}},
             ]
-        cursor = self.collection.find(filt).sort("created_at", -1).skip(skip).limit(limit)
+        cursor = self.collection.find(filt).sort([("sort_order", 1), ("created_at", -1)]).skip(skip).limit(limit)
         docs = await cursor.to_list(length=limit)
         return [self.model_class.from_mongo(doc) for doc in docs]
 

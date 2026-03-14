@@ -445,7 +445,7 @@ async def _execute_cycle(db, run: MongoAutonomousRun, agent) -> bool:
                 temperature=agent_settings.get("temperature", agent.temperature),
                 top_p=agent_settings.get("top_p", 0.9),
                 top_k=agent_settings.get("top_k", 40),
-                max_tokens=agent_settings.get("max_tokens", 2048),
+                max_tokens=agent_settings.get("max_tokens", 32768),
                 num_ctx=agent_settings.get("num_ctx", 32768),
                 repeat_penalty=agent_settings.get("repeat_penalty", 1.1),
                 num_predict=agent_settings.get("num_predict", -1),

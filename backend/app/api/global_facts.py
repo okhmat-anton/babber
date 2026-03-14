@@ -54,6 +54,7 @@ def _fact_to_response(f: MongoAgentFact) -> dict:
         "linked_analysis_ids": getattr(f, 'linked_analysis_ids', []) or [],
         "linked_idea_ids": getattr(f, 'linked_idea_ids', []) or [],
         "created_by": f.created_by,
+        "sort_order": getattr(f, 'sort_order', 0),
         "created_at": f.created_at.isoformat() if isinstance(f.created_at, datetime) else str(f.created_at),
         "updated_at": f.updated_at.isoformat() if isinstance(f.updated_at, datetime) else str(f.updated_at),
     }
@@ -235,3 +236,22 @@ async def unlink_entity_from_fact(
     await svc.collection.update_one({"_id": fact_id}, {"$pull": {field: body.target_id}})
     updated = await svc.get_by_id(fact_id)
     return _fact_to_response(updated)
+
+
+# ── Reorder ──────────────────────────────────────────
+
+class ReorderRequest(BaseModel):
+    ids: List[str]
+
+
+@router.post("/reorder")
+async def reorder_facts(
+    body: ReorderRequest,
+    _user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Update sort_order for facts based on the provided order."""
+    svc = AgentFactService(db)
+    for idx, item_id in enumerate(body.ids):
+        await svc.update(item_id, {"sort_order": idx})
+    return {"status": "ok", "updated": len(body.ids)}

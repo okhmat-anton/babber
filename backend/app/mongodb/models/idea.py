@@ -29,6 +29,7 @@ class MongoIdea(BaseModel):
     status: str = "new"  # new, in_progress, done, archived
     tags: List[str] = Field(default_factory=list)
     created_by: str = "user"  # user, agent
+    sort_order: int = 0  # manual ordering within category (lower = higher)
     # Cross-linking
     linked_video_ids: List[str] = Field(default_factory=list)
     linked_fact_ids: List[str] = Field(default_factory=list)

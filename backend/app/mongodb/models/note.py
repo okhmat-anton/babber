@@ -26,6 +26,7 @@ class MongoNote(BaseModel):
     status: str = "active"  # active, completed, archived
     tags: List[str] = Field(default_factory=list)
     in_context: bool = True  # included in agent context
+    sort_order: int = 0  # manual ordering within category (lower = higher)
     # Cross-linking
     linked_idea_ids: List[str] = Field(default_factory=list)
     linked_fact_ids: List[str] = Field(default_factory=list)

@@ -83,132 +83,83 @@
           {{ group.category || 'Uncategorized' }}
           <v-chip size="x-small" variant="tonal" class="ml-2">{{ group.items.length }}</v-chip>
         </div>
-        <v-card>
-          <v-card-text class="pa-0">
-            <v-data-table
-              v-model="selectedItems"
-              :headers="headers"
-              :items="group.items"
-              :loading="loading"
-              show-select
-              return-object
-              hover
-              density="compact"
-            >
-              <template #item.type="{ item }">
-                <v-chip :color="item.type === 'fact' ? 'teal' : 'orange'" size="small" variant="tonal">
-                  <v-icon start size="14">{{ item.type === 'fact' ? 'mdi-check-decagram' : 'mdi-help-circle-outline' }}</v-icon>
-                  {{ item.type }}
+        <draggable
+          :list="group.items"
+          item-key="id"
+          handle=".drag-handle"
+          animation="200"
+          ghost-class="drag-ghost"
+          @end="onDragEnd(group.category)"
+        >
+          <template #item="{ element: fact }">
+            <v-card variant="outlined" class="mb-1">
+              <v-card-text class="pa-2 d-flex align-center ga-2">
+                <div class="drag-handle">
+                  <v-icon size="18" color="grey">mdi-drag-vertical</v-icon>
+                </div>
+                <v-chip :color="fact.type === 'fact' ? 'teal' : 'orange'" size="small" variant="tonal">
+                  <v-icon start size="14">{{ fact.type === 'fact' ? 'mdi-check-decagram' : 'mdi-help-circle-outline' }}</v-icon>
+                  {{ fact.type }}
                 </v-chip>
-              </template>
-              <template #item.content="{ item }">
-                <div class="text-truncate" style="max-width: 500px;">{{ item.content }}</div>
-              </template>
-              <template #item.agent_id="{ item }">
-                <v-chip v-if="isGlobalFact(item)" size="small" variant="tonal" color="teal">
-                  <v-icon start size="14">mdi-earth</v-icon> Global
+                <div class="flex-grow-1 text-truncate" style="min-width: 0; max-width: 500px;">{{ fact.content }}</div>
+                <v-chip v-if="isGlobalFact(fact)" size="x-small" variant="tonal" color="teal">
+                  <v-icon start size="12">mdi-earth</v-icon> Global
                 </v-chip>
-                <span v-else>
-                  <v-chip v-for="aid in (item.agent_ids && item.agent_ids.length ? item.agent_ids : [item.agent_id])" :key="aid" size="small" variant="tonal" color="blue" class="mr-1">{{ agentName(aid) }}</v-chip>
-                </span>
-              </template>
-              <template #item.category="{ item }">
-                <v-chip v-if="item.category" size="small" variant="tonal" color="indigo">{{ item.category }}</v-chip>
-              </template>
-              <template #item.links="{ item }">
-                <span class="text-caption">{{ linkedCount(item) || '' }}</span>
-              </template>
-              <template #item.verified="{ item }">
-                <v-icon v-if="item.verified" color="green" size="20">mdi-check-circle</v-icon>
-                <v-icon v-else color="grey" size="20">mdi-minus-circle-outline</v-icon>
-              </template>
-              <template #item.confidence="{ item }">
-                <v-chip size="small" variant="tonal">{{ (item.confidence * 100).toFixed(0) }}%</v-chip>
-              </template>
-              <template #item.created_at="{ item }">{{ formatDate(item.created_at) }}</template>
-              <template #item.actions="{ item }">
-                <v-btn v-if="item.type === 'hypothesis' && !item.verified" icon size="small" variant="text" color="green" @click.stop="verifyFact(item)"><v-icon>mdi-check-circle</v-icon></v-btn>
-                <v-btn icon size="small" variant="text" @click.stop="editFact(item)"><v-icon>mdi-pencil</v-icon></v-btn>
-                <v-btn icon size="small" variant="text" color="error" @click.stop="deleteFact(item.id)"><v-icon>mdi-delete</v-icon></v-btn>
-              </template>
-            </v-data-table>
-          </v-card-text>
-        </v-card>
+                <template v-else>
+                  <v-chip v-for="aid in (fact.agent_ids && fact.agent_ids.length ? fact.agent_ids : [fact.agent_id])" :key="aid" size="x-small" variant="tonal" color="blue" class="mr-1">{{ agentName(aid) }}</v-chip>
+                </template>
+                <v-icon v-if="fact.verified" color="green" size="18">mdi-check-circle</v-icon>
+                <v-chip size="x-small" variant="tonal">{{ (fact.confidence * 100).toFixed(0) }}%</v-chip>
+                <span class="text-caption text-grey">{{ formatDate(fact.created_at) }}</span>
+                <v-btn v-if="fact.type === 'hypothesis' && !fact.verified" icon size="small" variant="text" color="green" @click.stop="verifyFact(fact)"><v-icon>mdi-check-circle</v-icon></v-btn>
+                <v-btn icon size="small" variant="text" @click.stop="editFact(fact)"><v-icon>mdi-pencil</v-icon></v-btn>
+                <v-btn icon size="small" variant="text" color="error" @click.stop="deleteFact(fact.id)"><v-icon>mdi-delete</v-icon></v-btn>
+              </v-card-text>
+            </v-card>
+          </template>
+        </draggable>
       </div>
     </div>
 
-    <!-- Flat table -->
-    <v-card v-else>
-      <v-card-text class="pa-0">
-        <v-data-table
-          v-model="selectedItems"
-          :headers="headers"
-          :items="facts"
-          :loading="loading"
-          show-select
-          return-object
-          hover
-        >
-          <template #item.type="{ item }">
-            <v-chip :color="item.type === 'fact' ? 'teal' : 'orange'" size="small" variant="tonal">
-              <v-icon start size="14">{{ item.type === 'fact' ? 'mdi-check-decagram' : 'mdi-help-circle-outline' }}</v-icon>
-              {{ item.type }}
-            </v-chip>
-          </template>
-
-          <template #item.content="{ item }">
-            <div class="text-truncate" style="max-width: 500px;">{{ item.content }}</div>
-          </template>
-
-          <template #item.agent_id="{ item }">
-            <v-chip v-if="isGlobalFact(item)" size="small" variant="tonal" color="teal">
-              <v-icon start size="14">mdi-earth</v-icon> Global
-            </v-chip>
-            <span v-else>
-              <v-chip v-for="aid in (item.agent_ids && item.agent_ids.length ? item.agent_ids : [item.agent_id])" :key="aid" size="small" variant="tonal" color="blue" class="mr-1">{{ agentName(aid) }}</v-chip>
-            </span>
-          </template>
-
-          <template #item.category="{ item }">
-            <v-chip v-if="item.category" size="small" variant="tonal" color="indigo">{{ item.category }}</v-chip>
-          </template>
-
-          <template #item.links="{ item }">
-            <span class="text-caption">{{ linkedCount(item) || '' }}</span>
-          </template>
-
-          <template #item.verified="{ item }">
-            <v-icon v-if="item.verified" color="green" size="20">mdi-check-circle</v-icon>
-            <v-icon v-else color="grey" size="20">mdi-minus-circle-outline</v-icon>
-          </template>
-
-          <template #item.confidence="{ item }">
-            <v-chip size="small" variant="tonal">{{ (item.confidence * 100).toFixed(0) }}%</v-chip>
-          </template>
-
-          <template #item.created_at="{ item }">
-            {{ formatDate(item.created_at) }}
-          </template>
-
-          <template #item.actions="{ item }">
-            <v-btn
-              v-if="item.type === 'hypothesis' && !item.verified"
-              icon size="small" variant="text" color="green"
-              @click.stop="verifyFact(item)"
-            >
-              <v-icon>mdi-check-circle</v-icon>
-              <v-tooltip activator="parent" location="top">Verify</v-tooltip>
-            </v-btn>
-            <v-btn icon size="small" variant="text" @click.stop="editFact(item)">
-              <v-icon>mdi-pencil</v-icon>
-            </v-btn>
-            <v-btn icon size="small" variant="text" color="error" @click.stop="deleteFact(item.id)">
-              <v-icon>mdi-delete</v-icon>
-            </v-btn>
-          </template>
-        </v-data-table>
-      </v-card-text>
-    </v-card>
+    <!-- Flat list -->
+    <div v-else>
+      <draggable
+        :list="facts"
+        item-key="id"
+        handle=".drag-handle"
+        animation="200"
+        ghost-class="drag-ghost"
+        @end="onDragEndFlat"
+      >
+        <template #item="{ element: fact }">
+          <v-card variant="outlined" class="mb-1">
+            <v-card-text class="pa-2 d-flex align-center ga-2">
+              <div class="drag-handle">
+                <v-icon size="18" color="grey">mdi-drag-vertical</v-icon>
+              </div>
+              <v-chip :color="fact.type === 'fact' ? 'teal' : 'orange'" size="small" variant="tonal">
+                <v-icon start size="14">{{ fact.type === 'fact' ? 'mdi-check-decagram' : 'mdi-help-circle-outline' }}</v-icon>
+                {{ fact.type }}
+              </v-chip>
+              <div class="flex-grow-1 text-truncate" style="min-width: 0; max-width: 500px;">{{ fact.content }}</div>
+              <v-chip v-if="isGlobalFact(fact)" size="x-small" variant="tonal" color="teal">
+                <v-icon start size="12">mdi-earth</v-icon> Global
+              </v-chip>
+              <template v-else>
+                <v-chip v-for="aid in (fact.agent_ids && fact.agent_ids.length ? fact.agent_ids : [fact.agent_id])" :key="aid" size="x-small" variant="tonal" color="blue" class="mr-1">{{ agentName(aid) }}</v-chip>
+              </template>
+              <v-chip v-if="fact.category" size="x-small" variant="tonal" color="indigo">{{ fact.category }}</v-chip>
+              <v-icon v-if="fact.verified" color="green" size="18">mdi-check-circle</v-icon>
+              <v-chip size="x-small" variant="tonal">{{ (fact.confidence * 100).toFixed(0) }}%</v-chip>
+              <span class="text-caption text-grey">{{ formatDate(fact.created_at) }}</span>
+              <v-btn v-if="fact.type === 'hypothesis' && !fact.verified" icon size="small" variant="text" color="green" @click.stop="verifyFact(fact)"><v-icon>mdi-check-circle</v-icon></v-btn>
+              <v-btn icon size="small" variant="text" @click.stop="editFact(fact)"><v-icon>mdi-pencil</v-icon></v-btn>
+              <v-btn icon size="small" variant="text" color="error" @click.stop="deleteFact(fact.id)"><v-icon>mdi-delete</v-icon></v-btn>
+            </v-card-text>
+          </v-card>
+        </template>
+      </draggable>
+    </div>
 
     <!-- Delete Confirmation Dialog -->
     <v-dialog v-model="deleteDialog" max-width="400">
@@ -334,6 +285,7 @@
 
 <script setup>
 import { ref, computed, onMounted, inject } from 'vue'
+import draggable from 'vuedraggable'
 import api from '../api'
 import { useAgentsStore } from '../stores/agents'
 import { useChatStore } from '../stores/chat'
@@ -544,6 +496,26 @@ function formatDate(dt) {
   return new Date(dt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
+async function onDragEnd(category) {
+  const group = groupedFacts.value.find(g => g.category === (category || ''))
+  if (!group) return
+  const ids = group.items.map(f => f.id)
+  try {
+    await api.post('/facts/reorder', { ids })
+  } catch (e) {
+    showSnackbar?.('Failed to reorder', 'error')
+  }
+}
+
+async function onDragEndFlat() {
+  const ids = facts.value.map(f => f.id)
+  try {
+    await api.post('/facts/reorder', { ids })
+  } catch (e) {
+    showSnackbar?.('Failed to reorder', 'error')
+  }
+}
+
 async function discussSelected() {
   if (!selectedItems.value.length) return
   try {
@@ -561,3 +533,21 @@ async function discussSelected() {
   }
 }
 </script>
+
+<style scoped>
+.drag-handle {
+  cursor: grab;
+  opacity: 0.4;
+  transition: opacity 0.2s;
+}
+.drag-handle:hover {
+  opacity: 1;
+}
+.drag-handle:active {
+  cursor: grabbing;
+}
+.drag-ghost {
+  opacity: 0.3;
+  background: rgba(var(--v-theme-primary), 0.1);
+}
+</style>

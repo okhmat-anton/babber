@@ -102,131 +102,83 @@
           {{ group.category || 'Uncategorized' }}
           <v-chip size="x-small" variant="tonal" class="ml-2">{{ group.items.length }}</v-chip>
         </div>
-        <v-card>
-          <v-card-text class="pa-0">
-            <v-data-table
-              v-model="selectedItems"
-              :headers="headers"
-              :items="group.items"
-              :loading="loading"
-              show-select
-              return-object
-              hover
-              density="compact"
-            >
-              <template #item.priority="{ item }">
-                <v-chip :color="priorityColor(item.priority)" size="small" variant="tonal">
-                  <v-icon start size="14">{{ priorityIcon(item.priority) }}</v-icon>
-                  {{ item.priority }}
-                </v-chip>
-              </template>
-              <template #item.title="{ item }">
-                <div>
-                  <span class="font-weight-medium">{{ item.title }}</span>
-                  <div v-if="item.description" class="text-caption text-grey text-truncate" style="max-width: 400px;">{{ item.description }}</div>
+        <draggable
+          :list="group.items"
+          item-key="id"
+          handle=".drag-handle"
+          animation="200"
+          ghost-class="drag-ghost"
+          @end="onDragEnd(group.category)"
+        >
+          <template #item="{ element: idea }">
+            <v-card variant="outlined" class="mb-1">
+              <v-card-text class="pa-2 d-flex align-center ga-2">
+                <div class="drag-handle">
+                  <v-icon size="18" color="grey">mdi-drag-vertical</v-icon>
                 </div>
-              </template>
-              <template #item.source="{ item }">
-                <v-chip :color="item.source === 'user' ? 'blue' : 'orange'" size="small" variant="tonal">
-                  <v-icon start size="14">{{ item.source === 'user' ? 'mdi-account' : 'mdi-robot' }}</v-icon>
-                  {{ item.source }}
+                <v-chip :color="priorityColor(idea.priority)" size="small" variant="tonal">
+                  <v-icon start size="14">{{ priorityIcon(idea.priority) }}</v-icon>
+                  {{ idea.priority }}
                 </v-chip>
-              </template>
-              <template #item.agent_id="{ item }">
-                <v-chip v-if="item.agent_id" size="small" variant="tonal" color="blue">{{ agentName(item.agent_id) }}</v-chip>
-                <v-chip v-else size="small" variant="tonal" color="grey">Global</v-chip>
-              </template>
-              <template #item.category="{ item }">
-                <v-chip v-if="item.category" size="small" variant="tonal" color="indigo">{{ item.category }}</v-chip>
-              </template>
-              <template #item.status="{ item }">
-                <v-chip :color="statusColor(item.status)" size="small" variant="tonal">{{ item.status }}</v-chip>
-              </template>
-              <template #item.links="{ item }">
-                <span class="text-caption">{{ linkedCount(item) || '' }}</span>
-              </template>
-              <template #item.created_at="{ item }">{{ formatDate(item.created_at) }}</template>
-              <template #item.actions="{ item }">
-                <v-btn icon size="small" variant="text" @click.stop="editIdea(item)"><v-icon>mdi-pencil</v-icon></v-btn>
-                <v-btn icon size="small" variant="text" color="error" @click.stop="deleteIdea(item.id)"><v-icon>mdi-delete</v-icon></v-btn>
-              </template>
-            </v-data-table>
-          </v-card-text>
-        </v-card>
+                <div class="flex-grow-1" style="min-width: 0;">
+                  <span class="font-weight-medium">{{ idea.title }}</span>
+                  <div v-if="idea.description" class="text-caption text-grey text-truncate" style="max-width: 400px;">{{ idea.description }}</div>
+                </div>
+                <v-chip :color="idea.source === 'user' ? 'blue' : 'orange'" size="x-small" variant="tonal">
+                  <v-icon start size="12">{{ idea.source === 'user' ? 'mdi-account' : 'mdi-robot' }}</v-icon>
+                  {{ idea.source }}
+                </v-chip>
+                <v-chip v-if="idea.agent_id" size="x-small" variant="tonal" color="blue">{{ agentName(idea.agent_id) }}</v-chip>
+                <v-chip :color="statusColor(idea.status)" size="x-small" variant="tonal">{{ idea.status }}</v-chip>
+                <span class="text-caption text-grey">{{ formatDate(idea.created_at) }}</span>
+                <v-btn icon size="small" variant="text" @click.stop="editIdea(idea)"><v-icon>mdi-pencil</v-icon></v-btn>
+                <v-btn icon size="small" variant="text" color="error" @click.stop="deleteIdea(idea.id)"><v-icon>mdi-delete</v-icon></v-btn>
+              </v-card-text>
+            </v-card>
+          </template>
+        </draggable>
       </div>
     </div>
 
-    <!-- Flat table -->
-    <v-card v-else>
-      <v-card-text class="pa-0">
-        <v-data-table
-          v-model="selectedItems"
-          :headers="headers"
-          :items="ideas"
-          :loading="loading"
-          show-select
-          return-object
-          hover
-        >
-          <template #item.priority="{ item }">
-            <v-chip :color="priorityColor(item.priority)" size="small" variant="tonal">
-              <v-icon start size="14">{{ priorityIcon(item.priority) }}</v-icon>
-              {{ item.priority }}
-            </v-chip>
-          </template>
-
-          <template #item.title="{ item }">
-            <div>
-              <span class="font-weight-medium">{{ item.title }}</span>
-              <div v-if="item.description" class="text-caption text-grey text-truncate" style="max-width: 400px;">
-                {{ item.description }}
+    <!-- Flat list -->
+    <div v-else>
+      <draggable
+        :list="ideas"
+        item-key="id"
+        handle=".drag-handle"
+        animation="200"
+        ghost-class="drag-ghost"
+        @end="onDragEndFlat"
+      >
+        <template #item="{ element: idea }">
+          <v-card variant="outlined" class="mb-1">
+            <v-card-text class="pa-2 d-flex align-center ga-2">
+              <div class="drag-handle">
+                <v-icon size="18" color="grey">mdi-drag-vertical</v-icon>
               </div>
-            </div>
-          </template>
-
-          <template #item.source="{ item }">
-            <v-chip :color="item.source === 'user' ? 'blue' : 'orange'" size="small" variant="tonal">
-              <v-icon start size="14">{{ item.source === 'user' ? 'mdi-account' : 'mdi-robot' }}</v-icon>
-              {{ item.source }}
-            </v-chip>
-          </template>
-
-          <template #item.agent_id="{ item }">
-            <v-chip v-if="item.agent_id" size="small" variant="tonal" color="blue">
-              {{ agentName(item.agent_id) }}
-            </v-chip>
-            <v-chip v-else size="small" variant="tonal" color="grey">Global</v-chip>
-          </template>
-
-          <template #item.category="{ item }">
-            <v-chip v-if="item.category" size="small" variant="tonal" color="indigo">{{ item.category }}</v-chip>
-          </template>
-
-          <template #item.status="{ item }">
-            <v-chip :color="statusColor(item.status)" size="small" variant="tonal">
-              {{ item.status }}
-            </v-chip>
-          </template>
-
-          <template #item.links="{ item }">
-            <span class="text-caption">{{ linkedCount(item) || '' }}</span>
-          </template>
-
-          <template #item.created_at="{ item }">
-            {{ formatDate(item.created_at) }}
-          </template>
-
-          <template #item.actions="{ item }">
-            <v-btn icon size="small" variant="text" @click.stop="editIdea(item)">
-              <v-icon>mdi-pencil</v-icon>
-            </v-btn>
-            <v-btn icon size="small" variant="text" color="error" @click.stop="deleteIdea(item.id)">
-              <v-icon>mdi-delete</v-icon>
-            </v-btn>
-          </template>
-        </v-data-table>
-      </v-card-text>
-    </v-card>
+              <v-chip :color="priorityColor(idea.priority)" size="small" variant="tonal">
+                <v-icon start size="14">{{ priorityIcon(idea.priority) }}</v-icon>
+                {{ idea.priority }}
+              </v-chip>
+              <div class="flex-grow-1" style="min-width: 0;">
+                <span class="font-weight-medium">{{ idea.title }}</span>
+                <div v-if="idea.description" class="text-caption text-grey text-truncate" style="max-width: 400px;">{{ idea.description }}</div>
+              </div>
+              <v-chip :color="idea.source === 'user' ? 'blue' : 'orange'" size="x-small" variant="tonal">
+                <v-icon start size="12">{{ idea.source === 'user' ? 'mdi-account' : 'mdi-robot' }}</v-icon>
+                {{ idea.source }}
+              </v-chip>
+              <v-chip v-if="idea.agent_id" size="x-small" variant="tonal" color="blue">{{ agentName(idea.agent_id) }}</v-chip>
+              <v-chip v-if="idea.category" size="x-small" variant="tonal" color="indigo">{{ idea.category }}</v-chip>
+              <v-chip :color="statusColor(idea.status)" size="x-small" variant="tonal">{{ idea.status }}</v-chip>
+              <span class="text-caption text-grey">{{ formatDate(idea.created_at) }}</span>
+              <v-btn icon size="small" variant="text" @click.stop="editIdea(idea)"><v-icon>mdi-pencil</v-icon></v-btn>
+              <v-btn icon size="small" variant="text" color="error" @click.stop="deleteIdea(idea.id)"><v-icon>mdi-delete</v-icon></v-btn>
+            </v-card-text>
+          </v-card>
+        </template>
+      </draggable>
+    </div>
 
     <!-- Delete Confirmation Dialog -->
     <v-dialog v-model="deleteDialog" max-width="400">
@@ -496,6 +448,7 @@
 
 <script setup>
 import { ref, computed, onMounted, inject } from 'vue'
+import draggable from 'vuedraggable'
 import api from '../api'
 import { useAgentsStore } from '../stores/agents'
 import { useChatStore } from '../stores/chat'
@@ -758,6 +711,26 @@ function formatDate(dt) {
   return new Date(dt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
+async function onDragEnd(category) {
+  const group = groupedIdeas.value.find(g => g.category === (category || ''))
+  if (!group) return
+  const ids = group.items.map(i => i.id)
+  try {
+    await api.post('/ideas/reorder', { ids })
+  } catch (e) {
+    showSnackbar?.('Failed to reorder', 'error')
+  }
+}
+
+async function onDragEndFlat() {
+  const ids = ideas.value.map(i => i.id)
+  try {
+    await api.post('/ideas/reorder', { ids })
+  } catch (e) {
+    showSnackbar?.('Failed to reorder', 'error')
+  }
+}
+
 async function discussSelected() {
   if (!selectedItems.value.length) return
   try {
@@ -853,3 +826,21 @@ async function acceptAllSuggestions() {
   await loadIdeas()
 }
 </script>
+
+<style scoped>
+.drag-handle {
+  cursor: grab;
+  opacity: 0.4;
+  transition: opacity 0.2s;
+}
+.drag-handle:hover {
+  opacity: 1;
+}
+.drag-handle:active {
+  cursor: grabbing;
+}
+.drag-ghost {
+  opacity: 0.3;
+  background: rgba(var(--v-theme-primary), 0.1);
+}
+</style>

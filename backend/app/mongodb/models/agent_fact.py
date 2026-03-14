@@ -29,6 +29,7 @@ class MongoAgentFact(BaseModel):
     tags: List[str] = Field(default_factory=list)
     category: Optional[str] = None  # User-defined category for grouping
     created_by: str = "agent"  # agent, user
+    sort_order: int = 0  # manual ordering within category (lower = higher)
     # Cross-linking
     linked_video_ids: List[str] = Field(default_factory=list)
     linked_analysis_ids: List[str] = Field(default_factory=list)

@@ -58,7 +58,7 @@ class AgentCreate(BaseModel):
     temperature: float = 0.7
     top_p: float = 0.9
     top_k: int = 40
-    max_tokens: int = 2048
+    max_tokens: int = 32768
     num_ctx: int = 32768
     repeat_penalty: float = 1.1
     num_predict: int = -1

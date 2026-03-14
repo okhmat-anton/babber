@@ -1433,7 +1433,7 @@ async def _build_agent_context(agent_id_str: str, db: AsyncIOMotorDatabase, sess
             temperature=agent_settings.get("temperature", session_temperature),
             top_p=agent_settings.get("top_p", 0.9),
             top_k=agent_settings.get("top_k", 40),
-            max_tokens=agent_settings.get("max_tokens", 8192),
+            max_tokens=agent_settings.get("max_tokens", 32768),
             num_ctx=agent_settings.get("num_ctx", 32768),
             repeat_penalty=agent_settings.get("repeat_penalty", 1.1),
             num_predict=agent_settings.get("num_predict", -1),

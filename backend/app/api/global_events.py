@@ -54,6 +54,7 @@ def _event_to_response(e: MongoAgentEvent) -> dict:
         "importance": e.importance,
         "tags": e.tags,
         "created_by": e.created_by,
+        "sort_order": getattr(e, 'sort_order', 0),
         "event_date": e.event_date.isoformat() if isinstance(e.event_date, datetime) else str(e.event_date),
         "created_at": e.created_at.isoformat() if isinstance(e.created_at, datetime) else str(e.created_at),
         "updated_at": e.updated_at.isoformat() if isinstance(e.updated_at, datetime) else str(e.updated_at),
@@ -180,3 +181,22 @@ async def delete_global_event(
         raise HTTPException(status_code=404, detail="Event not found")
     await svc.delete(event_id)
     return {"detail": "Deleted"}
+
+
+# ── Reorder ──────────────────────────────────────────
+
+class ReorderRequest(BaseModel):
+    ids: List[str]
+
+
+@router.post("/reorder")
+async def reorder_events(
+    body: ReorderRequest,
+    _user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Update sort_order for events based on the provided order."""
+    svc = AgentEventService(db)
+    for idx, item_id in enumerate(body.ids):
+        await svc.update(item_id, {"sort_order": idx})
+    return {"status": "ok", "updated": len(body.ids)}

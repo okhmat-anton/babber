@@ -69,126 +69,153 @@
           {{ group.category || 'Uncategorized' }}
           <v-chip size="x-small" variant="tonal" class="ml-2">{{ group.items.length }}</v-chip>
         </div>
-        <div class="d-flex flex-column ga-3">
-          <v-card v-for="note in group.items" :key="note.id" variant="flat" class="note-card" :class="{ 'note-completed': note.status === 'completed', 'note-no-context': !note.in_context }">
-            <div class="card-accent" :class="priorityAccentClass(note.priority)" />
-            <v-card-text class="pa-5 pl-7">
-              <div class="d-flex align-start">
-                <v-btn
-                  icon
-                  size="x-small"
-                  variant="text"
-                  class="mr-2 mt-1"
-                  @click.stop="toggleExpand(note.id)"
-                >
-                  <v-icon size="16">{{ expandedNotes.has(note.id) ? 'mdi-chevron-down' : 'mdi-chevron-right' }}</v-icon>
-                </v-btn>
-                <div class="flex-grow-1" @click="toggleExpand(note.id)" style="cursor: pointer;">
-                  <div class="d-flex align-center mb-1 ga-2 flex-wrap">
-                    <span class="text-subtitle-1 font-weight-medium">{{ note.title }}</span>
-                    <v-chip :color="priorityColor(note.priority)" size="x-small" variant="tonal">
-                      {{ note.priority }}
-                    </v-chip>
-                    <v-chip :color="statusColor(note.status)" size="x-small" variant="tonal">
-                      {{ note.status }}
-                    </v-chip>
-                    <v-chip v-if="note.category" size="x-small" variant="tonal" color="indigo">
-                      {{ note.category }}
-                    </v-chip>
-                    <v-chip v-if="!note.in_context" size="x-small" variant="tonal" color="grey">
-                      <v-icon start size="12">mdi-brain-off</v-icon>
-                      Hidden from context
-                    </v-chip>
-                    <span v-if="!expandedNotes.has(note.id) && note.content" class="text-caption text-medium-emphasis text-truncate" style="max-width: 300px;">{{ note.content.substring(0, 80) }}</span>
+        <draggable
+          :list="group.items"
+          item-key="id"
+          handle=".drag-handle"
+          animation="200"
+          ghost-class="drag-ghost"
+          class="d-flex flex-column ga-3"
+          @end="onDragEnd(group.category)"
+        >
+          <template #item="{ element: note }">
+            <v-card variant="flat" class="note-card" :class="{ 'note-completed': note.status === 'completed', 'note-no-context': !note.in_context }">
+              <div class="card-accent" :class="priorityAccentClass(note.priority)" />
+              <v-card-text class="pa-5 pl-7">
+                <div class="d-flex align-start">
+                  <div class="drag-handle mr-2 mt-1" title="Drag to reorder" @click.stop>
+                    <v-icon size="18" color="grey">mdi-drag-vertical</v-icon>
                   </div>
-                  <div v-if="expandedNotes.has(note.id)">
-                    <div v-if="note.content" class="text-body-2 text-medium-emphasis note-content mt-1">{{ note.content }}</div>
-                    <div class="d-flex align-center ga-2 mt-2">
-                      <v-chip v-for="tag in note.tags" :key="tag" size="x-small" variant="tonal" color="blue-grey">
-                        {{ tag }}
+                  <v-btn
+                    icon
+                    size="x-small"
+                    variant="text"
+                    class="mr-2 mt-1"
+                    @click.stop="toggleExpand(note.id)"
+                  >
+                    <v-icon size="16">{{ expandedNotes.has(note.id) ? 'mdi-chevron-down' : 'mdi-chevron-right' }}</v-icon>
+                  </v-btn>
+                  <div class="flex-grow-1" @click="toggleExpand(note.id)" style="cursor: pointer;">
+                    <div class="d-flex align-center mb-1 ga-2 flex-wrap">
+                      <span class="text-subtitle-1 font-weight-medium">{{ note.title }}</span>
+                      <v-chip :color="priorityColor(note.priority)" size="x-small" variant="tonal">
+                        {{ note.priority }}
                       </v-chip>
-                      <v-spacer />
-                      <span class="text-caption text-grey">{{ formatDate(note.created_at) }}</span>
+                      <v-chip :color="statusColor(note.status)" size="x-small" variant="tonal">
+                        {{ note.status }}
+                      </v-chip>
+                      <v-chip v-if="note.category" size="x-small" variant="tonal" color="indigo">
+                        {{ note.category }}
+                      </v-chip>
+                      <v-chip v-if="!note.in_context" size="x-small" variant="tonal" color="grey">
+                        <v-icon start size="12">mdi-brain-off</v-icon>
+                        Hidden from context
+                      </v-chip>
+                      <span v-if="!expandedNotes.has(note.id) && note.content" class="text-caption text-medium-emphasis text-truncate" style="max-width: 300px;">{{ note.content.substring(0, 80) }}</span>
+                    </div>
+                    <div v-if="expandedNotes.has(note.id)">
+                      <div v-if="note.content" class="text-body-2 text-medium-emphasis note-content mt-1">{{ note.content }}</div>
+                      <div class="d-flex align-center ga-2 mt-2">
+                        <v-chip v-for="tag in note.tags" :key="tag" size="x-small" variant="tonal" color="blue-grey">
+                          {{ tag }}
+                        </v-chip>
+                        <v-spacer />
+                        <span class="text-caption text-grey">{{ formatDate(note.created_at) }}</span>
+                      </div>
                     </div>
                   </div>
+                  <div class="d-flex ml-3 ga-1">
+                    <v-btn icon size="small" variant="text" @click.stop="editNote(note)">
+                      <v-icon>mdi-pencil</v-icon>
+                    </v-btn>
+                    <v-btn icon size="small" variant="text" :color="note.in_context ? 'info' : 'grey'" @click.stop="toggleContext(note)" :title="note.in_context ? 'In context — click to exclude' : 'Excluded — click to include'">
+                      <v-icon>{{ note.in_context ? 'mdi-brain' : 'mdi-brain-off' }}</v-icon>
+                    </v-btn>
+                    <v-btn icon size="small" variant="text" color="error" @click.stop="deleteNote(note.id)">
+                      <v-icon>mdi-delete</v-icon>
+                    </v-btn>
+                  </div>
                 </div>
-                <div class="d-flex ml-3 ga-1">
-                  <v-btn icon size="small" variant="text" @click.stop="editNote(note)">
-                    <v-icon>mdi-pencil</v-icon>
-                  </v-btn>
-                  <v-btn icon size="small" variant="text" :color="note.in_context ? 'info' : 'grey'" @click.stop="toggleContext(note)" :title="note.in_context ? 'In context — click to exclude' : 'Excluded — click to include'">
-                    <v-icon>{{ note.in_context ? 'mdi-brain' : 'mdi-brain-off' }}</v-icon>
-                  </v-btn>
-                  <v-btn icon size="small" variant="text" color="error" @click.stop="deleteNote(note.id)">
-                    <v-icon>mdi-delete</v-icon>
-                  </v-btn>
-                </div>
-              </div>
-            </v-card-text>
-          </v-card>
-        </div>
+              </v-card-text>
+            </v-card>
+          </template>
+        </draggable>
       </div>
     </div>
 
-    <!-- Flat list -->
-    <div v-else class="d-flex flex-column ga-3">
-      <v-card v-for="note in notes" :key="note.id" variant="flat" class="note-card" :class="{ 'note-completed': note.status === 'completed', 'note-no-context': !note.in_context }">
-        <div class="card-accent" :class="priorityAccentClass(note.priority)" />
-        <v-card-text class="pa-5 pl-7">
-          <div class="d-flex align-start">
-            <v-btn
-              icon
-              size="x-small"
-              variant="text"
-              class="mr-2 mt-1"
-              @click.stop="toggleExpand(note.id)"
-            >
-              <v-icon size="16">{{ expandedNotes.has(note.id) ? 'mdi-chevron-down' : 'mdi-chevron-right' }}</v-icon>
-            </v-btn>
-            <div class="flex-grow-1" @click="toggleExpand(note.id)" style="cursor: pointer;">
-              <div class="d-flex align-center mb-1 ga-2 flex-wrap">
-                <span class="text-subtitle-1 font-weight-medium">{{ note.title }}</span>
-                <v-chip :color="priorityColor(note.priority)" size="x-small" variant="tonal">
-                  {{ note.priority }}
-                </v-chip>
-                <v-chip :color="statusColor(note.status)" size="x-small" variant="tonal">
-                  {{ note.status }}
-                </v-chip>
-                <v-chip v-if="note.category" size="x-small" variant="tonal" color="indigo">
-                  {{ note.category }}
-                </v-chip>
-                <v-chip v-if="!note.in_context" size="x-small" variant="tonal" color="grey">
-                  <v-icon start size="12">mdi-brain-off</v-icon>
-                  Hidden from context
-                </v-chip>
-                <span v-if="!expandedNotes.has(note.id) && note.content" class="text-caption text-medium-emphasis text-truncate" style="max-width: 300px;">{{ note.content.substring(0, 80) }}</span>
+    <!-- Flat list (with drag) -->
+    <draggable
+      v-else-if="notes.length"
+      :list="notes"
+      item-key="id"
+      handle=".drag-handle"
+      animation="200"
+      ghost-class="drag-ghost"
+      class="d-flex flex-column ga-3"
+      @end="onDragEndFlat"
+    >
+      <template #item="{ element: note }">
+        <v-card variant="flat" class="note-card" :class="{ 'note-completed': note.status === 'completed', 'note-no-context': !note.in_context }">
+          <div class="card-accent" :class="priorityAccentClass(note.priority)" />
+          <v-card-text class="pa-5 pl-7">
+            <div class="d-flex align-start">
+              <div class="drag-handle mr-2 mt-1" title="Drag to reorder" @click.stop>
+                <v-icon size="18" color="grey">mdi-drag-vertical</v-icon>
               </div>
-              <div v-if="expandedNotes.has(note.id)">
-                <div v-if="note.content" class="text-body-2 text-medium-emphasis note-content mt-1">{{ note.content }}</div>
-                <div class="d-flex align-center ga-2 mt-2">
-                  <v-chip v-for="tag in note.tags" :key="tag" size="x-small" variant="tonal" color="blue-grey">
-                    {{ tag }}
+              <v-btn
+                icon
+                size="x-small"
+                variant="text"
+                class="mr-2 mt-1"
+                @click.stop="toggleExpand(note.id)"
+              >
+                <v-icon size="16">{{ expandedNotes.has(note.id) ? 'mdi-chevron-down' : 'mdi-chevron-right' }}</v-icon>
+              </v-btn>
+              <div class="flex-grow-1" @click="toggleExpand(note.id)" style="cursor: pointer;">
+                <div class="d-flex align-center mb-1 ga-2 flex-wrap">
+                  <span class="text-subtitle-1 font-weight-medium">{{ note.title }}</span>
+                  <v-chip :color="priorityColor(note.priority)" size="x-small" variant="tonal">
+                    {{ note.priority }}
                   </v-chip>
-                  <v-spacer />
-                  <span class="text-caption text-grey">{{ formatDate(note.created_at) }}</span>
+                  <v-chip :color="statusColor(note.status)" size="x-small" variant="tonal">
+                    {{ note.status }}
+                  </v-chip>
+                  <v-chip v-if="note.category" size="x-small" variant="tonal" color="indigo">
+                    {{ note.category }}
+                  </v-chip>
+                  <v-chip v-if="!note.in_context" size="x-small" variant="tonal" color="grey">
+                    <v-icon start size="12">mdi-brain-off</v-icon>
+                    Hidden from context
+                  </v-chip>
+                  <span v-if="!expandedNotes.has(note.id) && note.content" class="text-caption text-medium-emphasis text-truncate" style="max-width: 300px;">{{ note.content.substring(0, 80) }}</span>
+                </div>
+                <div v-if="expandedNotes.has(note.id)">
+                  <div v-if="note.content" class="text-body-2 text-medium-emphasis note-content mt-1">{{ note.content }}</div>
+                  <div class="d-flex align-center ga-2 mt-2">
+                    <v-chip v-for="tag in note.tags" :key="tag" size="x-small" variant="tonal" color="blue-grey">
+                      {{ tag }}
+                    </v-chip>
+                    <v-spacer />
+                    <span class="text-caption text-grey">{{ formatDate(note.created_at) }}</span>
+                  </div>
                 </div>
               </div>
+              <div class="d-flex ml-3 ga-1">
+                <v-btn icon size="small" variant="text" @click.stop="editNote(note)">
+                  <v-icon>mdi-pencil</v-icon>
+                </v-btn>
+                <v-btn icon size="small" variant="text" :color="note.in_context ? 'info' : 'grey'" @click.stop="toggleContext(note)" :title="note.in_context ? 'In context — click to exclude' : 'Excluded — click to include'">
+                  <v-icon>{{ note.in_context ? 'mdi-brain' : 'mdi-brain-off' }}</v-icon>
+                </v-btn>
+                <v-btn icon size="small" variant="text" color="error" @click.stop="deleteNote(note.id)">
+                  <v-icon>mdi-delete</v-icon>
+                </v-btn>
+              </div>
             </div>
-            <div class="d-flex ml-3 ga-1">
-              <v-btn icon size="small" variant="text" @click.stop="editNote(note)">
-                <v-icon>mdi-pencil</v-icon>
-              </v-btn>
-              <v-btn icon size="small" variant="text" :color="note.in_context ? 'info' : 'grey'" @click.stop="toggleContext(note)" :title="note.in_context ? 'In context — click to exclude' : 'Excluded — click to include'">
-                <v-icon>{{ note.in_context ? 'mdi-brain' : 'mdi-brain-off' }}</v-icon>
-              </v-btn>
-              <v-btn icon size="small" variant="text" color="error" @click.stop="deleteNote(note.id)">
-                <v-icon>mdi-delete</v-icon>
-              </v-btn>
-            </div>
-          </div>
-        </v-card-text>
-      </v-card>
-    </div>
+          </v-card-text>
+        </v-card>
+      </template>
+    </draggable>
 
     <!-- Empty state -->
     <div v-if="!loading && notes.length === 0" class="empty-state">
@@ -305,6 +332,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, inject, watch } from 'vue'
+import draggable from 'vuedraggable'
 import api from '../api'
 
 const showSnackbar = inject('showSnackbar')
@@ -499,6 +527,26 @@ function formatDate(dt) {
   if (!dt) return ''
   return new Date(dt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
+
+async function onDragEnd(category) {
+  const group = groupedNotes.value.find(g => g.category === category)
+  if (!group) return
+  const ids = group.items.map(n => n.id)
+  try {
+    await api.post('/notes/reorder', { ids })
+  } catch (e) {
+    console.error('Failed to reorder notes:', e)
+  }
+}
+
+async function onDragEndFlat() {
+  const ids = notes.value.map(n => n.id)
+  try {
+    await api.post('/notes/reorder', { ids })
+  } catch (e) {
+    console.error('Failed to reorder notes:', e)
+  }
+}
 </script>
 
 <style scoped>
@@ -551,5 +599,25 @@ function formatDate(dt) {
   align-items: center;
   justify-content: center;
   background: rgba(77, 182, 172, 0.1);
+}
+
+/* Drag & Drop */
+.drag-handle {
+  cursor: grab;
+  opacity: 0.4;
+  transition: opacity 0.15s;
+}
+
+.drag-handle:hover {
+  opacity: 0.8;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.drag-ghost {
+  opacity: 0.3;
+  border: 2px dashed rgba(var(--v-theme-primary), 0.5) !important;
 }
 </style>

@@ -311,7 +311,7 @@ class AgentChatEngine:
             temperature=agent_settings.get("temperature", getattr(agent, "temperature", 0.7) or 0.7),
             top_p=agent_settings.get("top_p", 0.9),
             top_k=agent_settings.get("top_k", 40),
-            max_tokens=agent_settings.get("max_tokens", getattr(agent, "max_tokens", 8192) or 8192),
+            max_tokens=agent_settings.get("max_tokens", getattr(agent, "max_tokens", 32768) or 32768),
             num_ctx=agent_settings.get("num_ctx", 32768),
             repeat_penalty=agent_settings.get("repeat_penalty", 1.1),
             num_predict=agent_settings.get("num_predict", -1),

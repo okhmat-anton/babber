@@ -62,6 +62,7 @@ def _note_to_response(note: MongoNote) -> dict:
         "status": note.status,
         "tags": note.tags,
         "in_context": note.in_context,
+        "sort_order": getattr(note, 'sort_order', 0),
         "linked_idea_ids": getattr(note, 'linked_idea_ids', []) or [],
         "linked_fact_ids": getattr(note, 'linked_fact_ids', []) or [],
         "created_at": note.created_at.isoformat() if isinstance(note.created_at, datetime) else str(note.created_at),
@@ -174,3 +175,22 @@ async def delete_note(
         raise HTTPException(status_code=404, detail="Note not found")
     await svc.delete(note_id)
     return {"status": "deleted"}
+
+
+# ── Reorder ──────────────────────────────────────────
+
+class ReorderRequest(BaseModel):
+    ids: List[str]  # ordered list of item IDs within a category
+
+
+@router.post("/api/notes/reorder")
+async def reorder_notes(
+    body: ReorderRequest,
+    _user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Update sort_order for notes based on the provided order."""
+    svc = NoteService(db)
+    for idx, item_id in enumerate(body.ids):
+        await svc.update(item_id, {"sort_order": idx})
+    return {"status": "ok", "updated": len(body.ids)}

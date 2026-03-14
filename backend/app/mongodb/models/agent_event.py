@@ -33,6 +33,7 @@ class MongoAgentEvent(BaseModel):
     importance: str = "medium"  # low, medium, high, critical
     tags: List[str] = Field(default_factory=list)
     created_by: str = "agent"  # agent, user
+    sort_order: int = 0  # manual ordering within event_type (lower = higher)
     event_date: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

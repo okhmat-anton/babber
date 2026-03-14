@@ -84,6 +84,7 @@ def _idea_to_response(idea: MongoIdea) -> dict:
         "linked_fact_ids": getattr(idea, 'linked_fact_ids', []) or [],
         "linked_analysis_ids": getattr(idea, 'linked_analysis_ids', []) or [],
         "created_by": idea.created_by,
+        "sort_order": getattr(idea, 'sort_order', 0),
         "created_at": idea.created_at.isoformat() if isinstance(idea.created_at, datetime) else str(idea.created_at),
         "updated_at": idea.updated_at.isoformat() if isinstance(idea.updated_at, datetime) else str(idea.updated_at),
     }
@@ -540,7 +541,7 @@ Generate 5-10 unique ideas now:"""
     gen_params = GenerationParams(
         temperature=0.9,
         top_p=0.95,
-        max_tokens=8192,
+        max_tokens=32768,
     )
 
     messages = [
@@ -763,3 +764,22 @@ async def create_agent_idea(
     svc = IdeaService(db)
     created = await svc.create(idea)
     return _idea_to_response(created)
+
+
+# ── Reorder ──────────────────────────────────────────
+
+class ReorderRequest(BaseModel):
+    ids: List[str]
+
+
+@router.post("/api/ideas/reorder")
+async def reorder_ideas(
+    body: ReorderRequest,
+    _user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Update sort_order for ideas based on the provided order."""
+    svc = IdeaService(db)
+    for idx, item_id in enumerate(body.ids):
+        await svc.update(item_id, {"sort_order": idx})
+    return {"status": "ok", "updated": len(body.ids)}
