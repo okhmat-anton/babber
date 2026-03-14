@@ -1,0 +1,18 @@
+{
+  "name": "budget_view",
+  "display_name": "Budget: View Summary",
+  "description": "Get the current budget summary including income, expenses, balances, accounts, and loans.",
+  "description_for_agent": "Get budget summary for a given month. Shows total income, expenses, balance, min daily earnings needed, breakdown by category, accounts and loans. Use when user asks about their budget, finances, balance, or spending. Optional parameter: month_key (YYYY-MM format, defaults to current month).",
+  "category": "budgeting",
+  "version": "1.0.0",
+  "entry_point": "main.py",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "month_key": {
+        "type": "string",
+        "description": "Month in YYYY-MM format. Defaults to current month if not provided."
+      }
+    }
+  }
+}

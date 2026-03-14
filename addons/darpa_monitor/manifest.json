@@ -1,0 +1,26 @@
+{
+  "id": "darpa_monitor",
+  "name": "DARPA Monitor",
+  "description": "Monitor DARPA opportunities, programs, news, and events — automatic scraping with change detection and agent search",
+  "icon": "mdi-shield-search",
+  "version": "1.0.0",
+  "author": "system",
+  "route": {
+    "path": "/addons/darpa-monitor",
+    "name": "DarpaMonitor",
+    "title": "DARPA Monitor"
+  },
+  "settings": [
+    {
+      "key": "darpa_scrape_frequency",
+      "label": "Scrape Frequency",
+      "type": "select",
+      "default": "daily",
+      "options": ["hourly", "daily", "weekly", "manual"]
+    }
+  ],
+  "protocols": [],
+  "skills": [
+    "darpa_search"
+  ]
+}

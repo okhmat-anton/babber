@@ -1,0 +1,19 @@
+{
+  "id": "budgeting",
+  "name": "Budgeting",
+  "description": "Personal budget management — track income, expenses, accounts, loans with monthly history and agent integration",
+  "icon": "mdi-wallet-outline",
+  "version": "1.0.0",
+  "author": "system",
+  "route": {
+    "path": "/addons/budgeting",
+    "name": "Budgeting",
+    "title": "Budgeting"
+  },
+  "settings": [],
+  "protocols": [],
+  "skills": [
+    "budget_view",
+    "budget_add_entry"
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "name": "budget_add_entry",
+  "display_name": "Budget: Add Entry",
+  "description": "Add a new income or expense entry to the budget.",
+  "description_for_agent": "Add a budget entry (income or expense). Required: type ('income' or 'expense'), name (description), amount (number). Optional: category, is_recurring (bool, default true), is_paid (bool, default false), month_key (YYYY-MM, defaults to current month). Use when user wants to add income, salary, expense, bill, or any financial entry.",
+  "category": "budgeting",
+  "version": "1.0.0",
+  "entry_point": "main.py",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "type": {
+        "type": "string",
+        "enum": ["income", "expense"],
+        "description": "Entry type: income or expense"
+      },
+      "name": {
+        "type": "string",
+        "description": "Name/description of the entry"
+      },
+      "amount": {
+        "type": "number",
+        "description": "Amount in dollars"
+      },
+      "category": {
+        "type": "string",
+        "description": "Category (e.g. Salary, Food, Housing)"
+      },
+      "is_recurring": {
+        "type": "boolean",
+        "description": "Whether this recurs monthly (default: true)"
+      },
+      "is_paid": {
+        "type": "boolean",
+        "description": "Whether already paid/received (default: false)"
+      },
+      "month_key": {
+        "type": "string",
+        "description": "Month in YYYY-MM format (defaults to current month)"
+      }
+    },
+    "required": ["type", "name", "amount"]
+  }
+}

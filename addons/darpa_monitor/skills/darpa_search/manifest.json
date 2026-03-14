@@ -1,0 +1,28 @@
+{
+  "name": "darpa_search",
+  "display_name": "DARPA: Search & Monitor",
+  "description": "Search DARPA opportunities, programs, news, and events stored from darpa.mil monitoring.",
+  "description_for_agent": "Search DARPA data (opportunities, programs, news, events) scraped from darpa.mil. Use when user asks about DARPA research, programs, funding opportunities, news, or events. Parameters: query (search text), category (optional: opportunities/programs/news/events), limit (max results, default 20).",
+  "category": "research",
+  "version": "1.0.0",
+  "entry_point": "main.py",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Search text to find in DARPA items (titles, body, summary)."
+      },
+      "category": {
+        "type": "string",
+        "description": "Filter by category: opportunities, programs, news, or events. Leave empty for all.",
+        "enum": ["", "opportunities", "programs", "news", "events"]
+      },
+      "limit": {
+        "type": "integer",
+        "description": "Maximum number of results to return. Default: 20.",
+        "default": 20
+      }
+    }
+  }
+}
