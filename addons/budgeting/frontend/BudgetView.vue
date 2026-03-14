@@ -39,6 +39,10 @@
         <v-icon start size="16">mdi-calendar-clock</v-icon>
         Min ${{ fmt(summary.min_daily_earnings) }}/day ({{ summary.remaining_days }}d left)
       </v-chip>
+      <v-chip variant="tonal" color="cyan" size="large" v-if="availableCash > 0">
+        <v-icon start size="16">mdi-cash</v-icon>
+        Cash: ${{ fmt(availableCash) }}
+      </v-chip>
       <v-chip variant="tonal" color="purple" size="large" v-if="summary.total_loan_payments > 0">
         <v-icon start size="16">mdi-bank</v-icon>
         Loan Payments: ${{ fmt(summary.total_loan_payments) }}/mo
@@ -84,7 +88,7 @@
                   v-for="item in incomeEntries"
                   :key="item.id"
                   class="px-0 rounded mb-1"
-                  :class="item.is_paid ? 'bg-green-darken-4' : ''"
+                  :class="entryBgClass(item, 'green')"
                 >
                   <template #prepend>
                     <v-checkbox-btn
@@ -97,13 +101,19 @@
                   <v-list-item-title :class="item.is_paid ? 'text-decoration-line-through text-medium-emphasis' : ''">
                     {{ item.name }}
                     <v-chip v-if="item.day_of_month" size="x-small" color="teal" variant="tonal" class="ml-1">{{ item.day_of_month }}th</v-chip>
+                    <v-chip v-if="item.frequency === 'daily'" size="x-small" color="blue" variant="tonal" class="ml-1">Daily</v-chip>
+                    <v-chip v-else-if="item.frequency === 'weekly'" size="x-small" color="indigo" variant="tonal" class="ml-1">Weekly</v-chip>
                   </v-list-item-title>
                   <v-list-item-subtitle>
                     <v-chip size="x-small" variant="text" class="px-0">{{ item.category || 'No category' }}</v-chip>
                     <v-icon v-if="item.is_recurring" size="12" class="ml-1" title="Recurring">mdi-repeat</v-icon>
                   </v-list-item-subtitle>
                   <template #append>
-                    <span class="text-green font-weight-bold mr-2">${{ fmt(item.amount) }}</span>
+                    <span class="text-green font-weight-bold mr-2">
+                      ${{ fmt(item.amount) }}
+                      <span v-if="item.frequency === 'daily'" class="text-caption text-blue">/day</span>
+                      <span v-else-if="item.frequency === 'weekly'" class="text-caption text-indigo">/wk</span>
+                    </span>
                     <v-btn icon="mdi-pencil" size="x-small" variant="text" @click="openEditEntry(item)" />
                     <v-btn icon="mdi-delete" size="x-small" variant="text" color="red" @click="confirmDeleteEntry(item)" />
                   </template>
@@ -122,7 +132,15 @@
               <div class="d-flex align-center mb-3">
                 <v-icon color="red" class="mr-2">mdi-arrow-up-bold</v-icon>
                 <span class="text-h6">Expenses</span>
+                <span v-if="summary && summary.unpaid_expense > 0" class="text-caption text-orange ml-2">(unpaid: ${{ fmt(summary.unpaid_expense) }})</span>
                 <v-spacer />
+                <v-btn
+                  :icon="expensesCollapsed ? 'mdi-chevron-down' : 'mdi-chevron-up'"
+                  size="x-small"
+                  variant="text"
+                  @click="expensesCollapsed = !expensesCollapsed"
+                  class="mr-1"
+                />
                 <span class="text-h6 text-red">${{ fmt(totalExpenseWithLoans) }}</span>
               </div>
 
@@ -132,10 +150,10 @@
 
               <v-list density="compact" class="bg-transparent">
                 <v-list-item
-                  v-for="item in expenseEntries"
+                  v-for="item in (expensesCollapsed ? expenseEntries.filter(e => !e.is_paid) : expenseEntries)"
                   :key="item.id"
                   class="px-0 rounded mb-1"
-                  :class="item.is_paid ? 'bg-red-darken-4' : ''"
+                  :class="entryBgClass(item, 'red')"
                 >
                   <template #prepend>
                     <v-checkbox-btn
@@ -148,6 +166,8 @@
                   <v-list-item-title :class="item.is_paid ? 'text-decoration-line-through text-medium-emphasis' : ''">
                     {{ item.name }}
                     <v-chip v-if="item.day_of_month" size="x-small" color="teal" variant="tonal" class="ml-1">{{ item.day_of_month }}th</v-chip>
+                    <v-chip v-if="item.frequency === 'daily'" size="x-small" color="blue" variant="tonal" class="ml-1">Daily</v-chip>
+                    <v-chip v-else-if="item.frequency === 'weekly'" size="x-small" color="indigo" variant="tonal" class="ml-1">Weekly</v-chip>
                   </v-list-item-title>
                   <v-list-item-subtitle>
                     <v-chip size="x-small" variant="text" class="px-0">{{ item.category || 'No category' }}</v-chip>
@@ -155,7 +175,11 @@
                     <v-chip v-if="item.is_credit_card" size="x-small" color="orange" variant="tonal" class="ml-1">CC</v-chip>
                   </v-list-item-subtitle>
                   <template #append>
-                    <span class="text-red font-weight-bold mr-2">${{ fmt(item.amount) }}</span>
+                    <span class="text-red font-weight-bold mr-2">
+                      ${{ fmt(item.amount) }}
+                      <span v-if="item.frequency === 'daily'" class="text-caption text-blue">/day</span>
+                      <span v-else-if="item.frequency === 'weekly'" class="text-caption text-indigo">/wk</span>
+                    </span>
                     <v-btn icon="mdi-pencil" size="x-small" variant="text" @click="openEditEntry(item)" />
                     <v-btn icon="mdi-delete" size="x-small" variant="text" color="red" @click="confirmDeleteEntry(item)" />
                   </template>
@@ -167,7 +191,7 @@
               </v-btn>
 
               <!-- Auto loan payments -->
-              <div v-if="loans.length" class="mt-3">
+              <div v-if="loans.length && (!expensesCollapsed || sortedLoans.some(l => !isLoanPaid(l)))" class="mt-3">
                 <v-divider class="mb-2" />
                 <div class="text-caption text-medium-emphasis mb-1">
                   <v-icon size="14" class="mr-1">mdi-bank</v-icon>
@@ -175,7 +199,7 @@
                 </div>
                 <v-list density="compact" class="bg-transparent">
                   <v-list-item
-                    v-for="loan in sortedLoans"
+                    v-for="loan in (expensesCollapsed ? sortedLoans.filter(l => !isLoanPaid(l)) : sortedLoans)"
                     :key="'loan-' + loan.id"
                     class="px-0 rounded mb-1"
                     :class="isLoanPaid(loan) ? 'bg-purple-darken-4' : ''"
@@ -255,6 +279,20 @@
                 </span>
               </div>
 
+              <!-- Available Cash -->
+              <v-text-field
+                v-model.number="availableCash"
+                label="Available Cash"
+                type="number"
+                prefix="$"
+                variant="outlined"
+                density="compact"
+                class="mt-2 mb-0"
+                hide-details
+                @change="loadSummary"
+                hint="Cash on hand to offset required earnings"
+              />
+
               <!-- Min daily earnings -->
               <v-alert
                 v-if="summary && summary.min_daily_earnings > 0"
@@ -266,6 +304,7 @@
                 <div class="text-body-2">
                   Need to earn at least <strong>${{ fmt(summary.min_daily_earnings) }}/day</strong>
                   over the next {{ summary.remaining_days }} days to cover unpaid expenses.
+                  <span v-if="availableCash > 0" class="text-medium-emphasis">(with ${{ fmt(availableCash) }} cash on hand)</span>
                 </div>
               </v-alert>
             </v-card>
@@ -443,10 +482,14 @@
 
               <!-- Items in this day -->
               <div
-                v-for="item in dayInfo.items"
-                :key="item.id"
+                v-for="(item, idx) in dayInfo.items"
+                :key="item.id + '-' + idx"
                 class="calendar-item mb-0"
-                :class="{ 'calendar-item-paid': item.is_paid }"
+                :class="{
+                  'calendar-item-paid': item.is_paid,
+                  'calendar-item-daily': item.frequency === 'daily',
+                  'calendar-item-weekly': item.frequency === 'weekly',
+                }"
               >
                 <div class="d-flex align-center" :style="{ fontSize: (10 * calendarZoom) + 'px', lineHeight: '1.2' }">
                   <v-icon
@@ -555,9 +598,18 @@
             clearable
             prepend-inner-icon="mdi-tag-outline"
           />
+          <div class="mb-3">
+            <div class="text-caption text-medium-emphasis mb-1">Frequency</div>
+            <v-btn-toggle v-model="entryForm.frequency" mandatory color="teal" density="compact" class="w-100">
+              <v-btn value="once" size="small" class="flex-grow-1">One-time / Monthly</v-btn>
+              <v-btn value="daily" size="small" class="flex-grow-1">Daily</v-btn>
+              <v-btn value="weekly" size="small" class="flex-grow-1">Weekly</v-btn>
+            </v-btn-toggle>
+          </div>
           <v-text-field
+            v-if="entryForm.frequency !== 'daily'"
             v-model.number="entryForm.day_of_month"
-            label="Day of month (1-31, optional)"
+            :label="entryForm.frequency === 'weekly' ? 'Starting day of month (1-31)' : 'Day of month (1-31, optional)'"
             type="number"
             :min="1"
             :max="31"
@@ -565,7 +617,7 @@
             density="compact"
             class="mb-2"
             clearable
-            hint="Which day this payment/income is expected"
+            :hint="entryForm.frequency === 'weekly' ? 'First occurrence day, repeats every 7 days' : 'Which day this payment/income is expected'"
             persistent-hint
           />
           <v-switch v-model="entryForm.is_recurring" label="Recurring (monthly)" color="teal" density="compact" class="mb-2" />
@@ -700,22 +752,51 @@ const entries = ref([])
 const summary = ref(null)
 const accounts = ref([])
 const loans = ref([])
-// Sort helper: by day_of_month ascending, daily items at bottom, no-day items before daily
+// Sort helper: by frequency, day_of_month ascending, recurring items grouped
 function sortByDay(a, b) {
-  const aDaily = a.is_daily || false
-  const bDaily = b.is_daily || false
-  if (aDaily !== bDaily) return aDaily ? 1 : -1
+  const freqOrder = { once: 0, weekly: 1, daily: 2 }
+  const aOrder = freqOrder[a.frequency] ?? 0
+  const bOrder = freqOrder[b.frequency] ?? 0
+  if (aOrder !== bOrder) return aOrder - bOrder
   const aDay = a.day_of_month || 999
   const bDay = b.day_of_month || 999
   return aDay - bDay
+}
+
+// Calculate effective monthly amount based on frequency
+function effectiveAmount(e) {
+  const freq = e.frequency || 'once'
+  if (freq === 'daily') {
+    const [y, m] = currentMonth.value.split('-').map(Number)
+    const days = new Date(y, m, 0).getDate()
+    return (e.amount || 0) * days
+  }
+  if (freq === 'weekly') {
+    const [y, m] = currentMonth.value.split('-').map(Number)
+    const days = new Date(y, m, 0).getDate()
+    const start = e.day_of_month || 1
+    let count = 0
+    for (let d = start; d <= days; d += 7) count++
+    return (e.amount || 0) * count
+  }
+  return e.amount || 0
+}
+
+// Entry background class based on paid status and frequency
+function entryBgClass(item, paidColor) {
+  if (item.is_paid) return `bg-${paidColor}-darken-4`
+  const freq = item.frequency || 'once'
+  if (freq === 'daily') return 'bg-blue-darken-4'
+  if (freq === 'weekly') return 'bg-indigo-darken-4'
+  return ''
 }
 
 // Computed
 const incomeEntries = computed(() => entries.value.filter(e => e.type === 'income').sort(sortByDay))
 const expenseEntries = computed(() => entries.value.filter(e => e.type === 'expense').sort(sortByDay))
 const sortedLoans = computed(() => [...loans.value].sort((a, b) => (a.payment_date || 999) - (b.payment_date || 999)))
-const totalIncome = computed(() => incomeEntries.value.reduce((s, e) => s + (e.amount || 0), 0))
-const totalExpense = computed(() => expenseEntries.value.reduce((s, e) => s + (e.amount || 0), 0))
+const totalIncome = computed(() => incomeEntries.value.reduce((s, e) => s + effectiveAmount(e), 0))
+const totalExpense = computed(() => expenseEntries.value.reduce((s, e) => s + effectiveAmount(e), 0))
 const totalAccountBalance = computed(() => accounts.value.reduce((s, a) => s + (a.balance || 0), 0))
 const totalDebt = computed(() => loans.value.reduce((s, l) => s + (l.remaining_debt || 0), 0))
 const totalLoanPayments = computed(() => loans.value.reduce((s, l) => s + (l.monthly_payment || 0), 0))
@@ -735,7 +816,7 @@ const incomeCategoryOptions = computed(() => {
 const entryDialog = ref(false)
 const editingEntry = ref(null)
 const entrySaving = ref(false)
-const entryForm = ref({ type: 'expense', name: '', amount: 0, category: '', is_recurring: true, is_paid: false, is_credit_card: false, day_of_month: null, notes: '' })
+const entryForm = ref({ type: 'expense', name: '', amount: 0, category: '', is_recurring: true, is_paid: false, is_credit_card: false, frequency: 'once', day_of_month: null, notes: '' })
 
 // Account dialog
 const accountDialog = ref(false)
@@ -758,6 +839,14 @@ const deleteLoading = ref(false)
 
 // Month transition
 const transitionLoading = ref(false)
+
+// Collapse state (persisted in localStorage)
+const expensesCollapsed = ref(localStorage.getItem('budget_expenses_collapsed') === 'true')
+watch(expensesCollapsed, (v) => localStorage.setItem('budget_expenses_collapsed', String(v)))
+
+// Available cash (persisted in localStorage)
+const availableCash = ref(parseFloat(localStorage.getItem('budget_available_cash')) || 0)
+watch(availableCash, (v) => localStorage.setItem('budget_available_cash', String(v ?? 0)))
 
 // Calendar
 const calendarData = ref(null)
@@ -822,7 +911,7 @@ async function loadEntries() {
 
 async function loadSummary() {
   try {
-    const { data } = await api.get('/addons/budgeting/summary', { params: { month_key: currentMonth.value } })
+    const { data } = await api.get('/addons/budgeting/summary', { params: { month_key: currentMonth.value, available_cash: availableCash.value || 0 } })
     summary.value = data
   } catch { summary.value = null }
 }
@@ -869,7 +958,7 @@ watch(currentMonth, () => {
 
 function openAddEntry(type) {
   editingEntry.value = null
-  entryForm.value = { type, name: '', amount: 0, category: '', is_recurring: true, is_paid: false, is_credit_card: false, day_of_month: null, notes: '' }
+  entryForm.value = { type, name: '', amount: 0, category: '', is_recurring: true, is_paid: false, is_credit_card: false, frequency: 'once', day_of_month: null, notes: '' }
   entryDialog.value = true
 }
 
@@ -890,6 +979,7 @@ async function saveEntry() {
         is_recurring: entryForm.value.is_recurring,
         is_paid: entryForm.value.is_paid,
         is_credit_card: entryForm.value.is_credit_card,
+        frequency: entryForm.value.frequency || 'once',
         day_of_month: entryForm.value.day_of_month || null,
         notes: entryForm.value.notes,
       })
@@ -1112,5 +1202,17 @@ onMounted(() => {
 
 .calendar-item-paid {
   opacity: 0.5;
+}
+
+.calendar-item-daily {
+  background-color: rgba(33, 150, 243, 0.1);
+  border-left: 2px solid rgba(33, 150, 243, 0.4);
+  padding-left: 4px;
+}
+
+.calendar-item-weekly {
+  background-color: rgba(63, 81, 181, 0.1);
+  border-left: 2px solid rgba(63, 81, 181, 0.4);
+  padding-left: 4px;
 }
 </style>
