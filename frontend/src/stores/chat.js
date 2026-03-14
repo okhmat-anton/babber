@@ -147,6 +147,18 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
+    async deleteMessage(messageId) {
+      try {
+        const sessionId = this.currentSession?.id
+        if (!sessionId) return
+        await api.delete(`/chat/sessions/${sessionId}/messages/${messageId}`)
+        this.messages = this.messages.filter(m => m.id !== messageId)
+      } catch (e) {
+        console.error('Failed to delete message:', e)
+        throw e
+      }
+    },
+
     async clearHistory(sessionId) {
       try {
         await api.post(`/chat/sessions/${sessionId}/clear`)

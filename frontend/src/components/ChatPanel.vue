@@ -314,6 +314,17 @@
             <v-icon size="14">mdi-pencil</v-icon>
             <v-tooltip activator="parent" location="top">Edit &amp; resend</v-tooltip>
           </v-btn>
+          <!-- Delete message button -->
+          <v-btn
+            icon
+            size="x-small"
+            variant="text"
+            class="msg-delete-btn mr-1"
+            @click="confirmDeleteMessage(msg)"
+          >
+            <v-icon size="14">mdi-close</v-icon>
+            <v-tooltip activator="parent" location="top">Delete message</v-tooltip>
+          </v-btn>
           <span v-if="msg.duration_ms" class="text-caption text-medium-emphasis">
             {{ (msg.duration_ms / 1000).toFixed(1) }}s
           </span>
@@ -877,6 +888,21 @@
       </div>
     </div>
   </div>
+
+  <!-- Delete message confirmation dialog -->
+  <v-dialog v-model="deleteMessageDialog" max-width="360">
+    <v-card>
+      <v-card-title class="text-subtitle-1">Delete message?</v-card-title>
+      <v-card-text class="text-body-2">
+        This will permanently delete this {{ messageToDelete?.role === 'user' ? 'question' : 'response' }}.
+      </v-card-text>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn variant="text" @click="deleteMessageDialog = false">Cancel</v-btn>
+        <v-btn color="red" variant="tonal" @click="doDeleteMessage">Delete</v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
 </template>
 
 <script setup>
@@ -957,6 +983,9 @@ const stepSubSections = reactive({})     // stepId_section -> boolean
 // Message edit state
 const editingMessageIndex = ref(null)
 const editingMessageContent = ref('')
+// Message delete state
+const deleteMessageDialog = ref(false)
+const messageToDelete = ref(null)
 // Restore active chat type from localStorage, default to 'user'
 const activeChatType = ref(localStorage.getItem('chat_active_tab') || 'user') // 'user', 'agent', 'project_task'
 const previousChatType = ref('user') // Remember which tab we came from
@@ -1395,6 +1424,23 @@ async function submitEditMessage(msgIndex) {
 
   await chatStore.editUserMessage(msgIndex, content)
   scrollToBottom()
+}
+
+// ── Delete single message ─────────────────────────────────────────
+function confirmDeleteMessage(msg) {
+  messageToDelete.value = msg
+  deleteMessageDialog.value = true
+}
+
+async function doDeleteMessage() {
+  if (!messageToDelete.value) return
+  try {
+    await chatStore.deleteMessage(messageToDelete.value.id)
+  } catch (e) {
+    console.error('Failed to delete message:', e)
+  }
+  deleteMessageDialog.value = false
+  messageToDelete.value = null
 }
 
 // ── Audio TTS ─────────────────────────────────────────────────────
@@ -2030,6 +2076,15 @@ watch(() => chatStore.pendingInput, (val) => {
   transition: opacity 0.15s;
 }
 .message-bubble.user:hover .msg-edit-btn {
+  opacity: 1;
+}
+
+/* Delete button: visible on hover */
+.message-bubble .msg-delete-btn {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.message-bubble:hover .msg-delete-btn {
   opacity: 1;
 }
 

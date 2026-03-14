@@ -626,6 +626,25 @@ async def delete_session(
     return {"message": "Session deleted"}
 
 
+@router.delete("/sessions/{session_id}/messages/{message_id}")
+async def delete_message(
+    session_id: str,
+    message_id: str,
+    user = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Delete a single message from a chat session."""
+    sess_svc = ChatSessionService(db)
+    session = await sess_svc.get_by_id(session_id)
+    if not session or session.user_id != str(user.id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    msg_svc = ChatMessageService(db)
+    deleted = await msg_svc.delete(message_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return {"message": "Message deleted"}
+
+
 @router.post("/sessions/{session_id}/clear")
 async def clear_session_history(
     session_id: str,
