@@ -449,6 +449,7 @@ async function onDragEnd(eventType) {
   const ids = group.items.map(e => e.id)
   try {
     await api.post('/events/reorder', { ids })
+    await loadEvents()
   } catch (e) {
     showSnackbar?.('Failed to reorder', 'error')
   }
@@ -459,6 +460,7 @@ async function onDragEndFlat() {
   const ids = items.map(e => e.id)
   try {
     await api.post('/events/reorder', { ids })
+    await loadEvents()
   } catch (e) {
     showSnackbar?.('Failed to reorder', 'error')
   }

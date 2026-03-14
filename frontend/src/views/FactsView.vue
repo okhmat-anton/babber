@@ -502,6 +502,7 @@ async function onDragEnd(category) {
   const ids = group.items.map(f => f.id)
   try {
     await api.post('/facts/reorder', { ids })
+    await loadFacts()
   } catch (e) {
     showSnackbar?.('Failed to reorder', 'error')
   }
@@ -511,6 +512,7 @@ async function onDragEndFlat() {
   const ids = facts.value.map(f => f.id)
   try {
     await api.post('/facts/reorder', { ids })
+    await loadFacts()
   } catch (e) {
     showSnackbar?.('Failed to reorder', 'error')
   }

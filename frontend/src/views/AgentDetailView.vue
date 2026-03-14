@@ -1394,13 +1394,123 @@
             <template #item.type="{ item }">
               <v-chip size="x-small" variant="tonal">{{ item.type }}</v-chip>
             </template>
+            <template #item.content="{ item }">
+              <div class="text-truncate" style="max-width: 400px;">{{ item.content }}</div>
+            </template>
             <template #item.importance="{ item }">
               <v-progress-linear :model-value="item.importance * 100" :color="item.importance > 0.7 ? 'success' : 'grey'" height="6" rounded />
             </template>
             <template #item.tags="{ item }">
               <v-chip v-for="t in (item.tags || []).slice(0, 3)" :key="t" size="x-small" class="mr-1">{{ t }}</v-chip>
             </template>
+            <template #item.category="{ item }">
+              <v-chip v-if="item.category" size="x-small" variant="tonal" color="indigo">{{ item.category }}</v-chip>
+            </template>
+            <template #item.actions="{ item }">
+              <v-btn icon size="small" variant="text" @click.stop="openEditMemory(item)">
+                <v-icon>mdi-pencil</v-icon>
+              </v-btn>
+              <v-btn icon size="small" variant="text" color="error" @click.stop="confirmDeleteMemory(item)">
+                <v-icon>mdi-delete</v-icon>
+              </v-btn>
+            </template>
           </v-data-table>
+
+          <!-- Edit Memory Dialog -->
+          <v-dialog v-model="memoryEditDialog" max-width="600">
+            <v-card>
+              <v-card-title>Edit Memory</v-card-title>
+              <v-card-text>
+                <v-text-field
+                  v-model="memoryForm.title"
+                  label="Title"
+                  variant="outlined"
+                  density="compact"
+                  class="mb-3"
+                />
+                <v-textarea
+                  v-model="memoryForm.content"
+                  label="Content"
+                  variant="outlined"
+                  density="compact"
+                  rows="4"
+                  class="mb-3"
+                />
+                <v-select
+                  v-model="memoryForm.type"
+                  :items="['fact', 'experience', 'skill', 'preference', 'conversation', 'reflection', 'observation', 'knowledge']"
+                  label="Type"
+                  variant="outlined"
+                  density="compact"
+                  class="mb-3"
+                />
+                <v-slider
+                  v-model="memoryForm.importance"
+                  label="Importance"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  thumb-label
+                  class="mb-3"
+                />
+                <v-combobox
+                  v-model="memoryForm.category"
+                  :items="memoryCategoryOptions"
+                  label="Category"
+                  variant="outlined"
+                  density="compact"
+                  clearable
+                  class="mb-3"
+                />
+                <v-combobox
+                  v-model="memoryForm.tags"
+                  label="Tags"
+                  variant="outlined"
+                  density="compact"
+                  chips
+                  multiple
+                  closable-chips
+                  class="mb-3"
+                />
+                <v-checkbox
+                  v-model="memoryForm.is_pinned"
+                  label="Pinned"
+                  density="compact"
+                  hide-details
+                />
+              </v-card-text>
+              <v-card-actions>
+                <v-spacer />
+                <v-btn @click="memoryEditDialog = false">Cancel</v-btn>
+                <v-btn color="primary" :loading="memorySaving" @click="saveMemory">Save</v-btn>
+              </v-card-actions>
+            </v-card>
+          </v-dialog>
+
+          <!-- Delete Memory Confirmation -->
+          <v-dialog v-model="memoryDeleteDialog" max-width="400">
+            <v-card>
+              <v-card-title class="text-h6">Delete Memory</v-card-title>
+              <v-card-text>
+                <div class="mb-3">Are you sure you want to delete this memory?</div>
+                <v-alert v-if="memoryDeleteTarget" type="info" variant="tonal" density="compact" class="mb-3">
+                  <strong>{{ memoryDeleteTarget.title }}</strong>
+                  <div class="text-caption text-truncate" style="max-width: 350px;">{{ memoryDeleteTarget.content }}</div>
+                </v-alert>
+                <v-text-field
+                  v-model="memoryDeleteConfirm"
+                  label="Type DELETE to confirm"
+                  variant="outlined"
+                  density="compact"
+                />
+              </v-card-text>
+              <v-card-actions>
+                <v-spacer />
+                <v-btn @click="memoryDeleteDialog = false">Cancel</v-btn>
+                <v-btn color="error" :disabled="memoryDeleteConfirm !== 'DELETE'" @click="doDeleteMemory">Delete</v-btn>
+              </v-card-actions>
+            </v-card>
+          </v-dialog>
         </div>
 
         <!-- Messengers Tab -->
@@ -2673,10 +2783,13 @@ const taskHeaders = [
 
 const memHeaders = [
   { title: 'Title', key: 'title' },
+  { title: 'Content', key: 'content' },
   { title: 'Type', key: 'type', width: 100 },
+  { title: 'Category', key: 'category', width: 120 },
   { title: 'Importance', key: 'importance', width: 120 },
   { title: 'Tags', key: 'tags', width: 200 },
   { title: 'Source', key: 'source', width: 80 },
+  { title: 'Actions', key: 'actions', sortable: false, width: 100 },
 ]
 
 const loadData = async () => {
@@ -2916,6 +3029,77 @@ const createPersonalSkill = async () => {
 const loadMemories = async () => {
   const { data } = await api.get(`/agents/${id.value}/memory`, { params: { limit: 100 } })
   memories.value = data
+}
+
+// ── Memory Edit/Delete ──
+const memoryEditDialog = ref(false)
+const memoryDeleteDialog = ref(false)
+const memoryDeleteTarget = ref(null)
+const memoryDeleteConfirm = ref('')
+const memorySaving = ref(false)
+const memoryEditId = ref(null)
+const memoryForm = ref({
+  title: '', content: '', type: 'fact', importance: 0.5,
+  category: 'general', tags: [], is_pinned: false,
+})
+
+const memoryCategoryOptions = computed(() => {
+  const cats = [...new Set(memories.value.map(m => m.category).filter(Boolean))]
+  return cats.sort()
+})
+
+function openEditMemory(item) {
+  memoryEditId.value = item.id
+  memoryForm.value = {
+    title: item.title || '',
+    content: item.content || '',
+    type: item.type || 'fact',
+    importance: item.importance ?? 0.5,
+    category: item.category || 'general',
+    tags: [...(item.tags || [])],
+    is_pinned: item.is_pinned || false,
+  }
+  memoryEditDialog.value = true
+}
+
+async function saveMemory() {
+  memorySaving.value = true
+  try {
+    await api.put(`/agents/${id.value}/memory/${memoryEditId.value}`, {
+      title: memoryForm.value.title,
+      content: memoryForm.value.content,
+      type: memoryForm.value.type,
+      importance: memoryForm.value.importance,
+      category: memoryForm.value.category,
+      tags: memoryForm.value.tags,
+      is_pinned: memoryForm.value.is_pinned,
+    })
+    memoryEditDialog.value = false
+    await loadMemories()
+    showSnackbar?.('Memory updated', 'success')
+  } catch (e) {
+    showSnackbar?.('Failed to update memory', 'error')
+  } finally {
+    memorySaving.value = false
+  }
+}
+
+function confirmDeleteMemory(item) {
+  memoryDeleteTarget.value = item
+  memoryDeleteConfirm.value = ''
+  memoryDeleteDialog.value = true
+}
+
+async function doDeleteMemory() {
+  if (!memoryDeleteTarget.value) return
+  try {
+    await api.delete(`/agents/${id.value}/memory/${memoryDeleteTarget.value.id}`)
+    memoryDeleteDialog.value = false
+    memories.value = memories.value.filter(m => m.id !== memoryDeleteTarget.value.id)
+    showSnackbar?.('Memory deleted', 'success')
+  } catch (e) {
+    showSnackbar?.('Failed to delete memory', 'error')
+  }
 }
 
 // ===== Files =====

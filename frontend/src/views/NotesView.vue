@@ -534,6 +534,7 @@ async function onDragEnd(category) {
   const ids = group.items.map(n => n.id)
   try {
     await api.post('/notes/reorder', { ids })
+    await loadNotes()
   } catch (e) {
     console.error('Failed to reorder notes:', e)
   }
@@ -543,6 +544,7 @@ async function onDragEndFlat() {
   const ids = notes.value.map(n => n.id)
   try {
     await api.post('/notes/reorder', { ids })
+    await loadNotes()
   } catch (e) {
     console.error('Failed to reorder notes:', e)
   }
