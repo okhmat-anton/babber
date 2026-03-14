@@ -3,9 +3,16 @@ Anthropic (Claude) LLM provider.
 
 Uses the official anthropic Python SDK for Messages API.
 """
+import asyncio
+import logging
 import anthropic
 from typing import AsyncIterator
 from app.llm.base import LLMProvider, Message, GenerationParams, LLMResponse, ModelInfo
+
+logger = logging.getLogger(__name__)
+
+MAX_RETRIES = 3
+RETRY_DELAYS = [2, 5, 10]  # seconds between retries
 
 
 # Well-known Anthropic models
@@ -75,52 +82,74 @@ class AnthropicProvider:
         if params.stop:
             kwargs["stop_sequences"] = params.stop
 
-        # Use streaming internally to avoid Anthropic 10-minute timeout on non-streaming requests
-        async with self._async_client.messages.stream(**kwargs) as stream:
-            response = await stream.get_final_message()
+        # Retry on transient errors (overloaded, rate limit, server errors)
+        last_error = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                # Use streaming internally to avoid Anthropic 10-minute timeout
+                async with self._async_client.messages.stream(**kwargs) as stream:
+                    response = await stream.get_final_message()
 
-        content = ""
-        for block in response.content:
-            if block.type == "text":
-                content += block.text
+                content = ""
+                for block in response.content:
+                    if block.type == "text":
+                        content += block.text
 
-        input_tokens = response.usage.input_tokens
-        output_tokens = response.usage.output_tokens
+                input_tokens = response.usage.input_tokens
+                output_tokens = response.usage.output_tokens
 
-        return LLMResponse(
-            content=content,
-            model=response.model,
-            total_tokens=input_tokens + output_tokens,
-            prompt_tokens=input_tokens,
-            completion_tokens=output_tokens,
-        )
+                return LLMResponse(
+                    content=content,
+                    model=response.model,
+                    total_tokens=input_tokens + output_tokens,
+                    prompt_tokens=input_tokens,
+                    completion_tokens=output_tokens,
+                )
+            except (anthropic.APIStatusError, anthropic.APIConnectionError) as e:
+                last_error = e
+                is_retryable = isinstance(e, anthropic.APIConnectionError) or (
+                    hasattr(e, 'status_code') and e.status_code in (429, 500, 502, 503, 529)
+                )
+                if is_retryable and attempt < MAX_RETRIES - 1:
+                    delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
+                    logger.warning("Anthropic chat error (attempt %d/%d), retrying in %ds: %s", attempt + 1, MAX_RETRIES, delay, e)
+                    await asyncio.sleep(delay)
+                else:
+                    raise
+        raise last_error
 
     async def stream(self, model: str, messages: list[Message], params: GenerationParams) -> AsyncIterator[str]:
         system_text, api_messages = self._prepare_messages(messages)
 
-        kwargs = {
+        stream_kwargs = {
             "model": model,
             "messages": api_messages,
             "max_tokens": params.max_tokens or 4096,
-            "stream": True,
+            "system": system_text or anthropic.NOT_GIVEN,
+            "temperature": params.temperature if params.temperature is not None else anthropic.NOT_GIVEN,
+            "stop_sequences": params.stop if params.stop else anthropic.NOT_GIVEN,
         }
-        if system_text:
-            kwargs["system"] = system_text
-        if params.temperature is not None:
-            kwargs["temperature"] = params.temperature
-        if params.stop:
-            kwargs["stop_sequences"] = params.stop
 
-        async with self._async_client.messages.stream(
-            model=model,
-            messages=api_messages,
-            max_tokens=params.max_tokens or 4096,
-            system=system_text or anthropic.NOT_GIVEN,
-            temperature=params.temperature if params.temperature is not None else anthropic.NOT_GIVEN,
-            stop_sequences=params.stop if params.stop else anthropic.NOT_GIVEN,
-        ) as stream:
-            async for text in stream.text_stream:
-                yield text
+        # Retry on transient errors (overloaded, rate limit, server errors)
+        last_error = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                async with self._async_client.messages.stream(**stream_kwargs) as stream:
+                    async for text in stream.text_stream:
+                        yield text
+                return  # Success - exit retry loop
+            except (anthropic.APIStatusError, anthropic.APIConnectionError) as e:
+                last_error = e
+                is_retryable = isinstance(e, anthropic.APIConnectionError) or (
+                    hasattr(e, 'status_code') and e.status_code in (429, 500, 502, 503, 529)
+                )
+                if is_retryable and attempt < MAX_RETRIES - 1:
+                    delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
+                    logger.warning("Anthropic stream error (attempt %d/%d), retrying in %ds: %s", attempt + 1, MAX_RETRIES, delay, e)
+                    await asyncio.sleep(delay)
+                else:
+                    raise
+        raise last_error
 
     async def list_models(self) -> list[ModelInfo]:
         """Return well-known Anthropic models."""
