@@ -355,6 +355,87 @@ DANGEROUS_ACTION_SKILLS = frozenset({
     "docker_manage", "api_call",
 })
 
+# ── Step result resolution ────────────────────────────────────────────
+
+_step_ref_re = re.compile(r'\{\{step(\d+)\.(result|output|text)\}\}', re.IGNORECASE)
+_bracket_placeholder_re = re.compile(r'^\[([^\[\]]{5,})\]$')
+_unresolvable_template_re = re.compile(r'\{\{[^}]+\}\}')
+
+
+def _extract_step_text(step_data: dict) -> str:
+    """Extract the main text content from a step result dict."""
+    result = step_data.get("result", {})
+    if isinstance(result, str):
+        return result
+    if isinstance(result, dict):
+        inner = result.get("result", "")
+        if isinstance(inner, str):
+            return inner
+        if isinstance(inner, dict):
+            # Try common text keys
+            for key in ("text", "content", "summary", "output", "humanized"):
+                if key in inner and isinstance(inner[key], str):
+                    return inner[key]
+            return json.dumps(inner, ensure_ascii=False, default=str)[:5000]
+        if isinstance(inner, list):
+            return json.dumps(inner, ensure_ascii=False, default=str)[:5000]
+        return str(inner) if inner else ""
+    return str(result) if result else ""
+
+
+def _find_last_step_text(step_results: dict) -> str:
+    """Find text output from the most recent successful skill step."""
+    sorted_ids = sorted(
+        (k for k in step_results
+         if step_results[k].get("success") and step_results[k].get("type") == "skill"),
+        key=lambda x: int(x) if x.isdigit() else 0,
+        reverse=True,
+    )
+    for sid in sorted_ids:
+        text = _extract_step_text(step_results[sid])
+        if text and len(text) > 10:
+            return text
+    return ""
+
+
+def _resolve_step_refs(args: dict, step_results: dict) -> dict:
+    """
+    Resolve {{stepN.result}} templates and bracket placeholders
+    from previous step results. Must be called BEFORE _infer_args.
+    """
+    if not step_results:
+        return args
+
+    resolved = dict(args)
+    for k, v in list(resolved.items()):
+        if not isinstance(v, str) or not v.strip():
+            continue
+
+        # 1. Resolve {{stepN.result}} / {{stepN.output}} / {{stepN.text}} references
+        def _replace_ref(m: re.Match) -> str:
+            step_id = m.group(1)
+            if step_id in step_results and step_results[step_id].get("success"):
+                text = _extract_step_text(step_results[step_id])
+                if text:
+                    return text
+            return m.group(0)  # Keep original if not found
+
+        new_val = _step_ref_re.sub(_replace_ref, v)
+        if new_val != v:
+            resolved[k] = new_val
+            continue
+
+        # 2. Detect bracket placeholders like [final humanized LinkedIn post]
+        stripped = v.strip()
+        if _bracket_placeholder_re.match(stripped):
+            last_text = _find_last_step_text(step_results)
+            if last_text:
+                logger.info(f"Resolved bracket placeholder '{stripped}' → {len(last_text)} chars from previous step")
+                resolved[k] = last_text
+
+    return resolved
+
+
 # ── Smart arg inference ──────────────────────────────────────────────
 
 
@@ -369,10 +450,9 @@ def _infer_args(skill_name: str, planned_args: dict, context: dict) -> dict:
     detected_project = context.get("detected_project")
     detected_task = context.get("detected_task")
 
-    # Resolve template variables: {{step2.output}}, {{previous_result}}, etc.
-    _template_re = re.compile(r'\{\{[^}]+\}\}')
+    # Clear remaining unresolvable template variables (already resolved by _resolve_step_refs)
     for k, v in list(args.items()):
-        if isinstance(v, str) and _template_re.search(v):
+        if isinstance(v, str) and _unresolvable_template_re.search(v):
             args[k] = ""  # Clear unresolvable template — let inference fill it
 
     if skill_name == "memory_search":
@@ -2803,6 +2883,7 @@ RULES:
 5. If info is already gathered — don't re-gather
 6. For memory_search: args={{"query": "relevant search text"}}
 7. For project skills: args MUST include "project_slug"
+8. CRITICAL: When a step needs the OUTPUT of a previous step, use template {{{{stepN.result}}}} where N is the step id. Example: step 2 uses step 1 output → args={{"content": "{{{{step1.result}}}}"}}. NEVER use descriptive placeholders like [final text] or [result from step 1] — always use {{{{stepN.result}}}} templates.
 
 JSON only:
 {{"approach":"brief plan description","steps":[{{"id":1,"action":"description","skill":"skill_name_or_null","args":{{"param":"value"}}}}],"missing_skills":[{{"name":"skill","description":"what it would do"}}]}}"""
@@ -2946,8 +3027,11 @@ JSON only:
                 }
                 continue
 
+            # Resolve references to previous step results
+            resolved_args = _resolve_step_refs(raw_args, step_results)
+
             # Smart arg inference
-            args = _infer_args(skill_name, raw_args, context)
+            args = _infer_args(skill_name, resolved_args, context)
 
             # Validate required args
             skip_step = False
