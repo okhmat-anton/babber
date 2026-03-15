@@ -126,7 +126,13 @@
           </template>
 
           <template #item.tags="{ item }">
-            <div class="d-flex ga-1 flex-wrap"><v-chip v-for="t in (item.tags || [])" :key="t" size="x-small" variant="tonal" color="cyan">{{ t }}</v-chip></div>
+            <div class="d-flex ga-1 flex-wrap">
+              <v-chip v-for="t in (item.tags || [])" :key="t" size="x-small" variant="tonal" color="cyan">{{ t }}</v-chip>
+              <v-chip v-if="(item.rss_feeds || []).length" size="x-small" variant="tonal" color="orange">
+                <v-icon start size="10">mdi-rss</v-icon>
+                {{ item.rss_feeds.length }} feed{{ item.rss_feeds.length > 1 ? 's' : '' }}
+              </v-chip>
+            </div>
           </template>
 
           <template #item.actions="{ item }">
@@ -270,6 +276,50 @@
                   placeholder="Type and press Enter to add tags"
                 />
               </v-col>
+
+              <!-- RSS Feeds -->
+              <v-col cols="12">
+                <div class="d-flex align-center mb-2">
+                  <v-icon size="18" class="mr-2" color="orange">mdi-rss</v-icon>
+                  <span class="text-subtitle-2 font-weight-medium">RSS Feeds</span>
+                  <v-spacer />
+                  <v-btn size="small" variant="tonal" color="orange" prepend-icon="mdi-plus" @click="addFeed">
+                    Add Feed
+                  </v-btn>
+                </div>
+                <div v-for="(feed, idx) in form.rss_feeds" :key="idx" class="d-flex align-center ga-2 mb-2">
+                  <v-text-field
+                    v-model="feed.url"
+                    label="Feed URL"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                    placeholder="https://example.com/rss"
+                    style="flex: 2"
+                  />
+                  <v-text-field
+                    v-model="feed.title"
+                    label="Title"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                    placeholder="Blog, News..."
+                    style="flex: 1"
+                  />
+                  <v-select
+                    v-model="feed.category"
+                    :items="feedCategories"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                    style="flex: 0.7"
+                  />
+                  <v-btn icon size="small" variant="text" color="error" @click="form.rss_feeds.splice(idx, 1)">
+                    <v-icon>mdi-close</v-icon>
+                  </v-btn>
+                </div>
+                <div v-if="!form.rss_feeds.length" class="text-caption text-grey ml-7">No RSS feeds added yet</div>
+              </v-col>
             </v-row>
           </v-form>
         </v-card-text>
@@ -391,6 +441,31 @@ const researchSkills = [
     params: [
       { name: 'url', desc: 'URL to scrape (required)' },
       { name: 'selector', desc: 'CSS selector to extract' },
+    ],
+  },
+  {
+    name: 'rss_read',
+    displayName: 'RSS Read',
+    description: 'Parse RSS/Atom feeds and return latest entries. Monitors news, blog posts, releases, and updates from research resources with RSS feeds.',
+    icon: 'mdi-rss',
+    color: 'orange',
+    category: 'web',
+    catColor: 'blue',
+    params: [
+      { name: 'url', desc: 'RSS/Atom feed URL (required)' },
+      { name: 'limit', desc: 'Max entries to return (default: 20)' },
+    ],
+  },
+  {
+    name: 'weather_check',
+    displayName: 'Weather Check',
+    description: 'Check current weather and 3-day forecast for any city. Uses Open-Meteo API (free, no API key). Integrates with creator cities of interest.',
+    icon: 'mdi-weather-partly-cloudy',
+    color: 'light-blue',
+    category: 'general',
+    catColor: 'deep-purple',
+    params: [
+      { name: 'location', desc: 'City name, optionally with country (required)' },
     ],
   },
   {
@@ -554,6 +629,12 @@ const editingId = ref(null)
 const saving = ref(false)
 const form = ref(defaultForm())
 
+const feedCategories = ['general', 'news', 'blog', 'releases', 'updates', 'discussions']
+
+function addFeed() {
+  form.value.rss_feeds.push({ url: '', title: '', category: 'general', is_active: true })
+}
+
 function defaultForm() {
   return {
     name: '',
@@ -565,6 +646,7 @@ function defaultForm() {
     search_instructions: '',
     category: 'general',
     tags: [],
+    rss_feeds: [],
   }
 }
 
@@ -586,6 +668,7 @@ function openEdit(item) {
     search_instructions: item.search_instructions || '',
     category: item.category,
     tags: item.tags || [],
+    rss_feeds: (item.rss_feeds || []).map(f => ({ url: f.url, title: f.title, category: f.category || 'general', is_active: f.is_active !== false })),
   }
   formDialog.value = true
 }

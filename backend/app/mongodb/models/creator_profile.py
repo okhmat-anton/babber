@@ -38,6 +38,15 @@ class IdeaItem(BaseModel):
     in_context: bool = True
 
 
+class CityItem(BaseModel):
+    """A city the creator visits or is interested in (used for weather, travel, etc.)."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str = ""           # city name (e.g. "Berlin")
+    country: str = ""        # country name or code (e.g. "Germany" or "DE")
+    type: str = "interest"   # home, frequent, interest
+    in_context: bool = True
+
+
 class NoteItem(BaseModel):
     """A single note."""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -63,6 +72,7 @@ class MongoCreatorProfile(BaseModel):
     action_history: Optional[str] = None # action attempt history
     ideas: List[IdeaItem] = Field(default_factory=list)          # ideas
     notes: List[NoteItem] = Field(default_factory=list)          # notes
+    cities: List[CityItem] = Field(default_factory=list)         # cities of interest (weather, travel)
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -84,7 +94,7 @@ class MongoCreatorProfile(BaseModel):
         if isinstance(doc.get("updated_at"), str):
             doc["updated_at"] = datetime.fromisoformat(doc["updated_at"])
         # Backward compat: old string fields or null → empty lists
-        for field in ("goals", "dreams", "ideas", "notes"):
+        for field in ("goals", "dreams", "ideas", "notes", "cities"):
             if not isinstance(doc.get(field), list):
                 doc[field] = []
         return cls(**doc)
@@ -159,5 +169,15 @@ class MongoCreatorProfile(BaseModel):
                     lines.append(f"  - {n.title}")
                     if n.content:
                         lines.append(f"    {n.content}")
+                sections.append("\n".join(lines))
+        if self.cities:
+            active_cities = [c for c in self.cities if getattr(c, 'in_context', True)]
+            if active_cities:
+                type_labels = {"home": "HOME", "frequent": "FREQUENT", "interest": "INTEREST"}
+                lines = ["Cities of interest (for weather, travel, etc.):"]
+                for c in active_cities:
+                    t = f" [{type_labels.get(c.type, 'INTEREST')}]"
+                    country_part = f", {c.country}" if c.country else ""
+                    lines.append(f"  - {c.name}{country_part}{t}")
                 sections.append("\n".join(lines))
         return "\n".join(sections) if sections else ""

@@ -321,6 +321,7 @@ GATHER_SKILLS = frozenset({
     "web_search", "project_search_code", "csv_parse", "pdf_read",
     "yaml_parse", "xml_parse", "regex_extract", "math_calculate",
     "rss_read", "translate", "image_analyze",
+    "weather_check",
 })
 
 ACTION_SKILLS = frozenset({
@@ -796,7 +797,7 @@ class StagedPipeline:
         "image_generate", "translate", "csv_parse", "pdf_read",
         "email_send", "schedule_reminder", "yaml_parse", "xml_parse",
         "regex_extract", "api_call", "math_calculate", "code_review",
-        "docker_manage", "rss_read",
+        "docker_manage", "rss_read", "weather_check",
     }
 
     async def _exec_skill(self, name: str, args: dict) -> dict:
@@ -897,6 +898,8 @@ class StagedPipeline:
             return await self._sys_docker_manage(args)
         elif name == "rss_read":
             return await self._sys_rss_read(args)
+        elif name == "weather_check":
+            return await self._sys_weather_check(args)
         return None
 
     async def _sys_memory_search(self, db, agent_id: str, args: dict) -> dict:
@@ -2487,6 +2490,89 @@ class StagedPipeline:
             return {"error": f"Feed parse error: {e}"}
         except Exception as e:
             return {"error": f"RSS read failed: {e}"}
+
+    async def _sys_weather_check(self, args: dict) -> dict:
+        """Check weather for a location using Open-Meteo (free, no API key)."""
+        import httpx
+
+        location = str(args.get("location", "")).strip()
+        if not location:
+            return {"error": "No location provided"}
+
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                # Step 1: Geocode the location name
+                geo_resp = await client.get(
+                    "https://geocoding-api.open-meteo.com/v1/search",
+                    params={"name": location, "count": 1, "language": "en"},
+                )
+                geo_data = geo_resp.json()
+                results = geo_data.get("results", [])
+                if not results:
+                    return {"error": f"Location '{location}' not found"}
+
+                place = results[0]
+                lat = place["latitude"]
+                lon = place["longitude"]
+                resolved_name = f"{place.get('name', location)}, {place.get('country', '')}"
+
+                # Step 2: Get current weather + 3-day forecast
+                weather_resp = await client.get(
+                    "https://api.open-meteo.com/v1/forecast",
+                    params={
+                        "latitude": lat,
+                        "longitude": lon,
+                        "current": "temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code",
+                        "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum",
+                        "timezone": "auto",
+                        "forecast_days": 3,
+                    },
+                )
+                w = weather_resp.json()
+
+                # WMO weather codes → descriptions
+                wmo_codes = {
+                    0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
+                    45: "Fog", 48: "Rime fog", 51: "Light drizzle", 53: "Moderate drizzle",
+                    55: "Dense drizzle", 56: "Freezing drizzle", 57: "Dense freezing drizzle",
+                    61: "Slight rain", 63: "Moderate rain", 65: "Heavy rain",
+                    66: "Freezing rain", 67: "Heavy freezing rain",
+                    71: "Slight snow", 73: "Moderate snow", 75: "Heavy snow",
+                    77: "Snow grains", 80: "Slight showers", 81: "Moderate showers",
+                    82: "Violent showers", 85: "Slight snow showers", 86: "Heavy snow showers",
+                    95: "Thunderstorm", 96: "Thunderstorm with hail", 99: "Severe thunderstorm",
+                }
+
+                current = w.get("current", {})
+                daily = w.get("daily", {})
+                code = current.get("weather_code", 0)
+
+                forecast = []
+                dates = daily.get("time", [])
+                for i, date in enumerate(dates):
+                    fc_code = (daily.get("weather_code", []) or [0])[i] if i < len(daily.get("weather_code", [])) else 0
+                    forecast.append({
+                        "date": date,
+                        "high": daily.get("temperature_2m_max", [None])[i],
+                        "low": daily.get("temperature_2m_min", [None])[i],
+                        "precipitation_mm": daily.get("precipitation_sum", [0])[i],
+                        "description": wmo_codes.get(fc_code, f"Code {fc_code}"),
+                    })
+
+                return {
+                    "result": {
+                        "location": resolved_name,
+                        "current": {
+                            "temperature_c": current.get("temperature_2m"),
+                            "humidity_pct": current.get("relative_humidity_2m"),
+                            "wind_speed_kmh": current.get("wind_speed_10m"),
+                            "description": wmo_codes.get(code, f"Code {code}"),
+                        },
+                        "forecast": forecast,
+                    }
+                }
+        except Exception as e:
+            return {"error": f"Weather check failed: {e}"}
 
     def _build_context(self, classification: Classification, user_input: str) -> dict:
         """Build context dict for arg inference."""

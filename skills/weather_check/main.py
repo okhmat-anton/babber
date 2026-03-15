@@ -1,0 +1,1 @@
+# Weather skill — handled by pipeline system handler

@@ -1687,6 +1687,27 @@ SYSTEM_SKILLS = [
             "required": ["text"],
         },
     },
+    {
+        "name": "weather_check",
+        "display_name": "Weather Check",
+        "description": "Check current weather and forecast for a city or country.",
+        "description_for_agent": (
+            "Check current weather conditions and short forecast for any city or country. "
+            "Uses the free Open-Meteo API (no API key needed). "
+            "Parameters: location (string, required — city name, optionally with country, e.g. 'Berlin', 'Tokyo, Japan'). "
+            "Returns current temperature, humidity, wind speed, weather description, and 3-day forecast. "
+            "The creator's cities of interest are stored in their profile — check creator_context for preferred locations."
+        ),
+        "category": "general",
+        "code": "# Weather skill — handled by pipeline system handler",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "location": {"type": "string", "description": "City name, optionally with country (e.g. 'Berlin', 'New York, US')"},
+            },
+            "required": ["location"],
+        },
+    },
 ]
 
 

@@ -43,6 +43,11 @@
         Dreams
         <v-badge v-if="form.dreams.length" :content="form.dreams.length" color="deep-purple" inline class="ml-1" />
       </v-tab>
+      <v-tab value="cities" rounded="lg" @click="navigateTab('cities')">
+        <v-icon start size="18" color="light-blue">mdi-city-variant</v-icon>
+        Cities
+        <v-badge v-if="form.cities.length" :content="form.cities.length" color="light-blue" inline class="ml-1" />
+      </v-tab>
     </v-tabs>
 
     <!-- Content -->
@@ -390,6 +395,79 @@
           </template>
         </v-window-item>
 
+        <!-- ══════════ TAB: Cities ══════════ -->
+        <v-window-item value="cities">
+          <v-alert type="info" variant="tonal" density="compact" class="mb-4">
+            Cities you live in, visit frequently, or are interested in. Used by agents for weather forecasts, travel suggestions, and time zone awareness.
+          </v-alert>
+
+          <div class="d-flex justify-end mb-3">
+            <v-btn color="light-blue" variant="flat" prepend-icon="mdi-plus" @click="addCity">
+              Add City
+            </v-btn>
+          </div>
+
+          <v-row>
+            <v-col v-for="(city, idx) in form.cities" :key="city.id || idx" cols="12" sm="6" md="4" lg="3">
+              <v-card variant="outlined" class="fill-height">
+                <v-card-text class="pb-2">
+                  <div class="d-flex align-center mb-2">
+                    <v-icon size="20" class="mr-2" :color="cityTypeColor(city.type)">
+                      {{ cityTypeIcon(city.type) }}
+                    </v-icon>
+                    <v-chip :color="cityTypeColor(city.type)" size="x-small" variant="tonal">{{ city.type }}</v-chip>
+                    <v-spacer />
+                    <v-btn icon size="x-small" variant="text" color="error" @click="form.cities.splice(idx, 1)">
+                      <v-icon size="16">mdi-close</v-icon>
+                    </v-btn>
+                  </div>
+                  <v-text-field
+                    v-model="city.name"
+                    label="City"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                    placeholder="Berlin, New York..."
+                    class="mb-2"
+                  />
+                  <v-text-field
+                    v-model="city.country"
+                    label="Country"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                    placeholder="Germany, US..."
+                    class="mb-2"
+                  />
+                  <v-select
+                    v-model="city.type"
+                    :items="cityTypes"
+                    item-title="label"
+                    item-value="value"
+                    label="Type"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                    class="mb-2"
+                  />
+                  <v-checkbox
+                    v-model="city.in_context"
+                    label="Include in agent context"
+                    density="compact"
+                    hide-details
+                    color="primary"
+                  />
+                </v-card-text>
+              </v-card>
+            </v-col>
+          </v-row>
+
+          <div v-if="!form.cities.length" class="text-center py-8 text-medium-emphasis">
+            <v-icon size="48" class="mb-2" color="grey">mdi-city-variant-outline</v-icon>
+            <div>No cities added yet. Click "Add City" to get started.</div>
+          </div>
+        </v-window-item>
+
       </v-window>
     </v-form>
 
@@ -579,6 +657,7 @@ const tabFromRoute = () => {
   const path = route.path
   if (path.startsWith('/creator/goals')) return 'goals'
   if (path.startsWith('/creator/dreams')) return 'dreams'
+  if (path.startsWith('/creator/cities')) return 'cities'
   return 'profile'
 }
 
@@ -624,6 +703,7 @@ const form = ref({
   who: '',
   goals: [],
   dreams: [],
+  cities: [],
   skills_and_abilities: '',
   current_situation: '',
   principles: '',
@@ -632,10 +712,29 @@ const form = ref({
   action_history: '',
 })
 
+const cityTypes = [
+  { value: 'home', label: 'Home' },
+  { value: 'frequent', label: 'Frequent' },
+  { value: 'interest', label: 'Interest' },
+]
+
+function cityTypeColor(type) {
+  return { home: 'green', frequent: 'blue', interest: 'amber' }[type] || 'grey'
+}
+
+function cityTypeIcon(type) {
+  return { home: 'mdi-home-city', frequent: 'mdi-airplane', interest: 'mdi-map-marker-star' }[type] || 'mdi-city'
+}
+
+function addCity() {
+  form.value.cities.push({ id: Date.now().toString(), name: '', country: '', type: 'interest', in_context: true })
+}
+
 const tabPaths = {
   profile: '/creator',
   goals: '/creator/goals',
   dreams: '/creator/dreams',
+  cities: '/creator/cities',
 }
 
 function navigateTab(val) {
@@ -734,6 +833,7 @@ async function load() {
     form.value.who = data.who || ''
     form.value.goals = Array.isArray(data.goals) ? data.goals : []
     form.value.dreams = Array.isArray(data.dreams) ? data.dreams : []
+    form.value.cities = Array.isArray(data.cities) ? data.cities : []
     form.value.skills_and_abilities = data.skills_and_abilities || ''
     form.value.current_situation = data.current_situation || ''
     form.value.principles = data.principles || ''
@@ -751,6 +851,7 @@ async function load() {
       })
     })
     form.value.dreams.forEach((d, i) => { if (d.priority == null) d.priority = 1 })
+    form.value.cities.forEach(c => { if (c.in_context == null) c.in_context = true })
   } catch (e) {
     console.error('Failed to load creator profile:', e)
   } finally {

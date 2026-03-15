@@ -28,12 +28,19 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.database import get_mongodb
 from app.core.dependencies import get_current_user
 from app.mongodb.services import ResearchResourceService
-from app.mongodb.models.research_resource import MongoResearchResource
+from app.mongodb.models.research_resource import MongoResearchResource, RssFeed
 
 router = APIRouter(prefix="/api/research-resources", tags=["research-resources"])
 
 
 # ── Schemas ──────────────────────────────────────────
+
+class RssFeedCreate(BaseModel):
+    url: str
+    title: str = ""
+    category: str = "general"  # news, blog, releases, updates, discussions
+    is_active: bool = True
+
 
 class ResourceCreate(BaseModel):
     name: str
@@ -45,6 +52,7 @@ class ResourceCreate(BaseModel):
     search_instructions: str = ""
     category: str = "general"
     tags: List[str] = []
+    rss_feeds: List[RssFeedCreate] = []
     is_active: bool = True
     added_by: str = "user"
 
@@ -59,7 +67,16 @@ class ResourceUpdate(BaseModel):
     search_instructions: Optional[str] = None
     category: Optional[str] = None
     tags: Optional[List[str]] = None
+    rss_feeds: Optional[List[RssFeedCreate]] = None
     is_active: Optional[bool] = None
+
+
+class RssFeedResponse(BaseModel):
+    id: str
+    url: str
+    title: str
+    category: str
+    is_active: bool
 
 
 class ResourceResponse(BaseModel):
@@ -73,6 +90,7 @@ class ResourceResponse(BaseModel):
     search_instructions: str
     category: str
     tags: List[str]
+    rss_feeds: List[RssFeedResponse] = []
     is_active: bool
     added_by: str
     last_used_at: Optional[str] = None
@@ -102,6 +120,7 @@ def _resource_to_response(r: MongoResearchResource) -> dict:
         "is_active": r.is_active,
         "added_by": r.added_by,
         "last_used_at": r.last_used_at.isoformat() if isinstance(r.last_used_at, datetime) else r.last_used_at,
+        "rss_feeds": [f.model_dump() for f in (r.rss_feeds or [])],
         "use_count": r.use_count,
         "created_at": r.created_at.isoformat() if isinstance(r.created_at, datetime) else str(r.created_at),
         "updated_at": r.updated_at.isoformat() if isinstance(r.updated_at, datetime) else str(r.updated_at),
@@ -183,6 +202,7 @@ async def create_resource(
         search_instructions=body.search_instructions.strip(),
         category=body.category,
         tags=body.tags,
+        rss_feeds=[RssFeed(url=f.url.strip(), title=f.title.strip(), category=f.category, is_active=f.is_active) for f in body.rss_feeds],
         is_active=body.is_active,
         added_by=body.added_by,
     )
@@ -240,6 +260,11 @@ async def update_resource(
         update_data["category"] = body.category
     if body.tags is not None:
         update_data["tags"] = body.tags
+    if body.rss_feeds is not None:
+        update_data["rss_feeds"] = [
+            RssFeed(url=f.url.strip(), title=f.title.strip(), category=f.category, is_active=f.is_active).model_dump()
+            for f in body.rss_feeds
+        ]
     if body.is_active is not None:
         update_data["is_active"] = body.is_active
 

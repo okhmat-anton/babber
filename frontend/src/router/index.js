@@ -69,6 +69,7 @@ const routes = [
       { path: 'creator/context', name: 'Creator', component: () => import('../views/CreatorView.vue') },
       { path: 'creator/goals', name: 'CreatorGoals', component: () => import('../views/CreatorView.vue') },
       { path: 'creator/dreams', name: 'CreatorDreams', component: () => import('../views/CreatorView.vue') },
+      { path: 'creator/cities', name: 'CreatorCities', component: () => import('../views/CreatorView.vue') },
       { path: 'creator/ideas', redirect: '/ideas' },
       { path: 'creator/notes', redirect: '/notes' },
       { path: 'backups', name: 'Backups', component: () => import('../views/BackupsView.vue') },

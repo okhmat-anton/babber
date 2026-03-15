@@ -5,6 +5,15 @@ from typing import Optional, List
 from pydantic import BaseModel, Field
 
 
+class RssFeed(BaseModel):
+    """An RSS/Atom feed associated with a research resource."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    url: str
+    title: str = ""          # human-readable name (e.g. "Blog", "Releases")
+    category: str = "general"  # news, blog, releases, updates, discussions
+    is_active: bool = True
+
+
 class MongoResearchResource(BaseModel):
     """
     A trusted resource/source that agents can use for research.
@@ -21,6 +30,7 @@ class MongoResearchResource(BaseModel):
       - search_instructions: how agents should search on this resource
       - category: type of resource (e.g. "docs", "forum", "wiki", "news", "code", "general")
       - tags: free-form labels
+      - rss_feeds: list of RSS/Atom feeds for monitoring content updates
       - is_active: whether this resource is currently usable
       - added_by: "user" or "agent"
       - last_used_at: when an agent last used this resource
@@ -36,6 +46,7 @@ class MongoResearchResource(BaseModel):
     search_instructions: str = ""  # how to search on this resource
     category: str = "general"  # docs, forum, wiki, news, code, general, academic
     tags: List[str] = Field(default_factory=list)
+    rss_feeds: List[RssFeed] = Field(default_factory=list)
     is_active: bool = True
     added_by: str = "user"  # user, agent
     last_used_at: Optional[datetime] = None
@@ -61,4 +72,7 @@ class MongoResearchResource(BaseModel):
         for field in ("created_at", "updated_at", "last_used_at"):
             if isinstance(doc.get(field), str):
                 doc[field] = datetime.fromisoformat(doc[field])
+        # Backward compat: old docs may not have rss_feeds
+        if not isinstance(doc.get("rss_feeds"), list):
+            doc["rss_feeds"] = []
         return cls(**doc)

@@ -12,7 +12,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.database import get_mongodb
 from app.core.dependencies import get_current_user
 from app.mongodb.services import CreatorProfileService
-from app.mongodb.models.creator_profile import GoalItem, DreamItem, IdeaItem, NoteItem
+from app.mongodb.models.creator_profile import GoalItem, DreamItem, IdeaItem, NoteItem, CityItem
 
 router = APIRouter(prefix="/api/creator", tags=["creator"])
 
@@ -30,6 +30,7 @@ class CreatorProfileRequest(BaseModel):
     action_history: Optional[str] = None
     ideas: Optional[List[IdeaItem]] = None
     notes: Optional[List[NoteItem]] = None
+    cities: Optional[List[CityItem]] = None
 
 
 class CreatorProfileResponse(BaseModel):
@@ -46,6 +47,7 @@ class CreatorProfileResponse(BaseModel):
     action_history: Optional[str] = None
     ideas: Optional[List[IdeaItem]] = None
     notes: Optional[List[NoteItem]] = None
+    cities: Optional[List[CityItem]] = None
 
 
 @router.get("", response_model=CreatorProfileResponse)
@@ -77,11 +79,14 @@ async def update_creator_profile(
 # ── Append single item to a list field ──────────────────
 
 class AppendItemRequest(BaseModel):
-    """Append a single item to goals, dreams, ideas, or notes."""
-    target: Literal["goals", "dreams", "ideas", "notes"]
+    """Append a single item to goals, dreams, ideas, notes, or cities."""
+    target: Literal["goals", "dreams", "ideas", "notes", "cities"]
     title: str = ""
     content: str = ""          # used for notes, ideas, and as description for goals/dreams
     priority: int = 1          # 0=high, 1=medium, 2=low (not used for notes)
+    # City-specific fields
+    country: str = ""          # country for cities
+    city_type: str = "interest"  # home, frequent, interest
 
 
 @router.post("/append-item", status_code=201)
@@ -109,6 +114,8 @@ async def append_creator_item(
         new_item = DreamItem(id=item_id, title=body.title, description=body.content, priority=body.priority)
     elif body.target == "ideas":
         new_item = IdeaItem(id=item_id, title=body.title, description=body.content, priority=body.priority)
+    elif body.target == "cities":
+        new_item = CityItem(id=item_id, name=body.title, country=body.country, type=body.city_type)
     else:
         raise HTTPException(status_code=400, detail=f"Unknown target: {body.target}")
 
