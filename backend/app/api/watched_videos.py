@@ -8,7 +8,7 @@ from typing import Optional, List
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel
 
@@ -380,6 +380,104 @@ async def fetch_video_transcript(
             video_id=video_id, transcript=transcript_text,
             language=lang or language, cached=False,
         )
+
+
+# ── Background transcript fetch ──────────────────────────────────────────
+
+
+async def _bg_fetch_transcript(video_id: str):
+    """Run transcript fetch in background. Gets its own DB handle."""
+    from app.database import get_mongodb as _get_db
+    from app.services.staged_pipeline import _detect_video_platform, _parse_transcript_response
+
+    db = _get_db()
+    svc = WatchedVideoService(db)
+    video = await svc.get_by_id(video_id)
+    if not video:
+        logger.error("BG transcript: video %s not found", video_id)
+        return
+
+    url = video.url
+    logger.info("BG transcript: starting for %s (%s)", url, video_id)
+    await _write_transcript_log(db, url, level="info", message="Background transcript fetch started", video_id=video_id)
+
+    api_key = await get_setting_value(db, "scrapecreators_api_key")
+    if not api_key:
+        await _write_transcript_log(db, url, level="error", message="ScrapeCreators API key not configured (background)")
+        await svc.collection.update_one({"_id": video_id}, {"$set": {"error": "ScrapeCreators API key not configured"}})
+        return
+
+    platform, api_path = _detect_video_platform(url)
+    if not platform:
+        await _write_transcript_log(db, url, level="error", message="Unsupported video URL (background)")
+        await svc.collection.update_one({"_id": video_id}, {"$set": {"error": "Unsupported video URL"}})
+        return
+
+    # Try with English language
+    params = {"url": url, "language": "en"}
+
+    timeout_str = await get_setting_value(db, "transcript_fetch_timeout")
+    timeout_sec = int(timeout_str) if timeout_str and timeout_str.isdigit() else 120
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout_sec) as client:
+            resp = await client.get(
+                f"https://api.scrapecreators.com{api_path}",
+                params=params,
+                headers={"x-api-key": api_key},
+            )
+        if resp.status_code != 200:
+            error_detail = resp.text[:500]
+            error_msg = f"HTTP {resp.status_code}: {error_detail}"
+            logger.warning("BG transcript error for %s: %s", url, error_msg)
+            await _write_transcript_log(db, url, platform=platform, level="error", message="BG ScrapeCreators error", details=error_detail)
+            await svc.collection.update_one({"_id": video_id}, {"$set": {"error": error_msg}})
+            return
+        data = resp.json()
+    except Exception as e:
+        logger.error("BG transcript exception for %s: %s", url, e)
+        await _write_transcript_log(db, url, platform=platform or "", level="error", message="BG fetch exception", details=str(e))
+        await svc.collection.update_one({"_id": video_id}, {"$set": {"error": str(e)[:500]}})
+        return
+
+    transcript_text, vid_id, segments, lang = _parse_transcript_response(platform, data)
+    if not transcript_text:
+        await _write_transcript_log(db, url, platform=platform, level="error", message="BG: no transcript text", details=f"keys={list(data.keys())}")
+        await svc.collection.update_one({"_id": video_id}, {"$set": {"error": "No transcript available", "video_id": vid_id, "language": lang}})
+        return
+
+    await svc.collection.update_one(
+        {"_id": video_id},
+        {"$set": {
+            "transcript": transcript_text,
+            "transcript_segments": segments,
+            "video_id": vid_id,
+            "language": lang or "en",
+            "error": None,
+            "metadata": {"raw_keys": list(data.keys())},
+        }},
+    )
+    await _write_transcript_log(db, url, platform=platform, video_id=vid_id or "", level="success",
+                                message="BG transcript fetched successfully", details=f"length={len(transcript_text)}, lang={lang}")
+    logger.info("BG transcript done for %s: %d chars", url, len(transcript_text))
+
+
+@router.post("/{video_id}/fetch-background", status_code=202)
+async def fetch_transcript_background(
+    video_id: str,
+    background_tasks: BackgroundTasks,
+    _user: MongoUser = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Trigger transcript fetch in background. Returns immediately."""
+    svc = WatchedVideoService(db)
+    video = await svc.get_by_id(video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    if video.transcript:
+        return {"status": "already_has_transcript", "video_id": video_id}
+    background_tasks.add_task(_bg_fetch_transcript, video_id)
+    return {"status": "started", "video_id": video_id}
 
 
 # ── Link / Unlink endpoints ────────────────────────────────────────────

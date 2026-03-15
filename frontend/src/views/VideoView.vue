@@ -26,6 +26,7 @@
         Transcript Logs
         <v-chip v-if="logErrorCount > 0" size="x-small" color="error" variant="flat" class="ml-2">{{ logErrorCount }}</v-chip>
       </v-tab>
+      <v-tab value="skills" prepend-icon="mdi-puzzle-outline">Skills</v-tab>
     </v-tabs>
 
     <!-- Error alert -->
@@ -257,6 +258,9 @@
           <v-spacer />
           <v-btn @click="addDialog = false">Cancel</v-btn>
           <v-btn color="primary" :loading="adding" :disabled="!addUrl?.trim()" @click="addVideo">Add</v-btn>
+          <v-btn color="teal" variant="tonal" :loading="addingWithTranscript" :disabled="!addUrl?.trim()" prepend-icon="mdi-text-recognition" @click="addVideoWithTranscript">
+            Add & Transcript
+          </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -476,6 +480,37 @@
 
       <v-progress-linear v-if="loadingLogs" indeterminate color="primary" class="mt-4" />
     </div>
+
+    <!-- ========== SKILLS TAB ========== -->
+    <div v-show="activeTab === 'skills'">
+      <v-alert type="info" variant="tonal" class="mb-4" density="compact">
+        These skills are available to agents when working with video content. Agents can call them automatically during conversations.
+      </v-alert>
+
+      <v-row>
+        <v-col v-for="skill in videoSkills" :key="skill.name" cols="12" md="6" lg="4">
+          <v-card variant="outlined" class="fill-height">
+            <v-card-title class="d-flex align-center text-subtitle-1">
+              <v-icon :color="skill.color" size="22" class="mr-2">{{ skill.icon }}</v-icon>
+              {{ skill.displayName }}
+            </v-card-title>
+            <v-card-subtitle class="pb-0">
+              <v-chip size="x-small" variant="tonal" :color="skill.catColor">{{ skill.category }}</v-chip>
+            </v-card-subtitle>
+            <v-card-text class="text-body-2">
+              {{ skill.description }}
+              <div v-if="skill.params.length" class="mt-3">
+                <div class="text-caption text-medium-emphasis font-weight-bold mb-1">Parameters</div>
+                <div v-for="p in skill.params" :key="p.name" class="d-flex align-start ga-2 mb-1">
+                  <code class="text-caption" style="white-space: nowrap;">{{ p.name }}</code>
+                  <span class="text-caption text-medium-emphasis">{{ p.desc }}</span>
+                </div>
+              </div>
+            </v-card-text>
+          </v-card>
+        </v-col>
+      </v-row>
+    </div>
   </div>
 </template>
 
@@ -521,10 +556,112 @@ const selectedItems = ref([])
 const addDialog = ref(false)
 const addUrl = ref('')
 const addCategory = ref(null)
+const addingWithTranscript = ref(false)
 const transcriptContainerRef = ref(null)
 
 // Tabs
 const activeTab = ref('videos')
+
+// Video-related skills
+const videoSkills = [
+  {
+    name: 'video_watch',
+    displayName: 'Video Watch',
+    description: 'Fetch video transcript or post content from YouTube (incl. Shorts), TikTok, Instagram, Facebook, Twitter/X, Threads, LinkedIn, Reddit, Twitch, or Kick via ScrapeCreators API. Results are cached in the watched videos database.',
+    icon: 'mdi-video-outline',
+    color: 'red',
+    category: 'web',
+    catColor: 'blue',
+    params: [
+      { name: 'url', desc: 'Full video/post URL (required)' },
+      { name: 'language', desc: '2-letter language code, e.g. en, es, ru (optional)' },
+    ],
+  },
+  {
+    name: 'study_material',
+    displayName: 'Study Material',
+    description: 'Study and deeply learn material from text, file, or topic. Creates a summary, extracts key topics, writes detailed notes with source references, and links everything in the knowledge graph.',
+    icon: 'mdi-book-open-page-variant',
+    color: 'purple',
+    category: 'general',
+    catColor: 'deep-purple',
+    params: [
+      { name: 'topic', desc: 'Subject to study (optional)' },
+      { name: 'text', desc: 'Direct text to study (optional)' },
+      { name: 'file_path', desc: 'Path to file in agent data/ folder (optional)' },
+      { name: 'depth', desc: 'quick, normal, or deep (default: normal)' },
+    ],
+  },
+  {
+    name: 'recall_knowledge',
+    displayName: 'Recall Knowledge',
+    description: 'Search and aggregate previously studied knowledge from memory. Provides structured answers based on what the agent has learned before.',
+    icon: 'mdi-brain',
+    color: 'deep-purple',
+    category: 'general',
+    catColor: 'deep-purple',
+    params: [
+      { name: 'query', desc: 'What to recall/remember (required)' },
+      { name: 'depth', desc: 'quick or detailed (default: quick)' },
+      { name: 'tags', desc: 'Filter by specific tags (optional)' },
+    ],
+  },
+  {
+    name: 'memory_store',
+    displayName: 'Memory Store',
+    description: 'Save information to the agent\'s long-term vector memory. Used to persist key facts, summaries, and insights from video analysis.',
+    icon: 'mdi-database-plus',
+    color: 'teal',
+    category: 'general',
+    catColor: 'deep-purple',
+    params: [
+      { name: 'title', desc: 'Memory entry title' },
+      { name: 'content', desc: 'Content to memorize' },
+      { name: 'type', desc: 'Entry type (fact, note, summary, etc.)' },
+      { name: 'importance', desc: 'Importance score 0-1' },
+      { name: 'tags', desc: 'Tags for categorization' },
+    ],
+  },
+  {
+    name: 'text_summarize',
+    displayName: 'Text Summarize',
+    description: 'Summarize text using LLM. Useful for creating concise summaries of long video transcripts.',
+    icon: 'mdi-text-box-check',
+    color: 'blue',
+    category: 'general',
+    catColor: 'deep-purple',
+    params: [
+      { name: 'text', desc: 'Text to summarize' },
+      { name: 'max_length', desc: 'Max summary length (default: 200)' },
+    ],
+  },
+  {
+    name: 'speech_recognize',
+    displayName: 'Speech Recognize (STT)',
+    description: 'Transcribe audio to text using OpenAI Whisper. Use for audio files that need transcription (not needed for videos — video_watch handles that).',
+    icon: 'mdi-microphone',
+    color: 'orange',
+    category: 'general',
+    catColor: 'deep-purple',
+    params: [
+      { name: 'audio_url', desc: 'URL or path to audio file (required)' },
+      { name: 'language', desc: 'Language code for accuracy (optional)' },
+    ],
+  },
+  {
+    name: 'humanize_text',
+    displayName: 'Humanize Text',
+    description: 'Rewrite AI-sounding text to sound natural and human. Checks for 24 common AI patterns (significance inflation, AI vocabulary, em dash overuse, sycophantic tone, etc.) and rewrites the text.',
+    icon: 'mdi-account-edit',
+    color: 'pink',
+    category: 'general',
+    catColor: 'deep-purple',
+    params: [
+      { name: 'text', desc: 'Text to humanize (required)' },
+      { name: 'tone', desc: 'neutral, casual, or formal (default: neutral)' },
+    ],
+  },
+]
 
 // Transcript logs
 const logs = ref([])
@@ -686,6 +823,30 @@ async function addVideo() {
     errorMsg.value = e.response?.data?.detail || 'Failed to add video'
   } finally {
     adding.value = false
+  }
+}
+
+async function addVideoWithTranscript() {
+  if (!addUrl.value?.trim()) return
+  addingWithTranscript.value = true
+  errorMsg.value = null
+  try {
+    const payload = { url: addUrl.value.trim() }
+    if (addCategory.value) payload.category = addCategory.value
+    const { data } = await api.post('/watched-videos', payload)
+    // Trigger background transcript fetch (fire & forget)
+    api.post(`/watched-videos/${data.id}/fetch-background`).then(() => {
+      showSnackbar?.('Transcript is being fetched in background...', 'info')
+    }).catch(() => {})
+    addUrl.value = ''
+    addCategory.value = null
+    addDialog.value = false
+    await loadHistory()
+    showSnackbar?.('Video added. Transcript fetching in background.', 'success')
+  } catch (e) {
+    errorMsg.value = e.response?.data?.detail || 'Failed to add video'
+  } finally {
+    addingWithTranscript.value = false
   }
 }
 

@@ -84,7 +84,7 @@ class ResourceResponse(BaseModel):
 # ── Helpers ──────────────────────────────────────────
 
 VALID_TRUST_LEVELS = ("low", "medium", "high", "highest")
-VALID_CATEGORIES = ("docs", "forum", "wiki", "news", "code", "general", "academic", "social", "search")
+VALID_CATEGORIES = ("docs", "forum", "wiki", "news", "code", "general", "academic", "social", "search", "patent")
 
 
 def _resource_to_response(r: MongoResearchResource) -> dict:

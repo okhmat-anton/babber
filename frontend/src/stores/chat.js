@@ -249,11 +249,15 @@ export const useChatStore = defineStore('chat', {
 
             const isNetworkError = !e.response && e.message === 'Network Error'
             const isTimeout = e.code === 'ECONNABORTED'
+            const httpStatus = e.response?.status
+            const isServerError = httpStatus && httpStatus >= 500
 
-            // Retry only on transient network errors (not HTTP errors)
-            if ((isNetworkError || isTimeout) && attempt < MAX_RETRIES) {
-              console.warn(`Chat request failed (attempt ${attempt + 1}), retrying...`, e.message)
-              await new Promise(r => setTimeout(r, 1000 * (attempt + 1)))
+            // Retry on transient errors: network, timeout, or server 5xx (overloaded, etc.)
+            if ((isNetworkError || isTimeout || isServerError) && attempt < MAX_RETRIES) {
+              console.warn(`Chat request failed (attempt ${attempt + 1}/${MAX_RETRIES + 1}), retrying...`, e.message)
+              // On retry, use replace_last to avoid duplicating user message in DB
+              replaceLast = true
+              await new Promise(r => setTimeout(r, 2000 * (attempt + 1)))
               continue
             }
 

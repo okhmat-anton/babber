@@ -1,9 +1,10 @@
 <template>
   <div>
-    <div class="d-flex align-center mb-6">
+    <div class="d-flex align-center mb-4">
       <div class="text-h4 font-weight-bold">Research Resources</div>
       <v-spacer />
       <v-text-field
+        v-if="activeTab === 'resources'"
         v-model="searchQuery"
         density="compact"
         variant="outlined"
@@ -15,8 +16,17 @@
         style="max-width: 300px"
         @update:model-value="debouncedSearch"
       />
-      <v-btn color="primary" prepend-icon="mdi-plus" @click="openCreate">New Resource</v-btn>
+      <v-btn v-if="activeTab === 'resources'" color="primary" prepend-icon="mdi-plus" @click="openCreate">New Resource</v-btn>
     </div>
+
+    <!-- Tabs -->
+    <v-tabs v-model="activeTab" class="mb-4" density="compact">
+      <v-tab value="resources" prepend-icon="mdi-earth">Resources</v-tab>
+      <v-tab value="skills" prepend-icon="mdi-puzzle-outline">Skills</v-tab>
+    </v-tabs>
+
+    <!-- ========== RESOURCES TAB ========== -->
+    <div v-show="activeTab === 'resources'">
 
     <!-- Filters -->
     <div class="d-flex align-center ga-3 mb-4">
@@ -297,6 +307,38 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+    </div>
+
+    <!-- ========== SKILLS TAB ========== -->
+    <div v-show="activeTab === 'skills'">
+      <v-alert type="info" variant="tonal" class="mb-4" density="compact">
+        These skills allow agents to discover, fetch, and learn from research resources during conversations.
+      </v-alert>
+
+      <v-row>
+        <v-col v-for="skill in researchSkills" :key="skill.name" cols="12" md="6" lg="4">
+          <v-card variant="outlined" class="fill-height">
+            <v-card-title class="d-flex align-center text-subtitle-1">
+              <v-icon :color="skill.color" size="22" class="mr-2">{{ skill.icon }}</v-icon>
+              {{ skill.displayName }}
+            </v-card-title>
+            <v-card-subtitle class="pb-0">
+              <v-chip size="x-small" variant="tonal" :color="skill.catColor">{{ skill.category }}</v-chip>
+            </v-card-subtitle>
+            <v-card-text class="text-body-2">
+              {{ skill.description }}
+              <div v-if="skill.params.length" class="mt-3">
+                <div class="text-caption text-medium-emphasis font-weight-bold mb-1">Parameters</div>
+                <div v-for="p in skill.params" :key="p.name" class="d-flex align-start ga-2 mb-1">
+                  <code class="text-caption" style="white-space: nowrap;">{{ p.name }}</code>
+                  <span class="text-caption text-medium-emphasis">{{ p.desc }}</span>
+                </div>
+              </div>
+            </v-card-text>
+          </v-card>
+        </v-col>
+      </v-row>
+    </div>
   </div>
 </template>
 
@@ -307,6 +349,135 @@ import { useResearchResourcesStore } from '../stores/researchResources'
 const store = useResearchResourcesStore()
 
 const selectedTags = ref([])
+const activeTab = ref('resources')
+
+// Research-related skills
+const researchSkills = [
+  {
+    name: 'web_search',
+    displayName: 'Web Search',
+    description: 'Search the internet via DuckDuckGo. Returns search results with titles, URLs, and snippets. The starting point for most research tasks.',
+    icon: 'mdi-magnify',
+    color: 'amber',
+    category: 'web',
+    catColor: 'blue',
+    params: [
+      { name: 'query', desc: 'Search query (required)' },
+      { name: 'limit', desc: 'Max results (default: 10)' },
+      { name: 'region', desc: 'Region code, e.g. us-en, ru-ru (optional)' },
+    ],
+  },
+  {
+    name: 'web_fetch',
+    displayName: 'Web Fetch',
+    description: 'HTTP GET/POST requests to any URL. Fetches the raw content of a page. Used to retrieve articles, documentation, and data from research resources.',
+    icon: 'mdi-download',
+    color: 'blue',
+    category: 'web',
+    catColor: 'blue',
+    params: [
+      { name: 'url', desc: 'URL to fetch (required)' },
+      { name: 'method', desc: 'HTTP method: GET or POST (default: GET)' },
+    ],
+  },
+  {
+    name: 'web_scrape',
+    displayName: 'Web Scrape',
+    description: 'Parse and extract specific data from HTML pages using BeautifulSoup CSS selectors. Useful for structured extraction from research sites.',
+    icon: 'mdi-code-tags',
+    color: 'green',
+    category: 'web',
+    catColor: 'blue',
+    params: [
+      { name: 'url', desc: 'URL to scrape (required)' },
+      { name: 'selector', desc: 'CSS selector to extract' },
+    ],
+  },
+  {
+    name: 'study_material',
+    displayName: 'Study Material',
+    description: 'Study and deeply learn material from text, file, or topic. Creates a summary, extracts key topics, writes detailed notes with source references, and links everything in the knowledge graph.',
+    icon: 'mdi-book-open-page-variant',
+    color: 'purple',
+    category: 'general',
+    catColor: 'deep-purple',
+    params: [
+      { name: 'topic', desc: 'Subject to study (optional)' },
+      { name: 'text', desc: 'Direct text to study (optional)' },
+      { name: 'file_path', desc: 'Path to file in agent data/ (optional)' },
+      { name: 'depth', desc: 'quick, normal, or deep (default: normal)' },
+    ],
+  },
+  {
+    name: 'recall_knowledge',
+    displayName: 'Recall Knowledge',
+    description: 'Search and aggregate previously studied knowledge from memory. Provides structured answers based on what the agent has learned from past research.',
+    icon: 'mdi-brain',
+    color: 'deep-purple',
+    category: 'general',
+    catColor: 'deep-purple',
+    params: [
+      { name: 'query', desc: 'What to recall/remember (required)' },
+      { name: 'depth', desc: 'quick or detailed (default: quick)' },
+      { name: 'tags', desc: 'Filter by specific tags (optional)' },
+    ],
+  },
+  {
+    name: 'memory_store',
+    displayName: 'Memory Store',
+    description: 'Save information to the agent\'s long-term vector memory. Used to persist key facts, findings, and insights from research sessions.',
+    icon: 'mdi-database-plus',
+    color: 'teal',
+    category: 'general',
+    catColor: 'deep-purple',
+    params: [
+      { name: 'title', desc: 'Memory entry title' },
+      { name: 'content', desc: 'Content to memorize' },
+      { name: 'type', desc: 'Entry type (fact, note, summary, etc.)' },
+      { name: 'importance', desc: 'Importance score 0-1' },
+      { name: 'tags', desc: 'Tags for categorization' },
+    ],
+  },
+  {
+    name: 'memory_search',
+    displayName: 'Memory Search',
+    description: 'Semantic search through the agent\'s memory. Finds previously stored research findings, facts, and notes by meaning, not just keywords.',
+    icon: 'mdi-database-search',
+    color: 'cyan',
+    category: 'general',
+    catColor: 'deep-purple',
+    params: [
+      { name: 'query', desc: 'Semantic search query (required)' },
+      { name: 'limit', desc: 'Max results (default: 5)' },
+    ],
+  },
+  {
+    name: 'text_summarize',
+    displayName: 'Text Summarize',
+    description: 'Summarize text using LLM. Condense long articles, papers, or documentation into concise summaries.',
+    icon: 'mdi-text-box-check',
+    color: 'blue',
+    category: 'general',
+    catColor: 'deep-purple',
+    params: [
+      { name: 'text', desc: 'Text to summarize' },
+      { name: 'max_length', desc: 'Max summary length (default: 200)' },
+    ],
+  },
+  {
+    name: 'humanize_text',
+    displayName: 'Humanize Text',
+    description: 'Rewrite AI-sounding text to sound natural and human. Removes 24 common AI patterns from research summaries and articles.',
+    icon: 'mdi-account-edit',
+    color: 'pink',
+    category: 'general',
+    catColor: 'deep-purple',
+    params: [
+      { name: 'text', desc: 'Text to humanize (required)' },
+      { name: 'tone', desc: 'neutral, casual, or formal (default: neutral)' },
+    ],
+  },
+]
 
 // ── Table config ──
 const headers = [

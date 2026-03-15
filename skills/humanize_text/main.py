@@ -1,13 +1,41 @@
-import httpx
-from app.config import settings
+from app.config import get_settings
 from app.database import get_mongodb
-from app.mongodb.services import ModelConfigService
+from app.services.model_role_service import resolve_model_for_role
+from app.api.settings import get_setting_value
+from app.llm.base import Message, GenerationParams
+from app.llm.ollama import OllamaProvider
+from app.llm.anthropic import AnthropicProvider
+from app.llm.kieai import KieAIProvider
+from app.llm.openai_compatible import OpenAICompatibleProvider
+
+
 async def execute(text, tone='neutral', **kwargs):
     db = get_mongodb()
-    mc_svc = ModelConfigService(db)
-    # Try to find a model with 'base' role
-    mc = await mc_svc.find_one({'role': 'base'})
-    model_id = mc.model_id if mc else 'llama3.1:8b'
+    settings = get_settings()
+
+    # Resolve model using the standard fallback chain:
+    # exact role 'base' -> first active Ollama -> first active API model
+    mc = await resolve_model_for_role(db, 'base')
+    if not mc:
+        return {'error': 'No LLM model configured. Add a model in Settings > Models.'}
+
+    provider_name = mc.provider
+    model_name = mc.model_id
+    api_key = mc.api_key
+    base_url = mc.base_url
+
+    # Resolve provider-specific settings
+    if provider_name == 'ollama':
+        base_url = settings.OLLAMA_BASE_URL
+    elif provider_name == 'anthropic' and not api_key:
+        api_key = await get_setting_value(db, 'anthropic_api_key')
+        base_url = base_url or 'https://api.anthropic.com'
+    elif provider_name == 'kieai' and not api_key:
+        api_key = await get_setting_value(db, 'kieai_api_key')
+        base_url = base_url or 'https://api.kie.ai'
+    else:
+        base_url = base_url or 'https://api.openai.com/v1'
+
     system_prompt = (
         'You are a writing editor that identifies and removes signs of AI-generated text. '
         'Your job: take the input text and rewrite it to sound human and natural.\n\n'
@@ -55,17 +83,23 @@ async def execute(text, tone='neutral', **kwargs):
         'anti-AI audit (ask "what makes this obviously AI?") → second rewrite.\n\n'
         'Output ONLY the rewritten text. No explanations, no preamble.'
     )
-    ollama_url = settings.OLLAMA_BASE_URL
-    async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(
-            f'{ollama_url}/api/chat',
-            json={'model': model_id, 'messages': [
-                {'role': 'system', 'content': system_prompt},
-                {'role': 'user', 'content': text},
-            ], 'stream': False},
-        )
-        if resp.status_code != 200:
-            return {'error': f'LLM error {resp.status_code}: {resp.text[:500]}'}
-        data = resp.json()
-        result = data.get('message', {}).get('content', '')
+
+    messages = [
+        Message(role='system', content=system_prompt),
+        Message(role='user', content=text),
+    ]
+    params = GenerationParams(temperature=0.8, max_tokens=32768)
+
+    # Use the proper LLM provider
+    if provider_name == 'ollama':
+        llm = OllamaProvider(base_url)
+    elif provider_name == 'anthropic':
+        llm = AnthropicProvider(api_key=api_key, base_url=base_url)
+    elif provider_name == 'kieai':
+        llm = KieAIProvider(api_key=api_key, base_url=base_url)
+    else:
+        llm = OpenAICompatibleProvider(base_url, api_key)
+
+    resp = await llm.chat(model_name, messages, params)
+    result = resp.content
     return {'original_length': len(text), 'humanized_length': len(result), 'text': result}
