@@ -104,12 +104,9 @@ async def list_watched_videos(
             filt["platform"] = platform
         if category:
             filt["category"] = category
-        if filt:
-            cursor = svc.collection.find(filt).sort("created_at", -1).skip(offset).limit(limit)
-            docs = await cursor.to_list(length=limit)
-            items = [MongoWatchedVideo.from_mongo(doc) for doc in docs]
-        else:
-            items = await svc.get_all(skip=offset, limit=limit)
+        cursor = svc.collection.find(filt).sort("created_at", -1).skip(offset).limit(limit)
+        docs = await cursor.to_list(length=limit)
+        items = [MongoWatchedVideo.from_mongo(doc) for doc in docs]
 
     total = await svc.count({})
     return WatchedVideoListResponse(
@@ -163,6 +160,7 @@ async def delete_all_watched_videos(
 class UpdateVideoRequest(BaseModel):
     category: Optional[str] = None
     title: Optional[str] = None
+    transcript: Optional[str] = None
     agent_id: Optional[str] = None
     linked_fact_ids: Optional[list[str]] = None
     linked_analysis_ids: Optional[list[str]] = None

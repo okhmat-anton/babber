@@ -393,13 +393,39 @@
           </div>
 
           <!-- Transcript text -->
-          <div v-if="transcript" ref="transcriptContainerRef" class="transcript-box pa-4 rounded-lg" style="
-            background: rgba(255,255,255,0.03);
-            border: 1px solid rgba(255,255,255,0.08);
-            white-space: pre-wrap;
-            font-size: 13px;
-            line-height: 1.7;
-          ">{{ transcript }}</div>
+          <div v-if="transcript && !editingTranscript" class="position-relative">
+            <v-btn
+              icon size="x-small" variant="text" color="grey"
+              style="position: absolute; top: 8px; right: 8px; z-index: 1;"
+              @click="startEditTranscript"
+            >
+              <v-icon size="16">mdi-pencil</v-icon>
+              <v-tooltip activator="parent" location="top">Edit transcript</v-tooltip>
+            </v-btn>
+            <div ref="transcriptContainerRef" class="transcript-box pa-4 rounded-lg" style="
+              background: rgba(255,255,255,0.03);
+              border: 1px solid rgba(255,255,255,0.08);
+              white-space: pre-wrap;
+              font-size: 13px;
+              line-height: 1.7;
+            ">{{ transcript }}</div>
+          </div>
+
+          <div v-else-if="editingTranscript">
+            <v-textarea
+              v-model="editedTranscript"
+              variant="outlined"
+              density="compact"
+              auto-grow
+              :rows="12"
+              :max-rows="30"
+              style="font-size: 13px; line-height: 1.7;"
+            />
+            <div class="d-flex ga-2 mt-1">
+              <v-btn color="primary" size="small" :loading="savingTranscript" @click="saveTranscript" prepend-icon="mdi-content-save">Save</v-btn>
+              <v-btn variant="text" size="small" @click="editingTranscript = false">Cancel</v-btn>
+            </div>
+          </div>
 
           <div v-else-if="!fetching" class="text-center text-grey py-8">
             <v-icon size="48" class="mb-2" color="grey-darken-1">mdi-text-recognition</v-icon>
@@ -533,6 +559,9 @@ const fetching = ref(false)
 const fetchingId = ref(null)
 const currentVideo = ref(null)
 const transcript = ref('')
+const editingTranscript = ref(false)
+const editedTranscript = ref('')
+const savingTranscript = ref(false)
 const errorMsg = ref(null)
 const detailDialog = ref(false)
 const filterPlatform = ref('')
@@ -835,16 +864,21 @@ async function addVideoWithTranscript() {
   try {
     const payload = { url: addUrl.value.trim() }
     if (addCategory.value) payload.category = addCategory.value
+
+    // Step 1: Create the video record first
     const { data } = await api.post('/watched-videos', payload)
-    // Trigger background transcript fetch (fire & forget)
-    api.post(`/watched-videos/${data.id}/fetch-background`).then(() => {
-      showSnackbar?.('Transcript is being fetched in background...', 'info')
-    }).catch(() => {})
+
+    // Step 2: Close dialog and show in list immediately
     addUrl.value = ''
     addCategory.value = null
     addDialog.value = false
     await loadHistory()
-    showSnackbar?.('Video added. Transcript fetching in background.', 'success')
+    showSnackbar?.('Video added! Fetching transcript in background...', 'success')
+
+    // Step 3: Trigger background transcript fetch (fire & forget)
+    api.post(`/watched-videos/${data.id}/fetch-background`).catch((err) => {
+      console.warn('Background transcript fetch failed:', err)
+    })
   } catch (e) {
     errorMsg.value = e.response?.data?.detail || 'Failed to add video'
   } finally {
@@ -864,6 +898,7 @@ function openVideo(item) {
   factsResult.value = null
   memoryResult.value = null
   errorMsg.value = null
+  editingTranscript.value = false
   if (item.transcript) {
     loadFullTranscript(item)
   } else {
@@ -878,6 +913,26 @@ async function loadFullTranscript(item) {
     transcript.value = data.transcript || item.transcript || ''
   } catch {
     transcript.value = item.transcript || ''
+  }
+}
+
+function startEditTranscript() {
+  editedTranscript.value = transcript.value
+  editingTranscript.value = true
+}
+
+async function saveTranscript() {
+  if (!currentVideo.value) return
+  savingTranscript.value = true
+  try {
+    await api.patch(`/watched-videos/${currentVideo.value.id}`, { transcript: editedTranscript.value })
+    transcript.value = editedTranscript.value
+    editingTranscript.value = false
+    showSnackbar?.('Transcript updated', 'success')
+  } catch (e) {
+    showSnackbar?.('Failed to save transcript', 'error')
+  } finally {
+    savingTranscript.value = false
   }
 }
 

@@ -137,6 +137,72 @@ def _parse_token_ids(raw) -> dict:
         return {"token_id_yes": None, "token_id_no": None}
 
 
+# ─── Derive API Keys (L1 auth with private key) ───
+
+@router.post("/derive-api-keys")
+async def derive_api_keys(db: AsyncIOMotorDatabase = Depends(get_mongodb)):
+    """Derive or create CLOB API credentials using wallet private key (L1 auth).
+
+    Uses the official py-clob-client SDK to sign with the private key,
+    then stores the resulting api_key, api_secret, passphrase, address.
+    """
+    private_key = await get_setting_value(db, "polymarket_private_key")
+    if not private_key or not private_key.strip():
+        raise HTTPException(status_code=400, detail="Private key not configured. Enter your wallet private key in Settings.")
+
+    private_key = private_key.strip()
+    # Ensure the key has 0x prefix for the SDK
+    if not private_key.startswith("0x"):
+        private_key = "0x" + private_key
+
+    try:
+        from py_clob_client.client import ClobClient
+
+        clob = ClobClient(
+            CLOB_API,
+            chain_id=137,
+            key=private_key,
+        )
+        wallet_address = clob.get_address()
+        logger.info("Deriving API keys for address: %s", wallet_address)
+
+        # Try derive first (if keys already exist), fall back to create
+        creds = clob.create_or_derive_api_creds()
+        if not creds:
+            raise HTTPException(status_code=500, detail="Failed to derive API credentials from Polymarket")
+
+        # Save all credentials to system settings via MongoDB directly
+        from app.mongodb.services import SystemSettingService
+        from app.mongodb.models import MongoSystemSetting
+        svc = SystemSettingService(db)
+        for key, value in [
+            ("polymarket_api_key", creds.api_key),
+            ("polymarket_api_secret", creds.api_secret),
+            ("polymarket_passphrase", creds.api_passphrase),
+            ("polymarket_address", wallet_address),
+        ]:
+            existing = await svc.get_by_key(key)
+            if existing:
+                await svc.update(existing.id, {"value": value})
+            else:
+                await svc.create(MongoSystemSetting(key=key, value=value))
+
+        logger.info("API keys derived successfully for %s, key=%s...", wallet_address, creds.api_key[:12])
+
+        return {
+            "success": True,
+            "api_key": creds.api_key,
+            "api_secret": creds.api_secret[:6] + "***",
+            "passphrase": creds.api_passphrase[:6] + "***",
+            "address": wallet_address,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to derive API keys: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to derive API keys: {str(e)}")
+
+
 # ─── Events (public, no auth needed) ───
 
 @router.get("/events")

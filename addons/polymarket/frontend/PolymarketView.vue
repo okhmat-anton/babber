@@ -638,6 +638,36 @@
           <p class="text-body-2 text-medium-emphasis mb-4">
             Enter your Polymarket CLOB API credentials to enable trading, positions and balance features.
           </p>
+
+          <!-- Private Key + Derive -->
+          <v-text-field
+            v-model="settingsForm.polymarket_private_key"
+            label="Wallet Private Key (for L1 auth)"
+            variant="outlined"
+            density="compact"
+            class="mb-2"
+            :append-inner-icon="showPrivateKey ? 'mdi-eye-off' : 'mdi-eye'"
+            :type="showPrivateKey ? 'text' : 'password'"
+            @click:append-inner="showPrivateKey = !showPrivateKey"
+            placeholder="0x... your wallet private key (hex)"
+            hint="Used to derive fresh API credentials automatically"
+            persistent-hint
+          />
+          <v-btn
+            color="secondary"
+            variant="tonal"
+            size="small"
+            class="mb-5"
+            :loading="derivingKeys"
+            :disabled="!settingsForm.polymarket_private_key"
+            @click="deriveApiKeys"
+            prepend-icon="mdi-key-chain"
+          >
+            Derive API Keys
+          </v-btn>
+
+          <v-divider class="mb-4" />
+
           <v-text-field
             v-model="settingsForm.polymarket_api_key"
             label="API Key"
@@ -782,11 +812,14 @@ const showApiKey = ref(false)
 const showApiSecret = ref(false)
 const showPassphrase = ref(false)
 const settingsForm = ref({
+  polymarket_private_key: '',
   polymarket_api_key: '',
   polymarket_api_secret: '',
   polymarket_passphrase: '',
   polymarket_address: '',
 })
+const showPrivateKey = ref(false)
+const derivingKeys = ref(false)
 
 // VPN toggle
 const vpnEnabled = ref(false)
@@ -810,6 +843,7 @@ watch(activeTab, (tab) => {
   if (tab === 'settings') {
     const s = settingsStore.systemSettings
     settingsForm.value = {
+      polymarket_private_key: s.polymarket_private_key?.value || '',
       polymarket_api_key: s.polymarket_api_key?.value || '',
       polymarket_api_secret: s.polymarket_api_secret?.value || '',
       polymarket_passphrase: s.polymarket_passphrase?.value || '',
@@ -995,7 +1029,7 @@ async function saveSettings() {
   settingsSaving.value = true
   settingsSaved.value = false
   try {
-    const keys = ['polymarket_api_key', 'polymarket_api_secret', 'polymarket_passphrase', 'polymarket_address']
+    const keys = ['polymarket_private_key', 'polymarket_api_key', 'polymarket_api_secret', 'polymarket_passphrase', 'polymarket_address']
     for (const key of keys) {
       await settingsStore.updateSystemSetting(key, settingsForm.value[key])
     }
@@ -1005,6 +1039,31 @@ async function saveSettings() {
     errorMsg.value = 'Failed to save settings'
   } finally {
     settingsSaving.value = false
+  }
+}
+
+async function deriveApiKeys() {
+  derivingKeys.value = true
+  try {
+    // Save the private key first so backend can read it
+    await settingsStore.updateSystemSetting('polymarket_private_key', settingsForm.value.polymarket_private_key)
+
+    const { data } = await api.post('/addons/polymarket/derive-api-keys')
+    if (data.success) {
+      // Reload settings to get the derived values
+      await settingsStore.fetchSystemSettings()
+      const s = settingsStore.systemSettings
+      settingsForm.value.polymarket_api_key = s.polymarket_api_key?.value || ''
+      settingsForm.value.polymarket_api_secret = s.polymarket_api_secret?.value || ''
+      settingsForm.value.polymarket_passphrase = s.polymarket_passphrase?.value || ''
+      settingsForm.value.polymarket_address = s.polymarket_address?.value || ''
+      showSnackbar(`API keys derived for ${data.address}`, 'success')
+    }
+  } catch (e) {
+    const msg = e.response?.data?.detail || 'Failed to derive API keys'
+    showSnackbar(msg, 'error')
+  } finally {
+    derivingKeys.value = false
   }
 }
 

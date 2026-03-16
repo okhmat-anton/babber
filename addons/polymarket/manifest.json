@@ -12,6 +12,11 @@
   },
   "settings": [
     {
+      "key": "polymarket_private_key",
+      "description": "Wallet private key (hex) for L1 auth — used to derive API keys automatically",
+      "default": ""
+    },
+    {
       "key": "polymarket_api_key",
       "description": "Polymarket API key for placing bets and accessing account data",
       "default": ""
