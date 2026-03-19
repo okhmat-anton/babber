@@ -182,7 +182,12 @@
                   @click="expensesCollapsed = !expensesCollapsed"
                   class="mr-1"
                 />
-                <span class="text-h6 text-red">${{ fmt(totalExpenseWithLoans) }}</span>
+                <div class="text-right">
+                  <span class="text-h6 text-red">${{ fmt(totalExpenseWithLoans) }}</span>
+                  <div v-if="summary && summary.entries_expense_no_daily > 0 && summary.entries_expense_no_daily !== summary.total_expense" class="text-caption text-medium-emphasis" style="line-height: 1;">
+                    w/o daily: ${{ fmt(summary.entries_expense_no_daily) }}
+                  </div>
+                </div>
               </div>
 
               <div v-if="expenseEntries.length === 0" class="text-center text-medium-emphasis py-4">
