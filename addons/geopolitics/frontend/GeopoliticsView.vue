@@ -412,16 +412,6 @@
           <span class="text-subtitle-2 text-medium-emphasis">{{ summaries.length }} saved briefing{{ summaries.length !== 1 ? 's' : '' }}</span>
         </v-col>
         <v-col cols="auto" class="d-flex ga-2 align-center">
-          <v-select
-            v-model="summaryLang"
-            :items="summaryLangs"
-            item-title="label"
-            item-value="value"
-            density="compact"
-            variant="outlined"
-            hide-details
-            style="max-width: 140px"
-          />
           <v-btn color="amber-darken-3" variant="flat" size="small" :loading="summarizing" @click="summarizeDay">
             <v-icon start>mdi-plus</v-icon> Daily
           </v-btn>
