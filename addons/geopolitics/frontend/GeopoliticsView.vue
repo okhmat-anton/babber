@@ -13,7 +13,23 @@
           </div>
         </div>
       </v-col>
-      <v-col cols="auto" class="d-flex ga-2">
+      <v-col cols="auto" class="d-flex ga-2 align-center">
+        <v-select
+          v-model="summaryLang"
+          :items="summaryLangs"
+          item-title="label"
+          item-value="value"
+          density="compact"
+          variant="outlined"
+          hide-details
+          style="max-width: 140px"
+        />
+        <v-btn color="amber-darken-3" variant="flat" :loading="summarizing" @click="summarizeDay" size="small">
+          <v-icon start>mdi-text-box-search-outline</v-icon> Summarize Today
+        </v-btn>
+        <v-btn color="deep-purple" variant="flat" :loading="summarizingMonth" @click="summarizeMonth" size="small">
+          <v-icon start>mdi-calendar-month</v-icon> Monthly
+        </v-btn>
         <v-chip variant="tonal" color="red-darken-2">
           <v-icon start>mdi-newspaper</v-icon>
           {{ stats.news_articles || 0 }} articles
@@ -27,6 +43,10 @@
 
     <!-- Tabs -->
     <v-tabs v-model="tab" color="red-darken-2" class="mb-4">
+      <v-tab value="summaries">
+        <v-icon start>mdi-text-box-multiple-outline</v-icon> Summaries
+        <v-badge v-if="summaries.length" :content="summaries.length" color="amber-darken-3" inline class="ml-1" />
+      </v-tab>
       <v-tab value="news">
         <v-icon start>mdi-newspaper-variant-outline</v-icon> News Feed
       </v-tab>
@@ -247,10 +267,10 @@
         v-for="item in filteredPentagon"
         :key="item._id"
         variant="outlined"
-        class="mb-2"
+        class="mb-3"
       >
-        <v-card-text class="d-flex align-center ga-3 py-3">
-          <v-icon size="small" color="blue-grey">mdi-shield-star</v-icon>
+        <v-card-text class="d-flex align-start ga-3 py-3">
+          <v-icon size="small" color="blue-grey" class="mt-1">mdi-shield-star</v-icon>
           <div class="flex-grow-1">
             <div class="d-flex align-center ga-2 mb-1">
               <v-chip size="x-small" variant="tonal" color="blue-grey">{{ item.source_type }}</v-chip>
@@ -258,11 +278,17 @@
               <v-spacer />
               <span class="text-caption text-medium-emphasis">{{ formatDate(item.published_at) }}</span>
             </div>
-            <a v-if="item.url" :href="item.url" target="_blank" class="text-body-2 font-weight-medium text-decoration-none" style="color: inherit">
-              {{ item.title }}
+            <a v-if="item.url" :href="item.url" target="_blank" class="text-subtitle-2 font-weight-medium text-decoration-none" style="color: inherit">
+              {{ decodeHtml(item.title) }}
               <v-icon size="x-small" class="ml-1">mdi-open-in-new</v-icon>
             </a>
-            <span v-else class="text-body-2 font-weight-medium">{{ item.title }}</span>
+            <span v-else class="text-subtitle-2 font-weight-medium">{{ decodeHtml(item.title) }}</span>
+            <p v-if="item.summary" class="text-body-2 text-medium-emphasis mt-1 mb-1">
+              {{ decodeHtml(item.summary).substring(0, 400) }}{{ item.summary.length > 400 ? '...' : '' }}
+            </p>
+            <div v-if="item.tags?.length" class="d-flex ga-1 flex-wrap mt-1">
+              <v-chip v-for="t in item.tags" :key="t" size="x-small" variant="tonal">{{ t }}</v-chip>
+            </div>
           </div>
           <v-btn icon size="x-small" variant="text" color="red" @click="deletePentagonItem(item._id)">
             <v-icon size="small">mdi-delete-outline</v-icon>
@@ -370,12 +396,78 @@
           </div>
           <h3 class="text-subtitle-1 font-weight-medium">
             <a v-if="article.url" :href="article.url" target="_blank" class="text-decoration-none" style="color: inherit">
-              {{ article.title }} <v-icon size="x-small">mdi-open-in-new</v-icon>
+              {{ decodeHtml(article.title) }} <v-icon size="x-small">mdi-open-in-new</v-icon>
             </a>
-            <span v-else>{{ article.title }}</span>
+            <span v-else>{{ decodeHtml(article.title) }}</span>
           </h3>
-          <p v-if="article.summary" class="text-body-2 text-medium-emphasis mt-1">{{ article.summary.substring(0, 200) }}</p>
+          <p v-if="article.summary" class="text-body-2 text-medium-emphasis mt-1">{{ decodeHtml(article.summary).substring(0, 200) }}</p>
         </v-card-text>
+      </v-card>
+    </div>
+
+    <!-- ========== Summaries History Tab ========== -->
+    <div v-if="tab === 'summaries'">
+      <v-row class="mb-4" align="center">
+        <v-col>
+          <span class="text-subtitle-2 text-medium-emphasis">{{ summaries.length }} saved briefing{{ summaries.length !== 1 ? 's' : '' }}</span>
+        </v-col>
+        <v-col cols="auto" class="d-flex ga-2 align-center">
+          <v-select
+            v-model="summaryLang"
+            :items="summaryLangs"
+            item-title="label"
+            item-value="value"
+            density="compact"
+            variant="outlined"
+            hide-details
+            style="max-width: 140px"
+          />
+          <v-btn color="amber-darken-3" variant="flat" size="small" :loading="summarizing" @click="summarizeDay">
+            <v-icon start>mdi-plus</v-icon> Daily
+          </v-btn>
+          <v-btn color="deep-purple" variant="flat" size="small" :loading="summarizingMonth" @click="summarizeMonth">
+            <v-icon start>mdi-calendar-month</v-icon> Monthly
+          </v-btn>
+          <v-btn v-if="summaries.length" color="red" variant="outlined" size="small" @click="clearSummaries">
+            <v-icon start>mdi-delete-forever</v-icon> Clear All
+          </v-btn>
+        </v-col>
+      </v-row>
+
+      <v-card v-if="summaries.length === 0" variant="outlined" class="text-center pa-8">
+        <v-icon size="64" color="grey">mdi-text-box-remove-outline</v-icon>
+        <p class="text-h6 mt-4">No summaries yet</p>
+        <p class="text-medium-emphasis">Click "Summarize Today" to generate your first daily intelligence briefing.</p>
+      </v-card>
+
+      <v-card
+        v-for="s in summaries"
+        :key="s._id"
+        variant="outlined"
+        class="mb-3"
+      >
+        <v-card-title class="d-flex align-center ga-2" style="cursor: pointer" @click="s._expanded = !s._expanded">
+          <v-icon :color="s._expanded ? 'amber-darken-3' : 'grey'">{{ s._expanded ? 'mdi-chevron-down' : 'mdi-chevron-right' }}</v-icon>
+          <v-icon size="small" color="amber-darken-3">mdi-text-box-search-outline</v-icon>
+          <span class="text-subtitle-1 font-weight-medium">{{ formatDate(s.created_at) }}</span>
+          <v-spacer />
+          <v-chip size="x-small" variant="tonal" v-if="s.model">{{ s.model }}</v-chip>
+          <v-chip size="x-small" variant="tonal" color="blue">{{ s.news_count || 0 }} news</v-chip>
+          <v-chip size="x-small" variant="tonal" color="blue-grey">{{ s.pentagon_count || 0 }} DoD</v-chip>
+          <v-chip v-if="s.language" size="x-small" variant="tonal" color="purple">{{ s.language }}</v-chip>
+          <v-chip size="x-small" variant="flat" :color="s.scope === 'monthly' ? 'deep-purple' : 'amber-darken-3'">{{ s.scope === 'monthly' ? 'Monthly' : 'Daily' }}</v-chip>
+          <v-btn icon size="x-small" variant="text" color="red" @click.stop="deleteSummary(s._id)">
+            <v-icon size="small">mdi-delete</v-icon>
+          </v-btn>
+        </v-card-title>
+        <v-expand-transition>
+          <div v-if="s._expanded">
+            <v-divider />
+            <v-card-text style="max-height: 60vh; overflow-y: auto;">
+              <div v-html="renderMarkdown(s.summary)" class="summary-content" />
+            </v-card-text>
+          </div>
+        </v-expand-transition>
       </v-card>
     </div>
 
@@ -495,6 +587,29 @@
       </v-row>
     </div>
 
+    <!-- Summary Dialog -->
+    <v-dialog v-model="summaryDialog" max-width="900" scrollable>
+      <v-card>
+        <v-card-title class="d-flex align-center ga-2">
+          <v-icon color="amber-darken-3">mdi-text-box-search-outline</v-icon>
+          Daily Intelligence Briefing
+          <v-spacer />
+          <v-chip v-if="summaryMeta.model" size="small" variant="tonal">{{ summaryMeta.model }}</v-chip>
+          <v-chip size="small" variant="tonal" color="blue">{{ summaryMeta.news_count || 0 }} news</v-chip>
+          <v-chip size="small" variant="tonal" color="blue-grey">{{ summaryMeta.pentagon_count || 0 }} DoD</v-chip>
+        </v-card-title>
+        <v-divider />
+        <v-card-text style="max-height: 70vh; overflow-y: auto;">
+          <div v-if="summaryText" v-html="renderMarkdown(summaryText)" class="summary-content" />
+          <div v-else class="text-center pa-8 text-medium-emphasis">No summary generated yet.</div>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn @click="summaryDialog = false">Close</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- Snackbar -->
     <v-snackbar v-model="snackbar.show" :color="snackbar.color" :timeout="3000">
       {{ snackbar.text }}
@@ -506,7 +621,7 @@
 import api from '@src/api'
 import { useSettingsStore } from '@src/stores/settings'
 
-const API = '/api/addons/geopolitics'
+const API = '/addons/geopolitics'
 
 export default {
   name: 'GeopoliticsView',
@@ -518,6 +633,7 @@ export default {
       pentagonItems: [],
       pentagonSources: [],
       sources: [],
+      summaries: [],
       bookmarkIds: new Set(),
       stats: {},
 
@@ -527,13 +643,33 @@ export default {
       pentagonSearch: '',
       pentagonType: 'all',
 
+      // Summary language
+      summaryLang: localStorage.getItem('geopolitics_summary_lang') || 'English',
+      summaryLangs: [
+        { label: '🇺🇸 English', value: 'English' },
+        { label: '🇺🇦 Ukrainian-Russian', value: 'Russian' },
+        { label: '🇺🇦 Ukrainian', value: 'Ukrainian' },
+        { label: '🇨🇳 Chinese', value: 'Chinese' },
+        { label: '🇪🇸 Spanish', value: 'Spanish' },
+        { label: '🇫🇷 French', value: 'French' },
+        { label: '🇩🇪 German', value: 'German' },
+        { label: '🇯🇵 Japanese', value: 'Japanese' },
+        { label: '🇰🇷 Korean', value: 'Korean' },
+        { label: '🇸🇦 Arabic', value: 'Arabic' },
+      ],
+
       // Loading
       scraping: false,
       scrapingPentagon: false,
+      summarizing: false,
+      summarizingMonth: false,
 
       // Dialogs
       addNewsDialog: false,
       addSourceDialog: false,
+      summaryDialog: false,
+      summaryText: '',
+      summaryMeta: {},
 
       // Forms
       newArticle: { title: '', url: '', source_name: '', category: 'general', summary: '', importance: 'medium', tags: [] },
@@ -591,6 +727,7 @@ export default {
 
   watch: {
     tab(v) { localStorage.setItem('geopolitics_tab', v) },
+    summaryLang(v) { localStorage.setItem('geopolitics_summary_lang', v) },
   },
 
   async mounted() {
@@ -600,6 +737,7 @@ export default {
       this.loadSources(),
       this.loadBookmarks(),
       this.loadPentagonSources(),
+      this.loadSummaries(),
       this.loadStats(),
     ])
     this.loadSettings()
@@ -608,6 +746,13 @@ export default {
   methods: {
     notify(text, color = 'success') {
       this.snackbar = { show: true, text, color }
+    },
+
+    decodeHtml(text) {
+      if (!text) return ''
+      const el = document.createElement('textarea')
+      el.innerHTML = text
+      return el.value
     },
 
     formatDate(d) {
@@ -693,6 +838,55 @@ export default {
       } catch (e) { this.notify('Delete failed', 'error') }
     },
 
+    // Summarize
+    async summarizeDay() {
+      this.summarizing = true
+      try {
+        const { data } = await api.post(`${API}/summarize-day`, { language: this.summaryLang })
+        await this.loadSummaries()
+        this.tab = 'summaries'
+        if (this.summaries.length > 0) {
+          this.summaries[0]._expanded = true
+        }
+        this.notify('Daily briefing generated', 'success')
+      } catch (e) {
+        this.notify(e.response?.data?.detail || 'Summarization failed', 'error')
+      } finally { this.summarizing = false }
+    },
+
+    async summarizeMonth() {
+      this.summarizingMonth = true
+      try {
+        const { data } = await api.post(`${API}/summarize-month`, { language: this.summaryLang })
+        await this.loadSummaries()
+        this.tab = 'summaries'
+        if (this.summaries.length > 0) {
+          this.summaries[0]._expanded = true
+        }
+        this.notify('Monthly briefing generated', 'success')
+      } catch (e) {
+        this.notify(e.response?.data?.detail || 'Monthly summarization failed', 'error')
+      } finally { this.summarizingMonth = false }
+    },
+
+    renderMarkdown(text) {
+      if (!text) return ''
+      // Simple markdown to HTML: bold, headers, bullets, line breaks
+      return text
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/^### (.+)$/gm, '<h4 class="mt-3 mb-1">$1</h4>')
+        .replace(/^## (.+)$/gm, '<h3 class="mt-4 mb-2">$1</h3>')
+        .replace(/^# (.+)$/gm, '<h2 class="mt-4 mb-2">$1</h2>')
+        .replace(/^\- (.+)$/gm, '<li>$1</li>')
+        .replace(/^\* (.+)$/gm, '<li>$1</li>')
+        .replace(/^(\d+)\. (.+)$/gm, '<li><strong>$1.</strong> $2</li>')
+        .replace(/(<li>.*<\/li>)/gs, '<ul style="margin-left:16px">$1</ul>')
+        .replace(/<\/ul>\s*<ul[^>]*>/g, '')
+        .replace(/\n{2,}/g, '<br><br>')
+        .replace(/\n/g, '<br>')
+    },
+
     // Sources
     async loadSources() {
       try {
@@ -756,6 +950,32 @@ export default {
       } catch (e) { this.notify('Bookmark failed', 'error') }
     },
 
+    // Summaries history
+    async loadSummaries() {
+      try {
+        const { data } = await api.get(`${API}/summaries`)
+        this.summaries = (data.items || []).map(s => ({ ...s, _expanded: false }))
+      } catch (e) { console.error(e) }
+    },
+
+    async deleteSummary(id) {
+      if (!confirm('Delete this summary?')) return
+      try {
+        await api.delete(`${API}/summaries/${id}`)
+        this.summaries = this.summaries.filter(s => s._id !== id)
+        this.notify('Summary deleted')
+      } catch (e) { this.notify('Delete failed', 'error') }
+    },
+
+    async clearSummaries() {
+      if (!confirm('Delete ALL saved summaries?')) return
+      try {
+        await api.delete(`${API}/clear-summaries`)
+        this.summaries = []
+        this.notify('Summaries cleared')
+      } catch (e) { this.notify('Clear failed', 'error') }
+    },
+
     // Stats
     async loadStats() {
       try {
@@ -808,7 +1028,7 @@ export default {
       try {
         await api.delete(`${API}/clear`)
         this.notify('All data cleared')
-        await Promise.all([this.loadNews(), this.loadPentagon(), this.loadBookmarks(), this.loadStats()])
+        await Promise.all([this.loadNews(), this.loadPentagon(), this.loadBookmarks(), this.loadSummaries(), this.loadStats()])
       } catch (e) { this.notify('Clear failed', 'error') }
     },
   },

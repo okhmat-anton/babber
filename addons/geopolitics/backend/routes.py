@@ -5,6 +5,7 @@ Tracks news from configurable sources, monitors Pentagon open-source releases,
 and stores articles for agent access.
 """
 
+import html as html_mod
 import logging
 import re
 from datetime import datetime, timezone
@@ -31,6 +32,7 @@ NEWS_COLLECTION = "geopolitics_news"
 PENTAGON_COLLECTION = "geopolitics_pentagon"
 SOURCES_COLLECTION = "geopolitics_sources"
 BOOKMARKS_COLLECTION = "geopolitics_bookmarks"
+SUMMARIES_COLLECTION = "geopolitics_summaries"
 META_COLLECTION = "geopolitics_meta"
 
 # ---------------------------------------------------------------------------
@@ -49,6 +51,12 @@ DEFAULT_NEWS_SOURCES = [
     {"name": "CSIS", "url": "https://www.csis.org", "category": "think_tank", "rss": "https://www.csis.org/rss"},
     {"name": "Brookings", "url": "https://www.brookings.edu", "category": "think_tank", "rss": "https://www.brookings.edu/feed/"},
     {"name": "RAND", "url": "https://www.rand.org", "category": "think_tank", "rss": "https://www.rand.org/pubs.xml"},
+    {"name": "Ukrainska Pravda", "url": "https://www.pravda.com.ua", "category": "wire", "rss": "https://www.pravda.com.ua/rss/view_news/"},
+    {"name": "South China Morning Post", "url": "https://www.scmp.com", "category": "wire", "rss": "https://www.scmp.com/rss/91/feed"},
+    {"name": "Middle East Eye", "url": "https://www.middleeasteye.net", "category": "wire", "rss": "https://www.middleeasteye.net/rss"},
+    {"name": "Pentagon - DoD News", "url": "https://www.defense.gov/News/", "category": "defense", "rss": "https://www.defense.gov/DesktopModules/ArticleCS/RSS.ashx?ContentType=1&Site=945&max=10"},
+    {"name": "Pentagon - Releases", "url": "https://www.defense.gov/News/Releases/", "category": "defense", "rss": "https://www.defense.gov/DesktopModules/ArticleCS/RSS.ashx?ContentType=2&Site=945&max=10"},
+    {"name": "Pentagon - Contracts", "url": "https://www.defense.gov/News/Contracts/", "category": "defense", "rss": "https://www.defense.gov/DesktopModules/ArticleCS/RSS.ashx?ContentType=3&Site=945&max=10"},
 ]
 
 # Pentagon open-data sources
@@ -385,7 +393,8 @@ async def scrape_news(body: dict = None):
         if rss_url:
             try:
                 import httpx
-                async with httpx.AsyncClient(timeout=30) as client:
+                headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"}
+                async with httpx.AsyncClient(timeout=30, headers=headers) as client:
                     resp = await client.get(rss_url, follow_redirects=True)
                 if resp.status_code == 200:
                     # Simple RSS XML parsing
@@ -431,9 +440,63 @@ async def scrape_news(body: dict = None):
     return {"scraped": total_added, "sources_checked": len(sources), "details": results}
 
 
+def _extract_article_summary(html: str) -> str:
+    """Extract summary from an article page using meta tags and first paragraphs."""
+    # Try og:description
+    m = re.search(r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']+)', html, re.IGNORECASE)
+    if not m:
+        m = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:description', html, re.IGNORECASE)
+    if m and len(m.group(1).strip()) > 30:
+        return html_mod.unescape(re.sub(r'<[^>]+>', '', m.group(1).strip()))[:800]
+
+    # Try meta description
+    m = re.search(r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+ )', html, re.IGNORECASE)
+    if not m:
+        m = re.search(r'<meta[^>]+content=["\']([^"\']+ )["\'][^>]+name=["\']description', html, re.IGNORECASE)
+    if m and len(m.group(1).strip()) > 30:
+        return html_mod.unescape(re.sub(r'<[^>]+>', '', m.group(1).strip()))[:800]
+
+    # Fallback: collect first meaningful <p> tags
+    paragraphs = re.findall(r'<p[^>]*>(.*?)</p>', html, re.DOTALL | re.IGNORECASE)
+    text_parts = []
+    for p in paragraphs:
+        clean = re.sub(r'<[^>]+>', '', p).strip()
+        if len(clean) > 40:
+            text_parts.append(clean)
+            if len(' '.join(text_parts)) > 500:
+                break
+    if text_parts:
+        return html_mod.unescape(' '.join(text_parts))[:800]
+
+    return ""
+
+
+def _extract_published_date(html: str) -> str:
+    """Try to extract a publish date from article page meta tags."""
+    for attr in ['article:published_time', 'datePublished', 'date', 'DC.date.issued', 'pubdate']:
+        m = re.search(
+            rf'<meta[^>]+(?:property|name|itemprop)=["\'](?:{re.escape(attr)})["\'][^>]+content=["\']([^"\']+)',
+            html, re.IGNORECASE
+        )
+        if not m:
+            m = re.search(
+                rf'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name|itemprop)=["\'](?:{re.escape(attr)})',
+                html, re.IGNORECASE
+            )
+        if m:
+            return m.group(1).strip()
+    # Try <time> tag
+    m = re.search(r'<time[^>]+datetime=["\']([^"\']+)', html, re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
+    return ""
+
+
 @router.post("/scrape-pentagon")
 async def scrape_pentagon():
-    """Trigger a scrape of Pentagon open sources."""
+    """Trigger a scrape of Pentagon open sources.
+    Follows each article link to extract summary, date, and tags.
+    """
     db = get_mongodb()
 
     # Check if Pentagon monitoring is enabled
@@ -443,19 +506,21 @@ async def scrape_pentagon():
 
     total_added = 0
     results = []
+    BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
 
     for source in PENTAGON_SOURCES:
         try:
             import httpx
-            async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            headers = {"User-Agent": BROWSER_UA}
+            async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=headers) as client:
                 resp = await client.get(source["url"])
             if resp.status_code == 200:
-                # Simple HTML title extraction (basic scraping)
-                titles = re.findall(r'<h[1-4][^>]*>(.*?)</h[1-4]>', resp.text, re.IGNORECASE | re.DOTALL)
+                # Extract article links from listing page
                 links = re.findall(r'<a[^>]+href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', resp.text, re.IGNORECASE | re.DOTALL)
 
                 added = 0
                 seen_titles = set()
+
                 for href, link_text in links[:50]:
                     clean_title = re.sub(r'<[^>]+>', '', link_text).strip()
                     if len(clean_title) < 15 or clean_title in seen_titles:
@@ -467,19 +532,45 @@ async def scrape_pentagon():
                         base = source["url"].split("/")[0] + "//" + source["url"].split("/")[2]
                         href = base + href
 
+                    # Skip non-article links
+                    if not href.startswith("http"):
+                        continue
+
                     # Skip duplicates
                     exists = await db[PENTAGON_COLLECTION].find_one({"url": href})
                     if exists:
                         continue
+
+                    # Follow the article link to get summary and date
+                    summary = ""
+                    pub_date = ""
+                    tags = []
+                    try:
+                        async with httpx.AsyncClient(timeout=20, follow_redirects=True, headers=headers) as detail_client:
+                            detail_resp = await detail_client.get(href)
+                        if detail_resp.status_code == 200:
+                            detail_html = detail_resp.text
+                            summary = _extract_article_summary(detail_html)
+                            pub_date = _extract_published_date(detail_html)
+
+                            # Extract keywords/tags from meta
+                            kw_m = re.search(
+                                r'<meta[^>]+name=["\']keywords["\'][^>]+content=["\']([^"\']+)',
+                                detail_html, re.IGNORECASE
+                            )
+                            if kw_m:
+                                tags = [t.strip() for t in kw_m.group(1).split(",") if t.strip()][:10]
+                    except Exception as detail_err:
+                        logger.debug(f"Could not fetch article detail {href}: {detail_err}")
 
                     doc = {
                         "title": clean_title,
                         "url": href,
                         "source_name": source["name"],
                         "source_type": source["type"],
-                        "summary": "",
-                        "tags": [],
-                        "published_at": datetime.now(timezone.utc).isoformat(),
+                        "summary": summary,
+                        "tags": tags,
+                        "published_at": pub_date or datetime.now(timezone.utc).isoformat(),
                         "scraped_at": datetime.now(timezone.utc).isoformat(),
                         "created_at": datetime.now(timezone.utc).isoformat(),
                     }
@@ -622,4 +713,206 @@ async def clear_news():
 async def clear_pentagon():
     db = get_mongodb()
     result = await db[PENTAGON_COLLECTION].delete_many({})
+    return {"deleted": result.deleted_count}
+
+
+# ---------------------------------------------------------------------------
+# 8. DAILY / MONTHLY SUMMARY (LLM)
+# ---------------------------------------------------------------------------
+
+def _build_news_context(news_items: list, pentagon_items: list) -> str:
+    """Build a text context block from news and Pentagon articles."""
+    context_parts = []
+    if news_items:
+        context_parts.append("## News Articles")
+        for i, art in enumerate(news_items, 1):
+            title = html_mod.unescape(art.get("title", ""))
+            summary = html_mod.unescape(art.get("summary", ""))
+            source = art.get("source_name", "Unknown")
+            category = art.get("category", "")
+            entry = f"{i}. [{source} / {category}] {title}"
+            if summary:
+                entry += f"\n   Summary: {summary[:400]}"
+            context_parts.append(entry)
+    if pentagon_items:
+        context_parts.append("\n## Pentagon / Defense Data")
+        for i, item in enumerate(pentagon_items, 1):
+            title = html_mod.unescape(item.get("title", ""))
+            summary = html_mod.unescape(item.get("summary", ""))
+            source = item.get("source_name", "Unknown")
+            stype = item.get("source_type", "")
+            entry = f"{i}. [{source} / {stype}] {title}"
+            if summary:
+                entry += f"\n   Summary: {summary[:400]}"
+            context_parts.append(entry)
+    return "\n".join(context_parts)
+
+
+async def _generate_summary(db, model_id: str, language: str, news_context: str, scope: str = "daily") -> str:
+    """Call LLM with the news context and return the summary text."""
+    from app.api.chat import _resolve_model, _chat_with_model
+    from app.llm.base import GenerationParams
+
+    language_instruction = ""
+    if language and language != "English":
+        language_instruction = f"\n\nIMPORTANT: Write the ENTIRE briefing in {language}. All headings, analysis, and text must be in {language}.\n"
+
+    scope_label = "daily" if scope == "daily" else "monthly (last 30 days)"
+
+    prompt = f"""You are a senior geopolitical intelligence analyst. Produce a concise {scope_label} intelligence briefing based on the following news and Pentagon data.{language_instruction}
+
+Structure your briefing as:
+1. **Executive Summary** — 2-3 sentence overview of the most critical developments
+2. **Key Developments** — bullet points of the most important stories, grouped by region or topic
+3. **Defense & Military** — any Pentagon/military-related developments
+4. **Risk Assessment** — emerging threats or escalation risks
+5. **Watch List** — things to monitor in the coming days
+6. **Money-Making Opportunities** — exactly 3 concrete, actionable ideas on how to profit or earn money based on the current geopolitical situation (e.g. investment opportunities, market moves, business ideas, sectors to watch)
+
+Be analytical, not just descriptive. Identify patterns, connections between events, and potential implications.
+
+---
+
+{news_context}"""
+
+    try:
+        provider, base_url, model_name, api_key = await _resolve_model(model_id, db)
+        params = GenerationParams(temperature=0.4, max_tokens=4096, num_ctx=32768)
+        response = await _chat_with_model(
+            provider, base_url, model_name, api_key,
+            [
+                {"role": "system", "content": "You are a geopolitical intelligence analyst producing briefings. Be concise, analytical, and focus on actionable intelligence. Always end with 3 concrete money-making opportunities based on the geopolitical landscape."},
+                {"role": "user", "content": prompt},
+            ],
+            params,
+        )
+        return response.content
+    except Exception as e:
+        logger.error(f"Summary LLM call failed: {e}")
+        raise HTTPException(status_code=500, detail=f"LLM summarization failed: {str(e)}")
+
+@router.post("/summarize-day")
+async def summarize_day(body: dict = None):
+    """Use LLM to produce an intelligence briefing from today's news and Pentagon data."""
+    from app.api.chat import _resolve_model, _chat_with_model
+    from app.llm.base import GenerationParams
+
+    db = get_mongodb()
+    body = body or {}
+    model_id = body.get("model_id", "role:default")
+    language = body.get("language", "English")
+
+    # Strictly today's articles only
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    news_query = {"created_at": {"$gte": today_start}}
+    news_items = []
+    async for doc in db[NEWS_COLLECTION].find(news_query).sort("published_at", -1).limit(100):
+        news_items.append(doc)
+
+    pentagon_items = []
+    async for doc in db[PENTAGON_COLLECTION].find(news_query).sort("published_at", -1).limit(100):
+        pentagon_items.append(doc)
+
+    if not news_items and not pentagon_items:
+        raise HTTPException(status_code=400, detail="No news or Pentagon data from today. Run scraping first.")
+
+    news_context = _build_news_context(news_items, pentagon_items)
+    summary_text = await _generate_summary(db, model_id, language, news_context, scope="daily")
+
+    summary_doc = {
+        "summary": summary_text,
+        "model": (await _resolve_model(model_id, db))[2],
+        "language": language,
+        "scope": "daily",
+        "news_count": len(news_items),
+        "pentagon_count": len(pentagon_items),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    result = await db[SUMMARIES_COLLECTION].insert_one(summary_doc)
+    summary_doc["_id"] = str(result.inserted_id)
+    return summary_doc
+
+
+@router.post("/summarize-month")
+async def summarize_month(body: dict = None):
+    """Use LLM to produce a monthly intelligence briefing from all available data."""
+    from app.api.chat import _resolve_model, _chat_with_model
+    from app.llm.base import GenerationParams
+
+    db = get_mongodb()
+    body = body or {}
+    model_id = body.get("model_id", "role:default")
+    language = body.get("language", "English")
+
+    # All articles from the last 30 days
+    from datetime import timedelta
+    month_start = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    news_query = {"created_at": {"$gte": month_start}}
+    news_items = []
+    async for doc in db[NEWS_COLLECTION].find(news_query).sort("published_at", -1).limit(200):
+        news_items.append(doc)
+
+    pentagon_items = []
+    async for doc in db[PENTAGON_COLLECTION].find(news_query).sort("published_at", -1).limit(200):
+        pentagon_items.append(doc)
+
+    # If nothing in last 30 days, grab everything available
+    if not news_items:
+        async for doc in db[NEWS_COLLECTION].find().sort("created_at", -1).limit(200):
+            news_items.append(doc)
+    if not pentagon_items:
+        async for doc in db[PENTAGON_COLLECTION].find().sort("created_at", -1).limit(200):
+            pentagon_items.append(doc)
+
+    if not news_items and not pentagon_items:
+        raise HTTPException(status_code=400, detail="No news or Pentagon data available. Run scraping first.")
+
+    news_context = _build_news_context(news_items, pentagon_items)
+    summary_text = await _generate_summary(db, model_id, language, news_context, scope="monthly")
+
+    summary_doc = {
+        "summary": summary_text,
+        "model": (await _resolve_model(model_id, db))[2],
+        "language": language,
+        "scope": "monthly",
+        "news_count": len(news_items),
+        "pentagon_count": len(pentagon_items),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    result = await db[SUMMARIES_COLLECTION].insert_one(summary_doc)
+    summary_doc["_id"] = str(result.inserted_id)
+    return summary_doc
+
+
+# ---------------------------------------------------------------------------
+# 9. SUMMARIES HISTORY
+# ---------------------------------------------------------------------------
+
+@router.get("/summaries")
+async def list_summaries(limit: int = Query(50, ge=1, le=200)):
+    """Return saved daily intelligence briefings, newest first."""
+    db = get_mongodb()
+    items = []
+    async for doc in db[SUMMARIES_COLLECTION].find().sort("created_at", -1).limit(limit):
+        doc["_id"] = str(doc["_id"])
+        items.append(doc)
+    return {"items": items}
+
+
+@router.delete("/summaries/{summary_id}")
+async def delete_summary(summary_id: str):
+    """Delete a single summary from history."""
+    from bson import ObjectId
+    db = get_mongodb()
+    result = await db[SUMMARIES_COLLECTION].delete_one({"_id": ObjectId(summary_id)})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Summary not found")
+    return {"deleted": True}
+
+
+@router.delete("/clear-summaries")
+async def clear_summaries():
+    """Delete all saved summaries."""
+    db = get_mongodb()
+    result = await db[SUMMARIES_COLLECTION].delete_many({})
     return {"deleted": result.deleted_count}

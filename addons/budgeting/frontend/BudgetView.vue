@@ -134,6 +134,8 @@
                       ${{ fmt(item.amount) }}
                       <span v-if="item.frequency === 'daily'" class="text-caption text-blue">/day</span>
                       <span v-else-if="item.frequency === 'weekly'" class="text-caption text-indigo">/wk</span>
+                      <div v-if="item.frequency === 'daily'" class="text-caption text-medium-emphasis" style="font-size: 10px; line-height: 1;">${{ fmt(item.amount * 30) }}/mo</div>
+                      <div v-else-if="item.frequency === 'weekly'" class="text-caption text-medium-emphasis" style="font-size: 10px; line-height: 1;">${{ fmt(Math.round(item.amount * 4.33 * 100) / 100) }}/mo</div>
                     </span>
                     <v-btn icon="mdi-pencil" size="x-small" variant="text" @click="openEditEntry(item)" />
                     <v-btn icon="mdi-delete" size="x-small" variant="text" color="red" @click="confirmDeleteEntry(item)" />
@@ -227,6 +229,8 @@
                       ${{ fmt(item.amount) }}
                       <span v-if="item.frequency === 'daily'" class="text-caption text-blue">/day</span>
                       <span v-else-if="item.frequency === 'weekly'" class="text-caption text-indigo">/wk</span>
+                      <div v-if="item.frequency === 'daily'" class="text-caption text-medium-emphasis" style="font-size: 10px; line-height: 1;">${{ fmt(item.amount * 30) }}/mo</div>
+                      <div v-else-if="item.frequency === 'weekly'" class="text-caption text-medium-emphasis" style="font-size: 10px; line-height: 1;">${{ fmt(Math.round(item.amount * 4.33 * 100) / 100) }}/mo</div>
                     </span>
                     <v-btn icon="mdi-pencil" size="x-small" variant="text" @click="openEditEntry(item)" />
                     <v-btn icon="mdi-delete" size="x-small" variant="text" color="red" @click="confirmDeleteEntry(item)" />
