@@ -86,6 +86,7 @@ const routes = [
       { path: 'addons/genetics', name: 'Genetics', component: () => import('@addons_private/genetics/frontend/GeneticsView.vue') },
       { path: 'addons/physiology', name: 'Physiology', component: () => import('@addons/physiology/frontend/PhysiologyView.vue') },
       { path: 'addons/geopolitics', name: 'Geopolitics', component: () => import('@addons/geopolitics/frontend/GeopoliticsView.vue') },
+      { path: 'addons/real-estate', name: 'RealEstate', component: () => import('@addons/real_estate/frontend/RealEstateView.vue') },
     ],
   },
 ]

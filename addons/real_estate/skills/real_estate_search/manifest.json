@@ -1,0 +1,39 @@
+{
+  "name": "real_estate_search",
+  "display_name": "Real Estate: Land Search",
+  "description": "Search affordable land listings scraped from multiple real estate sources.",
+  "description_for_agent": "Search affordable land listings from websites like LandCentral and ClassicCountryLand. Returns land parcels with price, acreage, state, county, and financing info. Use when user asks about buying land, affordable property, rural land, acreage for sale, or land deals. Parameters: query (search text), state (filter by US state), max_price (max price in dollars), min_acreage (minimum lot size in acres), source (filter by source: landcentral, classiccountryland), limit (max results, default 20).",
+  "category": "real_estate",
+  "version": "1.0.0",
+  "entry_point": "main.py",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Search text across land listings (name, state, county, description)."
+      },
+      "state": {
+        "type": "string",
+        "description": "Filter by US state name, e.g. 'Texas', 'Florida'."
+      },
+      "max_price": {
+        "type": "number",
+        "description": "Maximum price in dollars."
+      },
+      "min_acreage": {
+        "type": "number",
+        "description": "Minimum acreage."
+      },
+      "source": {
+        "type": "string",
+        "description": "Filter by source: landcentral, classiccountryland. Leave empty for all."
+      },
+      "limit": {
+        "type": "integer",
+        "description": "Maximum number of results to return. Default: 20.",
+        "default": 20
+      }
+    }
+  }
+}

@@ -1,0 +1,100 @@
+{
+  "id": "real_estate",
+  "name": "Real Estate",
+  "description": "Scrape affordable land listings from multiple sources — filter by price, down payment, monthly payment, state, zip/radius, acreage, land type and more",
+  "icon": "mdi-terrain",
+  "version": "1.0.0",
+  "author": "system",
+  "route": {
+    "path": "/addons/real-estate",
+    "name": "RealEstate",
+    "title": "Real Estate"
+  },
+  "settings": [
+    {
+      "key": "re_max_price",
+      "label": "Max Total Price ($)",
+      "type": "text",
+      "default": "50000"
+    },
+    {
+      "key": "re_max_down_payment",
+      "label": "Max Down Payment ($)",
+      "type": "text",
+      "default": "5000"
+    },
+    {
+      "key": "re_max_monthly_payment",
+      "label": "Max Monthly Payment ($)",
+      "type": "text",
+      "default": "500"
+    },
+    {
+      "key": "re_states",
+      "label": "States (comma-separated, empty = all)",
+      "type": "text",
+      "default": ""
+    },
+    {
+      "key": "re_zip_codes",
+      "label": "Zip codes (comma-separated)",
+      "type": "text",
+      "default": ""
+    },
+    {
+      "key": "re_zip_radius_miles",
+      "label": "Radius around zip (miles)",
+      "type": "select",
+      "default": "50",
+      "options": ["10", "25", "50", "100", "200"]
+    },
+    {
+      "key": "re_min_acreage",
+      "label": "Min Acreage",
+      "type": "text",
+      "default": "0"
+    },
+    {
+      "key": "re_max_acreage",
+      "label": "Max Acreage (0 = no limit)",
+      "type": "text",
+      "default": "0"
+    },
+    {
+      "key": "re_land_types",
+      "label": "Land Types (comma-separated: residential, recreational, hunting, raw, mountain, etc.)",
+      "type": "text",
+      "default": ""
+    },
+    {
+      "key": "re_require_building_permit",
+      "label": "Require Building Permit",
+      "type": "select",
+      "default": "any",
+      "options": ["any", "yes", "no"]
+    },
+    {
+      "key": "re_require_camping",
+      "label": "Allow Camping / RV",
+      "type": "select",
+      "default": "any",
+      "options": ["any", "yes", "no"]
+    },
+    {
+      "key": "re_require_septic",
+      "label": "Septic Available / Allowed",
+      "type": "select",
+      "default": "any",
+      "options": ["any", "yes", "no"]
+    },
+    {
+      "key": "re_scrape_interval_hours",
+      "label": "Scrape Interval (hours)",
+      "type": "select",
+      "default": "24",
+      "options": ["6", "12", "24", "48"]
+    }
+  ],
+  "protocols": [],
+  "skills": ["real_estate_search"]
+}
