@@ -86,100 +86,202 @@
       <!-- 1. AFFORDABLE LAND LISTINGS -->
       <!-- ═══════════════════════════════════════ -->
       <v-window-item value="listings">
-        <!-- Filters row -->
-        <div class="d-flex flex-wrap align-center ga-2 mb-3">
-          <v-select
-            v-model="filterSource"
-            :items="sourceOptions"
-            label="Source"
-            variant="outlined"
-            density="compact"
-            clearable
-            style="max-width: 200px"
-          />
-          <v-select
-            v-model="filterState"
-            :items="stateOptions"
-            label="States"
-            variant="outlined"
-            density="compact"
-            clearable
-            multiple
-            chips
-            closable-chips
-            style="min-width: 200px; max-width: 400px"
-          />
-          <v-text-field
-            v-model.number="filterMaxPrice"
-            label="Max Price"
-            variant="outlined"
-            density="compact"
-            type="number"
-            prefix="$"
-            clearable
-            style="max-width: 160px"
-          />
-          <v-text-field
-            v-model.number="filterMinAcreage"
-            label="Min Acres"
-            variant="outlined"
-            density="compact"
-            type="number"
-            clearable
-            style="max-width: 140px"
-          />
-          <v-select
-            v-model="filterZoning"
-            :items="zoningOptions"
-            label="Zoning"
-            variant="outlined"
-            density="compact"
-            clearable
-            multiple
-            chips
-            closable-chips
-            style="min-width: 180px; max-width: 350px"
-          />
-          <v-select
-            v-model="filterHoa"
-            :items="hoaOptions"
-            label="HOA"
-            variant="outlined"
-            density="compact"
-            clearable
-            style="max-width: 140px"
-          />
-          <v-select
-            v-model="sortBy"
-            :items="sortOptions"
-            label="Sort"
-            variant="outlined"
-            density="compact"
-            style="max-width: 160px"
-          />
-          <v-btn-toggle v-model="sortDir" mandatory density="compact" variant="outlined" color="brown">
-            <v-btn value="asc" size="small"><v-icon>mdi-sort-ascending</v-icon></v-btn>
-            <v-btn value="desc" size="small"><v-icon>mdi-sort-descending</v-icon></v-btn>
-          </v-btn-toggle>
-          <v-btn
-            color="brown"
-            variant="tonal"
-            size="small"
-            prepend-icon="mdi-magnify"
-            @click="loadListings"
-            :loading="loadingListings"
-          >
-            Apply
-          </v-btn>
-        </div>
+
+        <!-- Filter panel -->
+        <v-card variant="flat" class="filter-panel mb-4 pa-4">
+          <!-- Row 1: Main property filters -->
+          <div class="d-flex align-center mb-3">
+            <v-icon size="18" color="brown-lighten-1" class="mr-2">mdi-filter-variant</v-icon>
+            <span class="text-subtitle-2 font-weight-medium text-medium-emphasis">Filters</span>
+            <v-spacer />
+            <v-btn
+              variant="text"
+              size="x-small"
+              color="grey"
+              prepend-icon="mdi-filter-remove"
+              @click="clearFilters"
+              class="text-none"
+            >
+              Clear all
+            </v-btn>
+          </div>
+
+          <v-row dense class="mb-1">
+            <v-col cols="12" sm="6" md="3" lg="2">
+              <v-select
+                v-model="filterSource"
+                :items="sourceOptions"
+                label="Source"
+                variant="solo-filled"
+                density="compact"
+                flat
+                clearable
+                hide-details
+              />
+            </v-col>
+            <v-col cols="12" sm="6" md="4" lg="3">
+              <v-select
+                v-model="filterState"
+                :items="stateOptions"
+                label="States"
+                variant="solo-filled"
+                density="compact"
+                flat
+                clearable
+                multiple
+                chips
+                closable-chips
+                hide-details
+              />
+            </v-col>
+            <v-col cols="6" sm="4" md="2">
+              <v-text-field
+                v-model.number="filterMaxPrice"
+                label="Max Price"
+                variant="solo-filled"
+                density="compact"
+                flat
+                type="number"
+                prefix="$"
+                clearable
+                hide-details
+              />
+            </v-col>
+            <v-col cols="6" sm="4" md="2">
+              <v-text-field
+                v-model.number="filterMinAcreage"
+                label="Min Acres"
+                variant="solo-filled"
+                density="compact"
+                flat
+                type="number"
+                clearable
+                hide-details
+              />
+            </v-col>
+            <v-col cols="12" sm="4" md="3" lg="3">
+              <v-select
+                v-model="filterZoning"
+                :items="zoningOptions"
+                label="Zoning"
+                variant="solo-filled"
+                density="compact"
+                flat
+                clearable
+                multiple
+                chips
+                closable-chips
+                hide-details
+              />
+            </v-col>
+          </v-row>
+
+          <!-- Row 2: Extra filters + comment search + sort + actions -->
+          <v-row dense align="center">
+            <v-col cols="6" sm="3" md="2">
+              <v-select
+                v-model="filterHoa"
+                :items="hoaOptions"
+                label="HOA"
+                variant="solo-filled"
+                density="compact"
+                flat
+                clearable
+                hide-details
+              />
+            </v-col>
+            <v-col cols="6" sm="3" md="2">
+              <v-checkbox
+                v-model="filterHasComment"
+                label="With comments"
+                density="compact"
+                hide-details
+                color="brown"
+              />
+            </v-col>
+            <v-col cols="12" sm="6" md="3">
+              <v-text-field
+                v-model="filterSearchComment"
+                label="Search comments"
+                variant="solo-filled"
+                density="compact"
+                flat
+                clearable
+                prepend-inner-icon="mdi-comment-search-outline"
+                hide-details
+              />
+            </v-col>
+            <v-col cols="6" sm="4" md="2">
+              <v-select
+                v-model="sortBy"
+                :items="sortOptions"
+                label="Sort by"
+                variant="solo-filled"
+                density="compact"
+                flat
+                hide-details
+              />
+            </v-col>
+            <v-col cols="auto">
+              <v-btn-toggle v-model="sortDir" mandatory density="compact" variant="outlined" color="brown" rounded="lg">
+                <v-btn value="asc" size="small"><v-icon size="18">mdi-sort-ascending</v-icon></v-btn>
+                <v-btn value="desc" size="small"><v-icon size="18">mdi-sort-descending</v-icon></v-btn>
+              </v-btn-toggle>
+            </v-col>
+            <v-col cols="auto" class="d-flex ga-2">
+              <v-btn
+                color="brown"
+                variant="flat"
+                size="small"
+                prepend-icon="mdi-magnify"
+                @click="loadListings"
+                :loading="loadingListings"
+                rounded="lg"
+                class="text-none"
+              >
+                Apply
+              </v-btn>
+              <v-btn
+                color="brown"
+                variant="tonal"
+                size="small"
+                icon="mdi-content-save-outline"
+                @click="openSavePreset"
+                rounded="lg"
+              >
+                <v-icon size="18">mdi-content-save-outline</v-icon>
+                <v-tooltip activator="parent" location="top">Save filter preset</v-tooltip>
+              </v-btn>
+            </v-col>
+          </v-row>
+
+          <!-- Saved presets row -->
+          <div v-if="filterPresets.length > 0" class="d-flex flex-wrap align-center ga-2 mt-3 pt-3" style="border-top: 1px solid rgba(255,255,255,0.06)">
+            <v-icon size="14" color="brown-lighten-2" class="mr-1">mdi-bookmark-multiple-outline</v-icon>
+            <span class="text-caption text-medium-emphasis mr-1">Presets:</span>
+            <v-chip
+              v-for="preset in filterPresets"
+              :key="preset._id"
+              color="brown"
+              variant="tonal"
+              size="small"
+              closable
+              @click="applyPreset(preset)"
+              @click:close="deletePreset(preset._id)"
+              rounded="lg"
+            >
+              {{ preset.name }}
+            </v-chip>
+          </div>
+        </v-card>
 
         <v-progress-linear v-if="loadingListings" indeterminate color="brown" class="mb-2" />
 
         <!-- View toggle -->
         <div class="d-flex align-center mb-3">
-          <v-btn-toggle v-model="viewMode" mandatory density="compact" variant="outlined" color="brown" class="mr-3">
-            <v-btn value="cards" size="small"><v-icon>mdi-view-grid</v-icon></v-btn>
-            <v-btn value="table" size="small"><v-icon>mdi-view-list</v-icon></v-btn>
+          <v-btn-toggle v-model="viewMode" mandatory density="compact" variant="outlined" color="brown" rounded="lg" class="mr-3">
+            <v-btn value="cards" size="small"><v-icon size="18">mdi-view-grid</v-icon></v-btn>
+            <v-btn value="table" size="small"><v-icon size="18">mdi-view-list</v-icon></v-btn>
           </v-btn-toggle>
           <span class="text-body-2 text-medium-emphasis">
             {{ visibleListings.length }} of {{ listingsTotal }} listings
@@ -970,6 +1072,32 @@
       </v-card>
     </v-dialog>
 
+    <!-- Save filter preset dialog -->
+    <v-dialog v-model="showSavePreset" max-width="400">
+      <v-card>
+        <v-card-title>Save Filter Preset</v-card-title>
+        <v-card-text>
+          <v-text-field
+            v-model="presetName"
+            label="Preset name"
+            variant="outlined"
+            density="compact"
+            placeholder="e.g. Cheap Texas land"
+            autofocus
+            @keydown.enter="savePreset"
+          />
+          <div class="text-caption text-medium-emphasis mt-2">
+            Saves current filters: source, states, max price, min acreage, zoning, HOA, sort.
+          </div>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="showSavePreset = false">Cancel</v-btn>
+          <v-btn color="brown" variant="tonal" :disabled="!presetName.trim()" @click="savePreset">Save</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- Snackbar -->
     <v-snackbar v-model="snack" :color="snackColor" timeout="3000">
       {{ snackText }}
@@ -1014,6 +1142,8 @@ export default {
       filterZoning: (() => { try { const v = JSON.parse(localStorage.getItem('re_filterZoning')); return Array.isArray(v) ? v : [] } catch { return [] } })(),
       zoningOptions: [],
       filterHoa: (() => { try { return JSON.parse(localStorage.getItem('re_filterHoa')) } catch { return null } })(),
+      filterHasComment: false,
+      filterSearchComment: '',
       hoaOptions: [
         { title: 'No HOA', value: 'no' },
         { title: 'Has HOA', value: 'yes' },
@@ -1090,6 +1220,11 @@ export default {
         { title: 'Manual only', value: '0' },
       ],
 
+      // Filter presets
+      filterPresets: [],
+      showSavePreset: false,
+      presetName: '',
+
       // Clear confirmation
       confirmClear: false,
       clearConfirmText: '',
@@ -1143,6 +1278,7 @@ export default {
     this.loadStats()
     this.loadScrapeStatus()
     this.loadZoningOptions()
+    this.loadFilterPresets()
     this.loadTabData(this.activeTab)
     // Check if scrape is already running (e.g. page refresh during scrape)
     try {
@@ -1169,6 +1305,19 @@ export default {
   },
 
   methods: {
+    clearFilters() {
+      this.filterSource = null
+      this.filterState = []
+      this.filterMaxPrice = null
+      this.filterMinAcreage = null
+      this.filterZoning = []
+      this.filterHoa = null
+      this.filterHasComment = false
+      this.filterSearchComment = ''
+      this.sortBy = 'price'
+      this.sortDir = 'asc'
+      this.loadListings()
+    },
     async loadZoningOptions() {
       try {
         const { data } = await api.get(`${API}/zoning-values`)
@@ -1354,6 +1503,8 @@ export default {
         if (this.filterMinAcreage) params.min_acreage = this.filterMinAcreage
         if (this.filterZoning && this.filterZoning.length) params.zoning = this.filterZoning.join(',')
         if (this.filterHoa) params.hoa = this.filterHoa
+        if (this.filterHasComment) params.has_comment = true
+        if (this.filterSearchComment) params.search_comment = this.filterSearchComment
 
         const { data } = await api.get(`${API}/listings`, { params })
         this.listings = (data.items || []).map(i => ({ ...i, _loadingDetail: false }))
@@ -1377,6 +1528,8 @@ export default {
         if (this.filterMinAcreage) params.min_acreage = this.filterMinAcreage
         if (this.filterZoning && this.filterZoning.length) params.zoning = this.filterZoning.join(',')
         if (this.filterHoa) params.hoa = this.filterHoa
+        if (this.filterHasComment) params.has_comment = true
+        if (this.filterSearchComment) params.search_comment = this.filterSearchComment
 
         const { data } = await api.get(`${API}/listings`, { params })
         const newItems = (data.items || []).map(i => ({ ...i, _loadingDetail: false }))
@@ -1487,6 +1640,62 @@ export default {
       }
     },
 
+    // ---- Filter presets ----
+    async loadFilterPresets() {
+      try {
+        const { data } = await api.get(`${API}/filter-presets`)
+        this.filterPresets = data.items || []
+      } catch {}
+    },
+    openSavePreset() {
+      this.presetName = ''
+      this.showSavePreset = true
+    },
+    async savePreset() {
+      const name = this.presetName.trim()
+      if (!name) return
+      try {
+        const filters = {
+          source: this.filterSource,
+          state: this.filterState,
+          maxPrice: this.filterMaxPrice,
+          minAcreage: this.filterMinAcreage,
+          zoning: this.filterZoning,
+          hoa: this.filterHoa,
+          sortBy: this.sortBy,
+          sortDir: this.sortDir,
+        }
+        await api.post(`${API}/filter-presets`, { name, filters })
+        this.showSavePreset = false
+        this.notify('Preset saved')
+        this.loadFilterPresets()
+      } catch (e) {
+        this.notify('Failed to save preset', 'error')
+      }
+    },
+    applyPreset(preset) {
+      const f = preset.filters || {}
+      this.filterSource = f.source || null
+      this.filterState = Array.isArray(f.state) ? f.state : []
+      this.filterMaxPrice = f.maxPrice || null
+      this.filterMinAcreage = f.minAcreage || null
+      this.filterZoning = Array.isArray(f.zoning) ? f.zoning : []
+      this.filterHoa = f.hoa || null
+      this.sortBy = f.sortBy || 'price'
+      this.sortDir = f.sortDir || 'asc'
+      this.loadListings()
+      this.notify(`Applied: ${preset.name}`)
+    },
+    async deletePreset(presetId) {
+      try {
+        await api.delete(`${API}/filter-presets/${presetId}`)
+        this.filterPresets = this.filterPresets.filter(p => p._id !== presetId)
+        this.notify('Preset deleted')
+      } catch (e) {
+        this.notify('Failed to delete preset', 'error')
+      }
+    },
+
     // ---- Clear ----
     async clearAllData() {
       try {
@@ -1505,6 +1714,14 @@ export default {
 </script>
 
 <style scoped>
+.filter-panel {
+  background: rgba(141, 110, 99, 0.06);
+  border: 1px solid rgba(141, 110, 99, 0.12);
+  border-radius: 12px;
+}
+.filter-panel :deep(.v-field--variant-solo-filled .v-field__overlay) {
+  opacity: 0.04;
+}
 .comment-field :deep(.v-field__input) {
   font-size: 0.8rem;
   padding: 2px 4px;
