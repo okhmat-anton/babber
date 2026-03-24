@@ -16,6 +16,7 @@ from typing import Optional, List
 
 import httpx
 from bs4 import BeautifulSoup
+from curl_cffi.requests import AsyncSession as CffiSession
 from fastapi import APIRouter, HTTPException, Query, Depends, Body, BackgroundTasks
 from pydantic import BaseModel
 
@@ -60,12 +61,16 @@ MAX_RETRIES = 2
 
 # Background scrape state (in-memory, one scrape at a time)
 _scrape_lock = asyncio.Lock()
+_scrape_stop_requested = False
 _scrape_progress = {
     "running": False,
     "source": None,
+    "source_index": 0,
+    "sources_total": 0,
     "states_done": 0,
     "states_total": 0,
     "listings_found": 0,
+    "new_count": 0,
     "errors": 0,
     "started_at": None,
     "finished_at": None,
@@ -83,6 +88,28 @@ def _strip_html(html: str) -> str:
 
 def _hash(text: str) -> str:
     return hashlib.md5(text.encode()).hexdigest()[:16]
+
+
+# ── Zoning normalization ─────────────────────────────────────────────────
+ZONING_PATTERNS = {
+    "Residential": r"\b(residential|r-?[1-5]|rr-?\d|sfr|single.?family|multi.?family|townhome|housing|subdivision|dwelling|home.?site)\b",
+    "Agricultural": r"\b(agricultur|farm|ranch|ag\b|ag-?\d|grazing|crop|timber|forestry|pasture|orchard|livestock)\b",
+    "Commercial": r"\b(commercial|c-?\d|retail|office|business|storefront)\b",
+    "Industrial": r"\b(industrial|i-?\d|manufactur|warehouse|factory|heavy.?use)\b",
+    "Rural / Unzoned": r"\b(rural|unzoned|no.?zoning|none|unrestricted|open.?use|vacant.?land|county|unincorporated)\b",
+    "Mixed Use": r"\b(mixed.?use|planned.?unit|pud|overlay|transitional|general.?use)\b",
+    "Recreational": r"\b(recreat|hunt|fish|camp|conservation|wilderness|park|leisure|resort)\b",
+}
+
+
+def _normalize_zoning(raw: str) -> str:
+    """Map raw zoning text from scrapers to a clean category."""
+    if not raw:
+        return "Other"
+    for category, pattern in ZONING_PATTERNS.items():
+        if re.search(pattern, raw, re.IGNORECASE):
+            return category
+    return "Other"
 
 
 def _parse_price(text: str) -> Optional[float]:
@@ -272,6 +299,22 @@ DEFAULT_SOURCES = [
         "scraper_type": "horizonlandsales",
         "description": "Below-market-value land. WA, MT properties. Owner financing, deep discounts.",
     },
+    {
+        "source_id": "homescom",
+        "name": "Homes.com",
+        "base_url": "https://www.homes.com",
+        "enabled": True,
+        "scraper_type": "homescom",
+        "description": "Major real estate portal — land & lots for sale across all US states.",
+    },
+    {
+        "source_id": "landcom",
+        "name": "Land.com",
+        "base_url": "https://www.land.com",
+        "enabled": True,
+        "scraper_type": "landcom",
+        "description": "Major land marketplace — farms, ranches, all land types across US.",
+    },
 ]
 
 # LandCentral state slugs
@@ -416,6 +459,10 @@ async def _smart_upsert(col, listing_hash: str, fresh_data: dict):
     existing = await col.find_one({"hash": listing_hash})
     now = datetime.now(timezone.utc).isoformat()
 
+    # Skip soft-deleted listings — never re-insert them
+    if existing and existing.get("deleted"):
+        return False
+
     if existing is None:
         # Brand new listing — insert all fields
         fresh_data["first_seen"] = now
@@ -426,6 +473,7 @@ async def _smart_upsert(col, listing_hash: str, fresh_data: dict):
                 {"price": fresh_data["price"], "date": now}
             ]
         await col.insert_one(fresh_data)
+        _scrape_progress["new_count"] += 1
         return True
 
     # In new_only mode — skip updates for existing listings entirely
@@ -3835,6 +3883,526 @@ async def _scrape_detail_horizonlandsales(db, client: httpx.AsyncClient, listing
     return listing
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# HOMES.COM — https://www.homes.com/{state}/land-for-sale/p{page}/?price-max=X
+# Uses curl_cffi to bypass Akamai bot protection (TLS fingerprint impersonation)
+# ─────────────────────────────────────────────────────────────────────────
+
+HOMESCOM_STATES = [
+    "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
+    "connecticut", "delaware", "florida", "georgia", "hawaii", "idaho",
+    "illinois", "indiana", "iowa", "kansas", "kentucky", "louisiana",
+    "maine", "maryland", "massachusetts", "michigan", "minnesota",
+    "mississippi", "missouri", "montana", "nebraska", "nevada",
+    "new-hampshire", "new-jersey", "new-mexico", "new-york",
+    "north-carolina", "north-dakota", "ohio", "oklahoma", "oregon",
+    "pennsylvania", "rhode-island", "south-carolina", "south-dakota",
+    "tennessee", "texas", "utah", "vermont", "virginia", "washington",
+    "west-virginia", "wisconsin", "wyoming",
+]
+
+HOMESCOM_MAX_PAGES = 15  # 40 per page, up to 15 pages = ~600 listings
+
+
+async def _scrape_homescom(db, client: httpx.AsyncClient, states_filter: list) -> int:
+    """Scrape Homes.com — major real estate portal, land & lots.
+
+    Uses curl_cffi with Safari impersonation to bypass Akamai bot protection.
+    The httpx client parameter is unused (kept for interface compatibility).
+    """
+    col = db[COL_LISTINGS]
+    count = 0
+    filters = await _get_filter_settings(db)
+    max_price = int(filters["max_price"]) if filters["max_price"] < 999999999 else 50000
+
+    states = HOMESCOM_STATES
+    if states_filter:
+        states = [s for s in HOMESCOM_STATES if _slug_to_state(s).lower() in states_filter]
+
+    _scrape_progress["states_total"] = len(states)
+    _scrape_progress["states_done"] = 0
+
+    async with CffiSession(impersonate="safari") as session:
+        for si, state_slug in enumerate(states):
+            if _scrape_stop_requested:
+                break
+
+            for page in range(1, HOMESCOM_MAX_PAGES + 1):
+                if _scrape_stop_requested:
+                    break
+
+                if page == 1:
+                    url = f"https://www.homes.com/{state_slug}/land-for-sale/?price-max={max_price}"
+                else:
+                    url = f"https://www.homes.com/{state_slug}/land-for-sale/p{page}/?price-max={max_price}"
+
+                try:
+                    resp = await session.get(url, timeout=30)
+                    if resp.status_code != 200:
+                        logger.warning(f"Homes.com HTTP {resp.status_code} for {url}")
+                        break
+                    if len(resp.text) < 2000:
+                        break
+
+                    soup = BeautifulSoup(resp.text, "html.parser")
+                    articles = soup.find_all("article", class_=re.compile(r"placard"))
+                    if not articles:
+                        break
+
+                    page_new = 0
+                    for article in articles:
+                        try:
+                            # Property link — first link with /property/ href
+                            prop_link = article.find("a", href=re.compile(r"/property/[^/]+/[^/]+/"))
+                            if not prop_link:
+                                continue
+
+                            href = prop_link.get("href", "")
+                            full_url = f"https://www.homes.com{href}" if not href.startswith("http") else href
+                            clean_url = full_url.split("?")[0].rstrip("/")
+
+                            # Property ID from data-pk attribute
+                            property_id = article.get("data-pk", "")
+
+                            # Address from link title/aria-label
+                            address = prop_link.get("title", "") or prop_link.get("aria-label", "")
+
+                            # Image: first img with data-image attribute
+                            image_url = None
+                            img = article.find("img", attrs={"data-image": True})
+                            if img:
+                                image_url = img.get("data-image", "")
+
+                            # Parse card text for price, acreage, etc.
+                            card_text = article.get_text(" ", strip=True)
+
+                            # Price: first "$XX,XXX" in text
+                            price = None
+                            pm = re.search(r"\$([\d,]+)", card_text)
+                            if pm:
+                                price = _parse_price(pm.group(1))
+
+                            # Acreage: "X.XX Acre(s)"
+                            acreage = None
+                            am = re.search(r"([\d.]+)\s*Acres?", card_text, re.I)
+                            if am:
+                                acreage = float(am.group(1))
+
+                            # State from address (e.g., "... Ocean Park, WA 98640")
+                            state = _slug_to_state(state_slug)
+                            county = ""
+
+                            # Try to get county from address parsing
+                            # Address format: "3507 102nd St, Ocean Park, WA 98640"
+                            state_abbr = ""
+                            addr_m = re.search(r",\s*([A-Z]{2})\s+\d{5}", address)
+                            if addr_m:
+                                state_abbr = addr_m.group(1)
+                                state = STATE_ABBREVS.get(state_abbr, state)
+
+                            # Build name from address or card text
+                            name = address if address else card_text[:150]
+
+                            if not price:
+                                continue
+
+                            listing_hash = _hash(f"homescom:{clean_url}")
+                            fresh = {
+                                "hash": listing_hash,
+                                "source": "homescom",
+                                "source_name": "Homes.com",
+                                "name": name[:200],
+                                "url": full_url,
+                                "property_id": property_id,
+                                "state": state,
+                                "county": county,
+                                "acreage": acreage,
+                                "price": price,
+                                "original_price": None,
+                                "down_payment": None,
+                                "monthly_payment": None,
+                                "financing_available": None,
+                                "land_type": "Land",
+                                "image_url": image_url,
+                                "description": "",
+                                "is_foreclosure": False,
+                            }
+
+                            if not _matches_filters(fresh, filters):
+                                continue
+
+                            inserted = await _smart_upsert(col, listing_hash, fresh)
+                            count += 1
+                            if inserted:
+                                page_new += 1
+                            _scrape_progress["listings_found"] = count
+
+                        except Exception as e:
+                            logger.debug(f"Homes.com card parse error: {e}")
+                            continue
+
+                    # If no new listings were found on this page, stop paginating
+                    if _scrape_mode == "new_only" and page_new == 0 and page > 1:
+                        break
+
+                except Exception as e:
+                    logger.error(f"Homes.com page error {url}: {e}")
+                    _scrape_progress["errors"] += 1
+                    break
+
+                await asyncio.sleep(1.0)  # Throttle between pages
+
+            _scrape_progress["states_done"] = si + 1
+
+    return count
+
+
+async def _scrape_detail_homescom(db, client: httpx.AsyncClient, listing: dict) -> dict:
+    """Scrape Homes.com property detail page for description, lot size, zoning."""
+    url = listing.get("url")
+    if not url:
+        return listing
+    try:
+        async with CffiSession(impersonate="safari") as session:
+            resp = await session.get(url, timeout=30)
+            if resp.status_code != 200:
+                return listing
+            soup = BeautifulSoup(resp.text, "html.parser")
+            text = soup.get_text(" ", strip=True)
+
+            # Description — look for property description sections
+            desc = ""
+            for sel in [
+                soup.find(class_=re.compile(r"description|details-desc|property-desc", re.I)),
+                soup.find("div", class_=re.compile(r"listing-description", re.I)),
+            ]:
+                if sel:
+                    desc = sel.get_text(" ", strip=True)
+                    break
+            if not desc:
+                # Fallback: longest paragraph
+                for p in soup.find_all("p"):
+                    pt = p.get_text(strip=True)
+                    if len(pt) > len(desc):
+                        desc = pt
+            if desc:
+                listing["description"] = desc[:2000]
+
+            # Lot size
+            lm = re.search(r"Lot\s*Size[:\s]*([\d.,]+)\s*(acre|sqft|sq\s*ft)", text, re.I)
+            if lm:
+                val = float(lm.group(1).replace(",", ""))
+                unit = lm.group(2).lower()
+                if "acre" in unit:
+                    listing["acreage"] = val
+                elif val > 0:
+                    listing["acreage"] = round(val / 43560, 2)  # sqft to acres
+
+            # Zoning
+            zm = re.search(r"Zoning[:\s]*([^\n.]{3,100})", text, re.I)
+            if zm:
+                listing["zoning"] = _normalize_zoning(zm.group(1).strip())
+
+            # County
+            cm = re.search(r"County[:\s]*([\w\s]+?)(?:\s*County|\s*,|\s*$)", text, re.I)
+            if cm and not listing.get("county"):
+                listing["county"] = cm.group(1).strip()[:60]
+
+            # Parcel / APN / Tax ID
+            pn = re.search(r"(?:Parcel|APN|Tax\s*ID)[:\s#]*([\w-]+)", text, re.I)
+            if pn and not listing.get("property_id"):
+                listing["property_id"] = pn.group(1).strip()
+
+            # HOA
+            hoa_m = re.search(r"HOA[:\s]*\$?([\d,]+|None|No)", text, re.I)
+            if hoa_m:
+                val = hoa_m.group(1).lower()
+                listing["hoa"] = "no" if val in ("none", "no", "0") else "yes"
+
+            listing["detail_scraped"] = True
+    except Exception as e:
+        logger.warning(f"Homes.com detail error: {e}")
+    return listing
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# LAND.COM — https://www.land.com/{State}/all-land/under-{price}/page-{N}/
+# Uses curl_cffi to bypass Akamai bot protection (TLS fingerprint impersonation)
+# ─────────────────────────────────────────────────────────────────────────
+
+# Land.com uses Title Case state names in URLs
+LANDCOM_STATES = [
+    "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado",
+    "Connecticut", "Delaware", "Florida", "Georgia", "Hawaii", "Idaho",
+    "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana",
+    "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota",
+    "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada",
+    "New-Hampshire", "New-Jersey", "New-Mexico", "New-York",
+    "North-Carolina", "North-Dakota", "Ohio", "Oklahoma", "Oregon",
+    "Pennsylvania", "Rhode-Island", "South-Carolina", "South-Dakota",
+    "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington",
+    "West-Virginia", "Wisconsin", "Wyoming",
+]
+
+LANDCOM_MAX_PAGES = 15  # 25 per page
+
+
+async def _scrape_landcom(db, client: httpx.AsyncClient, states_filter: list) -> int:
+    """Scrape Land.com — major land marketplace.
+
+    Uses curl_cffi with Safari 15.5 impersonation to bypass Akamai bot protection.
+    The httpx client parameter is unused (kept for interface compatibility).
+    """
+    col = db[COL_LISTINGS]
+    count = 0
+    filters = await _get_filter_settings(db)
+    max_price = int(filters["max_price"]) if filters["max_price"] < 999999999 else 50000
+
+    # Map filter states to Land.com Title Case format
+    states = LANDCOM_STATES
+    if states_filter:
+        states = [
+            s for s in LANDCOM_STATES
+            if s.lower().replace("-", " ") in states_filter
+        ]
+
+    _scrape_progress["states_total"] = len(states)
+    _scrape_progress["states_done"] = 0
+
+    async with CffiSession(impersonate="safari15_5") as session:
+        for si, state_name in enumerate(states):
+            if _scrape_stop_requested:
+                break
+
+            for page in range(1, LANDCOM_MAX_PAGES + 1):
+                if _scrape_stop_requested:
+                    break
+
+                if page == 1:
+                    url = f"https://www.land.com/{state_name}/all-land/under-{max_price}/"
+                else:
+                    url = f"https://www.land.com/{state_name}/all-land/under-{max_price}/page-{page}/"
+
+                try:
+                    resp = await session.get(url, timeout=30)
+                    if resp.status_code != 200:
+                        logger.warning(f"Land.com HTTP {resp.status_code} for {url}")
+                        break
+                    if len(resp.text) < 2000:
+                        break
+
+                    soup = BeautifulSoup(resp.text, "html.parser")
+
+                    # Find all property links: /property/{slug}/{id}/
+                    all_prop_links = soup.find_all("a", href=re.compile(r"/property/[^/]+/\d+/"))
+                    if not all_prop_links:
+                        break
+
+                    # Group links by href to get per-property data
+                    # Each property has ~4 links: image, price+acres, address, description
+                    from collections import defaultdict
+                    groups = defaultdict(list)
+                    for a in all_prop_links:
+                        href = a.get("href", "").split("?")[0].rstrip("/")
+                        groups[href].append(a)
+
+                    if not groups:
+                        break
+
+                    page_new = 0
+                    for href, links in groups.items():
+                        try:
+                            full_url = f"https://www.land.com{href}/" if not href.startswith("http") else href
+                            clean_url = full_url.split("?")[0].rstrip("/")
+
+                            # Extract property ID from URL: /property/{slug}/{id}
+                            id_m = re.search(r"/(\d+)/?$", href)
+                            property_id = id_m.group(1) if id_m else ""
+
+                            # Parse data from the grouped links
+                            price = None
+                            acreage = None
+                            address = ""
+                            description = ""
+
+                            for a in links:
+                                link_text = a.get_text(strip=True)
+                                if not link_text:
+                                    continue
+
+                                # Price + acreage link: "$49,950•2.03 acres"
+                                price_m = re.search(r"\$([\d,]+)", link_text)
+                                acre_m = re.search(r"([\d.]+)\s*acres?", link_text, re.I)
+                                if price_m and not price:
+                                    price = _parse_price(price_m.group(1))
+                                if acre_m and not acreage:
+                                    try:
+                                        acreage = float(acre_m.group(1))
+                                    except ValueError:
+                                        pass
+
+                                # Address link: "68th Avenue South, Roy, WA, 98411, Pierce County"
+                                if re.search(r",\s*[A-Z]{2},?\s*\d{5}", link_text):
+                                    address = link_text
+
+                                # Description link: longer text without price pattern
+                                if len(link_text) > 60 and not price_m:
+                                    description = link_text
+
+                            # Parse state and county from address
+                            state = state_name.replace("-", " ")
+                            county = ""
+                            if address:
+                                # "68th Avenue South, Roy, WA, 98411, Pierce County"
+                                addr_parts = [p.strip() for p in address.split(",")]
+                                for part in addr_parts:
+                                    if re.match(r"^[A-Z]{2}$", part.strip()):
+                                        state = STATE_ABBREVS.get(part.strip(), state)
+                                    if "county" in part.lower() or (len(addr_parts) >= 5 and part == addr_parts[-1]):
+                                        county = part.replace("County", "").strip()
+
+                            name = address if address else f"Land in {state}"
+                            if not price:
+                                continue
+
+                            listing_hash = _hash(f"landcom:{clean_url}")
+                            fresh = {
+                                "hash": listing_hash,
+                                "source": "landcom",
+                                "source_name": "Land.com",
+                                "name": name[:200],
+                                "url": full_url,
+                                "property_id": property_id,
+                                "state": state,
+                                "county": county,
+                                "acreage": acreage,
+                                "price": price,
+                                "original_price": None,
+                                "down_payment": None,
+                                "monthly_payment": None,
+                                "financing_available": None,
+                                "land_type": "Land",
+                                "image_url": None,
+                                "description": description[:2000],
+                                "is_foreclosure": False,
+                            }
+
+                            if not _matches_filters(fresh, filters):
+                                continue
+
+                            inserted = await _smart_upsert(col, listing_hash, fresh)
+                            count += 1
+                            if inserted:
+                                page_new += 1
+                            _scrape_progress["listings_found"] = count
+
+                        except Exception as e:
+                            logger.debug(f"Land.com card parse error: {e}")
+                            continue
+
+                    # If no new listings on this page, stop paginating (new_only mode)
+                    if _scrape_mode == "new_only" and page_new == 0 and page > 1:
+                        break
+
+                except Exception as e:
+                    logger.error(f"Land.com page error {url}: {e}")
+                    _scrape_progress["errors"] += 1
+                    break
+
+                await asyncio.sleep(1.0)  # Throttle between pages
+
+            _scrape_progress["states_done"] = si + 1
+
+    return count
+
+
+async def _scrape_detail_landcom(db, client: httpx.AsyncClient, listing: dict) -> dict:
+    """Scrape Land.com property detail page for description, zoning, county, etc."""
+    url = listing.get("url")
+    if not url:
+        return listing
+    try:
+        async with CffiSession(impersonate="safari15_5") as session:
+            resp = await session.get(url, timeout=30)
+            if resp.status_code != 200:
+                return listing
+            soup = BeautifulSoup(resp.text, "html.parser")
+            text = soup.get_text(" ", strip=True)
+
+            # Description — try common selectors
+            desc = ""
+            for sel in [
+                soup.find(class_=re.compile(r"description|listing-desc|property-desc", re.I)),
+                soup.find("div", attrs={"data-testid": re.compile(r"description", re.I)}),
+            ]:
+                if sel:
+                    desc = sel.get_text(" ", strip=True)
+                    break
+            if not desc:
+                for p in soup.find_all("p"):
+                    pt = p.get_text(strip=True)
+                    if len(pt) > len(desc):
+                        desc = pt
+            if desc and len(desc) > len(listing.get("description", "")):
+                listing["description"] = desc[:2000]
+
+            # Acreage from detail (more precise)
+            am = re.search(r"([\d.]+)\s*(?:total\s*)?acres?", text, re.I)
+            if am:
+                try:
+                    val = float(am.group(1))
+                    if val > 0:
+                        listing["acreage"] = val
+                except ValueError:
+                    pass
+
+            # Zoning
+            zm = re.search(r"Zoning[:\s]*([^\n.]{3,100})", text, re.I)
+            if zm:
+                listing["zoning"] = _normalize_zoning(zm.group(1).strip())
+
+            # County (update if missing)
+            cm = re.search(r"County[:\s]*([\w\s]+?)(?:\s*County|\s*,|\s*$)", text, re.I)
+            if cm and not listing.get("county"):
+                listing["county"] = cm.group(1).strip()[:60]
+
+            # Parcel / APN
+            pn = re.search(r"(?:Parcel|APN)[:\s#]*([\w-]+)", text, re.I)
+            if pn and not listing.get("property_id"):
+                listing["property_id"] = pn.group(1).strip()
+
+            # Property type refinement
+            pt = re.search(r"Property\s*Type[:\s]*([\w\s/]+?)(?:\s*$|\s*\n)", text, re.I)
+            if pt:
+                ptype = pt.group(1).strip()
+                if ptype and ptype.lower() not in ("land",):
+                    listing["land_type"] = ptype[:50]
+
+            # JSON-LD structured data
+            for script in soup.find_all("script", type="application/ld+json"):
+                if script.string:
+                    try:
+                        import json
+                        ld = json.loads(script.string)
+                        if isinstance(ld, dict):
+                            if ld.get("@type") in ("Product", "RealEstateListing", "Place"):
+                                if ld.get("description") and len(ld["description"]) > len(listing.get("description", "")):
+                                    listing["description"] = ld["description"][:2000]
+                                if ld.get("image") and not listing.get("image_url"):
+                                    img = ld["image"]
+                                    if isinstance(img, list):
+                                        img = img[0]
+                                    if isinstance(img, str):
+                                        listing["image_url"] = img
+                    except (json.JSONDecodeError, KeyError, IndexError):
+                        pass
+
+            listing["detail_scraped"] = True
+    except Exception as e:
+        logger.warning(f"Land.com detail error: {e}")
+    return listing
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # API ROUTES — Listings
 # ═══════════════════════════════════════════════════════════════════════════
@@ -3842,12 +4410,14 @@ async def _scrape_detail_horizonlandsales(db, client: httpx.AsyncClient, listing
 
 @router.get("/zoning-values")
 async def get_zoning_values(db=Depends(get_mongodb)):
-    """Get distinct zoning values from all listings."""
+    """Get normalized zoning categories from all listings."""
     col = db[COL_LISTINGS]
-    values = await col.distinct("zoning")
-    # Filter out None/empty and sort
-    values = sorted([v for v in values if v])
-    return {"values": values}
+    raw_values = await col.distinct("zoning")
+    categories = set()
+    for v in raw_values:
+        if v:
+            categories.add(_normalize_zoning(v))
+    return {"values": sorted(categories)}
 
 
 @router.get("/listings")
@@ -3870,7 +4440,7 @@ async def list_listings(
     db=Depends(get_mongodb),
 ):
     """List scraped land listings with optional filters."""
-    query = {}
+    query = {"deleted": {"$ne": True}}
 
     if source:
         query["source"] = source
@@ -3891,10 +4461,24 @@ async def list_listings(
         query.setdefault("acreage", {})["$lte"] = max_acreage
     if zoning:
         zoning_values = [z.strip() for z in zoning.split(",") if z.strip()]
-        if len(zoning_values) == 1:
-            query["zoning"] = {"$regex": re.escape(zoning_values[0]), "$options": "i"}
-        elif len(zoning_values) > 1:
-            query["zoning"] = {"$in": zoning_values}
+        # Expand normalized category names to regex patterns
+        patterns = []
+        for zv in zoning_values:
+            if zv in ZONING_PATTERNS:
+                patterns.append(ZONING_PATTERNS[zv])
+            elif zv == "Other":
+                # "Other" = anything not matching known categories
+                # We negate all known patterns (complex), so just skip filter for Other
+                # Instead, gather all raw values that normalize to "Other" and use $in
+                all_raw = await col.distinct("zoning")
+                other_raw = [r for r in all_raw if r and _normalize_zoning(r) == "Other"]
+                if other_raw:
+                    patterns.append("|".join(re.escape(r) for r in other_raw))
+            else:
+                patterns.append(re.escape(zv))
+        if patterns:
+            combined = "|".join(f"({p})" for p in patterns)
+            query["zoning"] = {"$regex": combined, "$options": "i"}
 
     if hoa and hoa.lower() in ("yes", "no"):
         query["hoa"] = hoa.lower()
@@ -3958,6 +4542,30 @@ class CommentInput(BaseModel):
     comment: str = ""
 
 
+@router.delete("/listings/{listing_hash}")
+async def soft_delete_listing(listing_hash: str, db=Depends(get_mongodb)):
+    """Soft-delete a listing — mark as deleted so it is hidden and never re-scraped."""
+    result = await db[COL_LISTINGS].update_one(
+        {"hash": listing_hash},
+        {"$set": {"deleted": True, "deleted_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(404, "Listing not found")
+    return {"ok": True}
+
+
+@router.patch("/listings/{listing_hash}/restore")
+async def restore_listing(listing_hash: str, db=Depends(get_mongodb)):
+    """Restore a soft-deleted listing."""
+    result = await db[COL_LISTINGS].update_one(
+        {"hash": listing_hash},
+        {"$unset": {"deleted": "", "deleted_at": ""}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(404, "Listing not found")
+    return {"ok": True}
+
+
 @router.patch("/listings/{listing_hash}/comment")
 async def update_listing_comment(
     listing_hash: str,
@@ -4019,6 +4627,10 @@ async def scrape_listing_detail(listing_hash: str, db=Depends(get_mongodb)):
             doc = await _scrape_detail_landwatch(db, client, doc)
         elif source == "horizonlandsales":
             doc = await _scrape_detail_horizonlandsales(db, client, doc)
+        elif source == "homescom":
+            doc = await _scrape_detail_homescom(db, client, doc)
+        elif source == "landcom":
+            doc = await _scrape_detail_landcom(db, client, doc)
 
     # Save updated listing
     update_data = {
@@ -4167,13 +4779,19 @@ async def _run_scrape_background(source_ids: list, mode: str = "full",
     from app.database import get_mongodb
     db = get_mongodb()
 
+    global _scrape_stop_requested
+    _scrape_stop_requested = False
+
     _scrape_progress["running"] = True
     _scrape_progress["started_at"] = datetime.now(timezone.utc).isoformat()
     _scrape_progress["finished_at"] = None
     _scrape_progress["listings_found"] = 0
+    _scrape_progress["new_count"] = 0
     _scrape_progress["errors"] = 0
     _scrape_progress["states_done"] = 0
     _scrape_progress["states_total"] = 0
+    _scrape_progress["source_index"] = 0
+    _scrape_progress["sources_total"] = len(source_ids)
     _scrape_progress["error_msg"] = None
     _scrape_progress["mode"] = mode
 
@@ -4189,8 +4807,13 @@ async def _run_scrape_background(source_ids: list, mode: str = "full",
             async with httpx.AsyncClient(
                 limits=httpx.Limits(max_connections=5, max_keepalive_connections=3),
             ) as client:
-                for sid in source_ids:
+                for idx, sid in enumerate(source_ids):
+                    if _scrape_stop_requested:
+                        logger.info("Scrape stopped by user (phase 1)")
+                        _scrape_progress["error_msg"] = "Stopped by user"
+                        break
                     _scrape_progress["source"] = sid
+                    _scrape_progress["source_index"] = idx + 1
                     try:
                         if sid == "landcentral":
                             count = await _scrape_landcentral(db, client, filters["states"])
@@ -4228,6 +4851,10 @@ async def _run_scrape_background(source_ids: list, mode: str = "full",
                             count = await _scrape_landwatch(db, client, filters["states"])
                         elif sid == "horizonlandsales":
                             count = await _scrape_horizonlandsales(db, client, filters["states"])
+                        elif sid == "homescom":
+                            count = await _scrape_homescom(db, client, filters["states"])
+                        elif sid == "landcom":
+                            count = await _scrape_landcom(db, client, filters["states"])
                         else:
                             count = 0
                         results[sid] = count
@@ -4296,6 +4923,10 @@ async def _run_scrape_background(source_ids: list, mode: str = "full",
                 limits=httpx.Limits(max_connections=3, max_keepalive_connections=2),
             ) as detail_client:
                 for i, stub in enumerate(no_detail):
+                    if _scrape_stop_requested:
+                        logger.info("Scrape stopped by user (detail phase)")
+                        _scrape_progress["error_msg"] = "Stopped by user"
+                        break
                     try:
                         doc = await col.find_one({"hash": stub["hash"]})
                         if not doc:
@@ -4338,6 +4969,10 @@ async def _run_scrape_background(source_ids: list, mode: str = "full",
                             doc = await _scrape_detail_landwatch(db, detail_client, doc)
                         elif source == "horizonlandsales":
                             doc = await _scrape_detail_horizonlandsales(db, detail_client, doc)
+                        elif source == "homescom":
+                            doc = await _scrape_detail_homescom(db, detail_client, doc)
+                        elif source == "landcom":
+                            doc = await _scrape_detail_landcom(db, detail_client, doc)
                         else:
                             _scrape_progress["states_done"] = i + 1
                             continue
@@ -4371,6 +5006,16 @@ async def _run_scrape_background(source_ids: list, mode: str = "full",
 async def scrape_progress_endpoint():
     """Get live scrape progress (poll from frontend)."""
     return dict(_scrape_progress)
+
+
+@router.post("/scrape/stop")
+async def scrape_stop():
+    """Request the running scrape to stop gracefully."""
+    global _scrape_stop_requested
+    if not _scrape_progress["running"]:
+        return {"ok": False, "message": "No scrape is running"}
+    _scrape_stop_requested = True
+    return {"ok": True, "message": "Stop requested — scrape will finish current item and stop"}
 
 
 @router.get("/scrape/status")

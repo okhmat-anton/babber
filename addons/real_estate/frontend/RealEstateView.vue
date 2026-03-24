@@ -3,8 +3,30 @@
     <!-- Header -->
     <div class="d-flex align-center mb-4">
       <v-icon size="32" color="brown-lighten-1" class="mr-3">mdi-terrain</v-icon>
-      <div class="text-h4 font-weight-bold">Real Estate — Affordable Land</div>
-      <v-spacer />
+      <div class="text-h4 font-weight-bold">Real Estate</div>
+    </div>
+
+    <!-- Top-level tabs -->
+    <v-tabs v-model="mainTab" color="brown-lighten-1" class="mb-4" density="comfortable">
+      <v-tab value="land">
+        <v-icon start size="20">mdi-terrain</v-icon>
+        Affordable Land
+      </v-tab>
+      <v-tab value="auctions">
+        <v-icon start size="20">mdi-gavel</v-icon>
+        Auction Houses
+      </v-tab>
+    </v-tabs>
+
+    <v-window v-model="mainTab" :transition="false" :reverse-transition="false">
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- MAIN TAB 1: AFFORDABLE LAND                                -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <v-window-item value="land" eager>
+
+    <!-- Scrape buttons -->
+    <div class="d-flex align-center mb-3">
       <v-btn-group variant="tonal" density="comfortable" class="mr-2" divided>
         <v-btn
           color="brown"
@@ -51,11 +73,22 @@
           <span v-if="scrapeProgress.errors"> ({{ scrapeProgress.errors }} errors)</span>
         </span>
         <span v-else>
+          <span v-if="scrapeProgress.sources_total" class="text-medium-emphasis mr-1">[{{ scrapeProgress.source_index || 0 }}/{{ scrapeProgress.sources_total }}]</span>
           Scraping <strong>{{ scrapeProgress.source || '...' }}</strong>
           — {{ scrapeProgress.states_done }}/{{ scrapeProgress.states_total }} states,
           {{ scrapeProgress.listings_found }} listings found
+          <span :class="scrapeProgress.new_count ? 'text-success font-weight-bold' : 'text-medium-emphasis'">({{ scrapeProgress.new_count || 0 }} new)</span>
           <span v-if="scrapeProgress.errors"> ({{ scrapeProgress.errors }} errors)</span>
         </span>
+        <v-spacer />
+        <v-btn
+          variant="text"
+          size="x-small"
+          color="red"
+          icon="mdi-stop-circle-outline"
+          :loading="stoppingParserScrape"
+          @click="stopScrape"
+        />
       </div>
     </v-alert>
 
@@ -102,7 +135,7 @@
       </v-tab>
     </v-tabs>
 
-    <v-window v-model="activeTab">
+    <v-window v-model="activeTab" :transition="false" :reverse-transition="false">
 
       <!-- ═══════════════════════════════════════ -->
       <!-- 1. AFFORDABLE LAND LISTINGS -->
@@ -306,7 +339,7 @@
             <v-btn value="table" size="small"><v-icon size="18">mdi-view-list</v-icon></v-btn>
           </v-btn-toggle>
           <span class="text-body-2 text-medium-emphasis">
-            {{ visibleListings.length }} of {{ listingsTotal }} listings
+            {{ (currentPage - 1) * perPage + 1 }}–{{ Math.min(currentPage * perPage, listingsTotal) }} of {{ listingsTotal }} listings
             <span v-if="hiddenCount > 0" class="text-grey"> ({{ hiddenCount }} hidden)</span>
           </span>
           <v-spacer />
@@ -320,15 +353,7 @@
           >
             {{ showHidden ? 'Hide dismissed' : 'Show dismissed' }}
           </v-btn>
-          <v-btn
-            v-if="listingsTotal > listings.length"
-            variant="text"
-            size="small"
-            @click="loadMore"
-            :loading="loadingMore"
-          >
-            Load More
-          </v-btn>
+
         </div>
 
         <!-- CARD view -->
@@ -344,6 +369,7 @@
             <v-card
               variant="outlined"
               class="h-100 d-flex flex-column"
+              :class="{ 're-seen': seenHashes[item.hash] && !hiddenHashes[item.hash] }"
               :style="hiddenHashes[item.hash] ? 'opacity: 0.45; text-decoration: line-through' : ''"
             >
               <!-- Image -->
@@ -352,6 +378,7 @@
                 :src="item.image_url"
                 height="160"
                 cover
+                loading="lazy"
                 class="bg-grey-darken-3"
               >
                 <template #error>
@@ -433,7 +460,7 @@
                   variant="tonal"
                   color="brown"
                   prepend-icon="mdi-information-outline"
-                  @click="scrapeDetail(item)"
+                  @click="markSeen(item); scrapeDetail(item)"
                   :loading="item._loadingDetail"
                 >
                   Details
@@ -444,6 +471,7 @@
                   :href="item.url"
                   target="_blank"
                   append-icon="mdi-open-in-new"
+                  @click="markSeen(item)"
                 >
                   Visit
                 </v-btn>
@@ -455,7 +483,6 @@
                   :color="item.is_favorite ? 'red' : 'grey'"
                 >
                   <v-icon>{{ item.is_favorite ? 'mdi-heart' : 'mdi-heart-outline' }}</v-icon>
-                  <v-tooltip activator="parent" location="top">{{ item.is_favorite ? 'Unfavorite' : 'Favorite' }}</v-tooltip>
                 </v-btn>
                 <v-btn
                   icon
@@ -465,7 +492,15 @@
                   :color="hiddenHashes[item.hash] ? 'orange' : 'grey'"
                 >
                   <v-icon>{{ hiddenHashes[item.hash] ? 'mdi-eye-off' : 'mdi-eye-off-outline' }}</v-icon>
-                  <v-tooltip activator="parent" location="top">{{ hiddenHashes[item.hash] ? 'Restore' : 'Dismiss' }}</v-tooltip>
+                </v-btn>
+                <v-btn
+                  icon
+                  variant="text"
+                  size="small"
+                  @click.stop="deleteListing(item)"
+                  color="red-darken-2"
+                >
+                  <v-icon>mdi-delete-outline</v-icon>
                 </v-btn>
               </v-card-actions>
             </v-card>
@@ -494,6 +529,7 @@
             <tr
               v-for="item in visibleListings"
               :key="item.hash"
+              :class="{ 're-seen-row': seenHashes[item.hash] && !hiddenHashes[item.hash] }"
               :style="[
                 hiddenHashes[item.hash] ? 'opacity: 0.45; text-decoration: line-through' : '',
                 lastClickedHash === item.hash ? 'background: rgba(255, 183, 77, 0.15); box-shadow: inset 3px 0 0 #FFB74D' : '',
@@ -545,10 +581,10 @@
                 />
               </td>
               <td style="white-space: nowrap">
-                <v-btn size="x-small" variant="text" icon @click="scrapeDetail(item)" :loading="item._loadingDetail">
+                <v-btn size="x-small" variant="text" icon @click="markSeen(item); scrapeDetail(item)" :loading="item._loadingDetail">
                   <v-icon size="16">mdi-information-outline</v-icon>
                 </v-btn>
-                <v-btn size="x-small" variant="text" icon :href="item.url" target="_blank" @click="lastClickedHash = item.hash">
+                <v-btn size="x-small" variant="text" icon :href="item.url" target="_blank" @click="markSeen(item); lastClickedHash = item.hash">
                   <v-icon size="16">mdi-open-in-new</v-icon>
                 </v-btn>
                 <v-btn size="x-small" variant="text" icon @click="toggleFavorite(item)" :color="item.is_favorite ? 'red' : 'grey'">
@@ -558,10 +594,27 @@
                   <v-icon size="16">{{ hiddenHashes[item.hash] ? 'mdi-eye-off' : 'mdi-eye-off-outline' }}</v-icon>
                   <v-tooltip activator="parent" location="top">{{ hiddenHashes[item.hash] ? 'Restore' : 'Dismiss' }}</v-tooltip>
                 </v-btn>
+                <v-btn size="x-small" variant="text" icon @click="deleteListing(item)" color="red-darken-2">
+                  <v-icon size="16">mdi-delete-outline</v-icon>
+                  <v-tooltip activator="parent" location="top">Delete permanently</v-tooltip>
+                </v-btn>
               </td>
             </tr>
           </tbody>
         </v-table>
+
+        <!-- Pagination -->
+        <div v-if="totalPages > 1 && listings.length > 0" class="d-flex justify-center align-center mt-4 mb-2">
+          <v-pagination
+            v-model="currentPage"
+            :length="totalPages"
+            :total-visible="7"
+            density="comfortable"
+            rounded="lg"
+            color="brown"
+            @update:modelValue="goToPage"
+          />
+        </div>
 
         <!-- Empty state -->
         <v-alert v-if="!loadingListings && listings.length === 0" type="info" variant="tonal" class="mt-3">
@@ -931,6 +984,277 @@
       </v-window-item>
     </v-window>
 
+    </v-window-item>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- MAIN TAB 2: AUCTION HOUSES                                 -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <v-window-item value="auctions" eager>
+
+      <!-- Auction scrape buttons -->
+      <div class="d-flex align-center mb-3">
+        <v-btn-group variant="tonal" density="comfortable" class="mr-2" divided>
+          <v-btn color="deep-purple" prepend-icon="mdi-refresh" size="small" disabled>
+            Update All
+          </v-btn>
+          <v-btn color="teal" prepend-icon="mdi-magnify-plus-outline" size="small" disabled>
+            Find New
+          </v-btn>
+          <v-btn color="red" prepend-icon="mdi-heart-pulse" size="small" disabled>
+            Update Favorites
+          </v-btn>
+        </v-btn-group>
+        <v-chip variant="tonal" color="grey" size="small">Coming soon</v-chip>
+      </div>
+
+      <!-- Auction stats chips -->
+      <div class="d-flex flex-wrap ga-2 mb-4">
+        <v-chip variant="tonal" color="deep-purple" size="large">
+          <v-icon start size="16">mdi-gavel</v-icon>
+          Auction Listings: 0
+        </v-chip>
+        <v-chip variant="tonal" color="red" size="large">
+          <v-icon start size="16">mdi-heart</v-icon>
+          Favorites: 0
+        </v-chip>
+        <v-chip variant="tonal" color="blue" size="large">
+          <v-icon start size="16">mdi-web</v-icon>
+          Sources: 0
+        </v-chip>
+      </div>
+
+      <!-- Auction sub-tabs -->
+      <v-tabs v-model="auctionTab" color="deep-purple-lighten-1" class="mb-4" show-arrows>
+        <v-tab value="auction_listings">
+          <v-icon start size="18">mdi-gavel</v-icon>
+          Auction Listings
+        </v-tab>
+        <v-tab value="auction_favorites">
+          <v-icon start size="18">mdi-heart-outline</v-icon>
+          Favorites
+        </v-tab>
+        <v-tab value="auction_sources">
+          <v-icon start size="18">mdi-web</v-icon>
+          Sources
+        </v-tab>
+        <v-tab value="auction_settings">
+          <v-icon start size="18">mdi-cog-outline</v-icon>
+          Settings
+        </v-tab>
+      </v-tabs>
+
+      <v-window v-model="auctionTab" :transition="false" :reverse-transition="false">
+        <!-- Auction listings -->
+        <v-window-item value="auction_listings">
+          <!-- Filters -->
+          <v-card variant="tonal" class="mb-4 pa-3">
+            <v-row dense align="center">
+              <v-col cols="12" sm="6" md="2">
+                <v-select
+                  v-model="auctionFilterState"
+                  :items="stateOptions"
+                  label="State"
+                  density="compact"
+                  clearable
+                  multiple
+                  chips
+                  closable-chips
+                  variant="outlined"
+                  hide-details
+                />
+              </v-col>
+              <v-col cols="6" sm="3" md="2">
+                <v-text-field
+                  v-model.number="auctionFilterMaxPrice"
+                  label="Max Price"
+                  type="number"
+                  density="compact"
+                  prefix="$"
+                  variant="outlined"
+                  hide-details
+                  clearable
+                />
+              </v-col>
+              <v-col cols="6" sm="3" md="2">
+                <v-text-field
+                  v-model.number="auctionFilterMinBeds"
+                  label="Min Beds"
+                  type="number"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                  clearable
+                />
+              </v-col>
+              <v-col cols="6" sm="3" md="2">
+                <v-text-field
+                  v-model.number="auctionFilterMinBath"
+                  label="Min Bath"
+                  type="number"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                  clearable
+                />
+              </v-col>
+              <v-col cols="6" sm="3" md="2">
+                <v-select
+                  v-model="auctionFilterType"
+                  :items="auctionTypeOptions"
+                  label="Property Type"
+                  density="compact"
+                  clearable
+                  variant="outlined"
+                  hide-details
+                />
+              </v-col>
+              <v-col cols="auto">
+                <v-btn color="deep-purple" variant="flat" size="small" rounded="lg" class="text-none" disabled>
+                  Apply
+                </v-btn>
+              </v-col>
+            </v-row>
+          </v-card>
+
+          <!-- View mode toggle -->
+          <div class="d-flex align-center mb-3">
+            <v-btn-toggle v-model="auctionViewMode" mandatory density="compact" variant="outlined" color="deep-purple" rounded="lg" class="mr-3">
+              <v-btn value="cards" size="small"><v-icon size="18">mdi-view-grid</v-icon></v-btn>
+              <v-btn value="table" size="small"><v-icon size="18">mdi-view-list</v-icon></v-btn>
+            </v-btn-toggle>
+            <span class="text-body-2 text-medium-emphasis">0 auction listings</span>
+          </div>
+
+          <!-- Empty state -->
+          <v-alert type="info" variant="tonal" class="mt-3">
+            <v-icon start>mdi-gavel</v-icon>
+            <strong>Auction Houses</strong> — scrape homes from foreclosure auctions, online auction platforms (Auction.com, Hubzu, Xome, etc.), and sheriff sales.
+            <br><span class="text-caption text-medium-emphasis mt-1 d-block">This feature is under development. Sources and scrapers will be added soon.</span>
+          </v-alert>
+
+          <!-- Placeholder table -->
+          <v-table v-if="auctionViewMode === 'table'" density="compact" hover class="mt-3">
+            <thead>
+              <tr>
+                <th>Address</th>
+                <th>City</th>
+                <th>State</th>
+                <th>Beds</th>
+                <th>Bath</th>
+                <th>Sq Ft</th>
+                <th>Price</th>
+                <th>Auction Date</th>
+                <th>Source</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td colspan="10" class="text-center text-medium-emphasis pa-6">No auction listings yet</td>
+              </tr>
+            </tbody>
+          </v-table>
+        </v-window-item>
+
+        <!-- Auction favorites -->
+        <v-window-item value="auction_favorites">
+          <v-alert type="info" variant="tonal">
+            <v-icon start>mdi-heart-outline</v-icon>
+            No auction favorites yet. Favorite auction listings will appear here.
+          </v-alert>
+        </v-window-item>
+
+        <!-- Auction sources -->
+        <v-window-item value="auction_sources">
+          <v-card variant="outlined" class="pa-4 mb-3">
+            <div class="d-flex align-center mb-3">
+              <div class="text-h6">Auction Sources</div>
+              <v-spacer />
+              <v-btn color="deep-purple" variant="tonal" size="small" prepend-icon="mdi-plus" disabled>
+                Add Source
+              </v-btn>
+            </div>
+            <v-table density="compact">
+              <thead>
+                <tr>
+                  <th>Source</th>
+                  <th>Type</th>
+                  <th>URL</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Auction.com</td>
+                  <td>Online Auction</td>
+                  <td class="text-caption">https://www.auction.com</td>
+                  <td><v-chip size="x-small" color="grey" variant="tonal">Planned</v-chip></td>
+                </tr>
+                <tr>
+                  <td>Hubzu</td>
+                  <td>Online Auction</td>
+                  <td class="text-caption">https://www.hubzu.com</td>
+                  <td><v-chip size="x-small" color="grey" variant="tonal">Planned</v-chip></td>
+                </tr>
+                <tr>
+                  <td>Xome</td>
+                  <td>Online Auction</td>
+                  <td class="text-caption">https://www.xome.com</td>
+                  <td><v-chip size="x-small" color="grey" variant="tonal">Planned</v-chip></td>
+                </tr>
+                <tr>
+                  <td>Foreclosure.com</td>
+                  <td>Foreclosure</td>
+                  <td class="text-caption">https://www.foreclosure.com</td>
+                  <td><v-chip size="x-small" color="grey" variant="tonal">Planned</v-chip></td>
+                </tr>
+                <tr>
+                  <td>RealtyTrac</td>
+                  <td>Foreclosure</td>
+                  <td class="text-caption">https://www.realtytrac.com</td>
+                  <td><v-chip size="x-small" color="grey" variant="tonal">Planned</v-chip></td>
+                </tr>
+                <tr>
+                  <td>Sheriff Sales</td>
+                  <td>Government</td>
+                  <td class="text-caption">Various county sites</td>
+                  <td><v-chip size="x-small" color="grey" variant="tonal">Planned</v-chip></td>
+                </tr>
+              </tbody>
+            </v-table>
+          </v-card>
+        </v-window-item>
+
+        <!-- Auction settings -->
+        <v-window-item value="auction_settings">
+          <v-card variant="outlined" class="pa-4">
+            <div class="text-h6 mb-3">Auction Scraping Settings</div>
+            <v-row dense>
+              <v-col cols="12" md="6">
+                <v-text-field label="Max Total Price ($)" model-value="200000" variant="outlined" density="compact" disabled />
+              </v-col>
+              <v-col cols="12" md="6">
+                <v-text-field label="States (comma-separated)" model-value="" variant="outlined" density="compact" placeholder="e.g. Washington, Oregon" disabled />
+              </v-col>
+              <v-col cols="12" md="6">
+                <v-select label="Property Types" :items="['Single Family', 'Condo', 'Townhouse', 'Multi-Family']" variant="outlined" density="compact" multiple chips disabled />
+              </v-col>
+              <v-col cols="12" md="6">
+                <v-select label="Scrape Interval (hours)" :items="['6', '12', '24', '48']" model-value="24" variant="outlined" density="compact" disabled />
+              </v-col>
+            </v-row>
+            <v-alert type="info" variant="tonal" density="compact" class="mt-3">
+              <v-icon start size="16">mdi-information</v-icon>
+              Auction settings will be enabled once auction scrapers are implemented.
+            </v-alert>
+          </v-card>
+        </v-window-item>
+      </v-window>
+
+    </v-window-item>
+
+    </v-window>
+
     <!-- Detail dialog -->
     <v-dialog v-model="detailDialog" max-width="600">
       <v-card v-if="detailItem">
@@ -1026,7 +1350,7 @@
         <v-card-actions>
           <v-spacer />
           <v-btn variant="text" @click="detailDialog = false">Close</v-btn>
-          <v-btn color="brown" variant="tonal" :href="detailItem.url" target="_blank" append-icon="mdi-open-in-new">
+          <v-btn color="brown" variant="tonal" :href="detailItem.url" target="_blank" append-icon="mdi-open-in-new" @click="markSeen(detailItem)">
             View on Site
           </v-btn>
         </v-card-actions>
@@ -1138,12 +1462,24 @@ export default {
 
   data() {
     return {
+      mainTab: localStorage.getItem('re_mainTab') || 'land',
       activeTab: localStorage.getItem('re_tab') || 'listings',
+
+      // Auction Houses tab
+      auctionTab: 'auction_listings',
+      auctionViewMode: 'table',
+      auctionFilterState: [],
+      auctionFilterMaxPrice: null,
+      auctionFilterMinBeds: null,
+      auctionFilterMinBath: null,
+      auctionFilterType: null,
+      auctionTypeOptions: ['Single Family', 'Condo', 'Townhouse', 'Multi-Family', 'Commercial'],
 
       // Stats
       stats: null,
       lastScrape: null,
       scraping: false,
+      stoppingParserScrape: false,
       scrapeStatusData: null,
       scrapeProgress: null,
       _pollTimer: null,
@@ -1152,10 +1488,12 @@ export default {
       listings: [],
       listingsTotal: 0,
       loadingListings: false,
-      loadingMore: false,
+      currentPage: 1,
+      perPage: 50,
       viewMode: localStorage.getItem('re_view') || 'cards',
       lastClickedHash: null,
       hiddenHashes: (() => { try { const arr = JSON.parse(localStorage.getItem('re_hidden') || '[]'); const obj = {}; arr.forEach(h => obj[h] = true); return obj } catch { return {} } })(),
+      seenHashes: (() => { try { const arr = JSON.parse(localStorage.getItem('re_seen') || '[]'); const obj = {}; arr.forEach(h => obj[h] = true); return obj } catch { return {} } })(),
       showHidden: localStorage.getItem('re_showHidden') === 'true',
       filterSource: (() => { try { return JSON.parse(localStorage.getItem('re_filterSource')) } catch { return null } })(),
       filterState: (() => { try { const v = JSON.parse(localStorage.getItem('re_filterState')); return Array.isArray(v) ? v : [] } catch { return [] } })(),
@@ -1259,6 +1597,9 @@ export default {
   },
 
   watch: {
+    mainTab(tab) {
+      localStorage.setItem('re_mainTab', tab)
+    },
     activeTab(tab) {
       localStorage.setItem('re_tab', tab)
       this.loadTabData(tab)
@@ -1324,6 +1665,9 @@ export default {
     hiddenCount() {
       return Object.keys(this.hiddenHashes).length
     },
+    totalPages() {
+      return Math.max(1, Math.ceil(this.listingsTotal / this.perPage))
+    },
   },
 
   methods: {
@@ -1355,6 +1699,24 @@ export default {
       // trigger reactivity
       this.hiddenHashes = { ...this.hiddenHashes }
       localStorage.setItem('re_hidden', JSON.stringify(Object.keys(this.hiddenHashes)))
+    },
+    markSeen(item) {
+      if (!item?.hash || this.seenHashes[item.hash]) return
+      this.seenHashes[item.hash] = true
+      this.seenHashes = { ...this.seenHashes }
+      localStorage.setItem('re_seen', JSON.stringify(Object.keys(this.seenHashes)))
+    },
+    async deleteListing(item) {
+      const name = item.name || 'this listing'
+      if (!confirm(`Delete "${name}"?\n\nThis listing will be permanently hidden and will not reappear on future scrapes.`)) return
+      try {
+        await api.delete(`${API}/listings/${item.hash}`)
+        this.listings = this.listings.filter(l => l.hash !== item.hash)
+        this.listingsTotal = Math.max(0, this.listingsTotal - 1)
+        this.notify('Listing deleted')
+      } catch (e) {
+        this.notify('Failed to delete listing', 'error')
+      }
     },
     // ---- Formatting ----
     fmtDate(d) {
@@ -1434,6 +1796,19 @@ export default {
         }
         this.lastScrape = latest
       } catch {}
+    },
+
+    // ---- Stop scrape ----
+    async stopScrape() {
+      this.stoppingParserScrape = true
+      try {
+        const { data } = await api.post(`${API}/scrape/stop`)
+        this.notify(data.message || 'Stop requested', data.ok ? 'warning' : 'info')
+      } catch (e) {
+        this.notify('Failed to stop: ' + (e.response?.data?.detail || e.message), 'error')
+      } finally {
+        this.stoppingParserScrape = false
+      }
     },
 
     // ---- Scrape with mode (background + polling) ----
@@ -1523,14 +1898,15 @@ export default {
     },
 
     // ---- Listings ----
-    async loadListings() {
+    async loadListings(resetPage = true) {
+      if (resetPage) this.currentPage = 1
       this.loadingListings = true
       try {
         const params = {
           sort_by: this.sortBy,
           sort_dir: this.sortDir,
-          limit: 100,
-          offset: 0,
+          limit: this.perPage,
+          offset: (this.currentPage - 1) * this.perPage,
         }
         if (this.filterSource) params.source = this.filterSource
         if (this.filterState && this.filterState.length) params.state = this.filterState.join(',')
@@ -1548,30 +1924,12 @@ export default {
         this.loadingListings = false
       }
     },
-    async loadMore() {
-      this.loadingMore = true
-      try {
-        const params = {
-          sort_by: this.sortBy,
-          sort_dir: this.sortDir,
-          limit: 100,
-          offset: this.listings.length,
-        }
-        if (this.filterSource) params.source = this.filterSource
-        if (this.filterState && this.filterState.length) params.state = this.filterState.join(',')
-        if (this.filterMaxPrice) params.max_price = this.filterMaxPrice
-        if (this.filterMinAcreage) params.min_acreage = this.filterMinAcreage
-        if (this.filterZoning && this.filterZoning.length) params.zoning = this.filterZoning.join(',')
-        if (this.filterHoa) params.hoa = this.filterHoa
-        if (this.filterHasComment) params.has_comment = true
-        if (this.filterSearchComment) params.search_comment = this.filterSearchComment
-
-        const { data } = await api.get(`${API}/listings`, { params })
-        const newItems = (data.items || []).map(i => ({ ...i, _loadingDetail: false }))
-        this.listings.push(...newItems)
-      } catch {} finally {
-        this.loadingMore = false
-      }
+    goToPage(page) {
+      this.currentPage = page
+      this.loadListings(false)
+      this.$nextTick(() => {
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+      })
     },
 
     // ---- Favorites ----
@@ -1722,6 +2080,7 @@ export default {
       this.notify(`Applied: ${preset.name}`)
     },
     async deletePreset(presetId) {
+      if (!confirm('Delete this saved search?')) return
       try {
         await api.delete(`${API}/filter-presets/${presetId}`)
         this.filterPresets = this.filterPresets.filter(p => p._id !== presetId)
@@ -1774,5 +2133,20 @@ export default {
 .comment-card-field :deep(.v-field__input) {
   font-size: 0.8rem;
   min-height: 32px;
+}
+
+/* Subtle "seen" indicator for viewed listings */
+.re-seen {
+  opacity: 0.72;
+  border-color: rgba(255, 255, 255, 0.04) !important;
+}
+.re-seen:hover {
+  opacity: 1;
+}
+.re-seen-row {
+  opacity: 0.65;
+}
+.re-seen-row:hover {
+  opacity: 1;
 }
 </style>

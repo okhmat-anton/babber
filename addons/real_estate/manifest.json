@@ -1,7 +1,7 @@
 {
   "id": "real_estate",
   "name": "Real Estate",
-  "description": "Scrape affordable land listings from multiple sources — filter by price, down payment, monthly payment, state, zip/radius, acreage, land type and more",
+  "description": "Scrape affordable land listings and auction house properties from multiple sources — filter by price, acreage, state, zoning, and more",
   "icon": "mdi-terrain",
   "version": "1.0.0",
   "author": "system",
