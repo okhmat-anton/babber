@@ -102,6 +102,10 @@
         <v-icon start size="16">mdi-heart</v-icon>
         Favorites: {{ stats.favorites || 0 }}
       </v-chip>
+      <v-chip variant="tonal" color="cyan" size="large">
+        <v-icon start size="16">mdi-binoculars</v-icon>
+        Watched: {{ stats.watched || 0 }}
+      </v-chip>
       <v-chip variant="tonal" color="blue" size="large">
         <v-icon start size="16">mdi-web</v-icon>
         Sources: {{ stats.sources || 0 }}
@@ -124,6 +128,10 @@
       <v-tab value="favorites">
         <v-icon start size="18">mdi-heart-outline</v-icon>
         Favorites
+      </v-tab>
+      <v-tab value="watched">
+        <v-icon start size="18">mdi-binoculars</v-icon>
+        Watched
       </v-tab>
       <v-tab value="sources">
         <v-icon start size="18">mdi-web</v-icon>
@@ -369,8 +377,8 @@
             <v-card
               variant="outlined"
               class="h-100 d-flex flex-column"
-              :class="{ 're-seen': seenHashes[item.hash] && !hiddenHashes[item.hash] }"
-              :style="hiddenHashes[item.hash] ? 'opacity: 0.45; text-decoration: line-through' : ''"
+              :class="{ 're-seen': seenHashes[item.hash] && !item.is_hidden }"
+              :style="item.is_hidden ? 'opacity: 0.45; text-decoration: line-through' : ''"
             >
               <!-- Image -->
               <v-img
@@ -488,10 +496,19 @@
                   icon
                   variant="text"
                   size="small"
-                  @click.stop="toggleHidden(item)"
-                  :color="hiddenHashes[item.hash] ? 'orange' : 'grey'"
+                  @click.stop="toggleWatched(item)"
+                  :color="item.is_watched ? 'cyan' : 'grey'"
                 >
-                  <v-icon>{{ hiddenHashes[item.hash] ? 'mdi-eye-off' : 'mdi-eye-off-outline' }}</v-icon>
+                  <v-icon>{{ item.is_watched ? 'mdi-binoculars' : 'mdi-eye-outline' }}</v-icon>
+                </v-btn>
+                <v-btn
+                  icon
+                  variant="text"
+                  size="small"
+                  @click.stop="toggleHidden(item)"
+                  :color="item.is_hidden ? 'orange' : 'grey'"
+                >
+                  <v-icon>{{ item.is_hidden ? 'mdi-eye-off' : 'mdi-eye-off-outline' }}</v-icon>
                 </v-btn>
                 <v-btn
                   icon
@@ -529,9 +546,9 @@
             <tr
               v-for="item in visibleListings"
               :key="item.hash"
-              :class="{ 're-seen-row': seenHashes[item.hash] && !hiddenHashes[item.hash] }"
+              :class="{ 're-seen-row': seenHashes[item.hash] && !item.is_hidden }"
               :style="[
-                hiddenHashes[item.hash] ? 'opacity: 0.45; text-decoration: line-through' : '',
+                item.is_hidden ? 'opacity: 0.45; text-decoration: line-through' : '',
                 lastClickedHash === item.hash ? 'background: rgba(255, 183, 77, 0.15); box-shadow: inset 3px 0 0 #FFB74D' : '',
               ]"
             >
@@ -590,9 +607,13 @@
                 <v-btn size="x-small" variant="text" icon @click="toggleFavorite(item)" :color="item.is_favorite ? 'red' : 'grey'">
                   <v-icon size="16">{{ item.is_favorite ? 'mdi-heart' : 'mdi-heart-outline' }}</v-icon>
                 </v-btn>
-                <v-btn size="x-small" variant="text" icon @click="toggleHidden(item)" :color="hiddenHashes[item.hash] ? 'orange' : 'grey'">
-                  <v-icon size="16">{{ hiddenHashes[item.hash] ? 'mdi-eye-off' : 'mdi-eye-off-outline' }}</v-icon>
-                  <v-tooltip activator="parent" location="top">{{ hiddenHashes[item.hash] ? 'Restore' : 'Dismiss' }}</v-tooltip>
+                <v-btn size="x-small" variant="text" icon @click="toggleWatched(item)" :color="item.is_watched ? 'cyan' : 'grey'">
+                  <v-icon size="16">{{ item.is_watched ? 'mdi-binoculars' : 'mdi-eye-outline' }}</v-icon>
+                  <v-tooltip activator="parent" location="top">{{ item.is_watched ? 'Unwatch' : 'Watch' }}</v-tooltip>
+                </v-btn>
+                <v-btn size="x-small" variant="text" icon @click="toggleHidden(item)" :color="item.is_hidden ? 'orange' : 'grey'">
+                  <v-icon size="16">{{ item.is_hidden ? 'mdi-eye-off' : 'mdi-eye-off-outline' }}</v-icon>
+                  <v-tooltip activator="parent" location="top">{{ item.is_hidden ? 'Restore' : 'Dismiss' }}</v-tooltip>
                 </v-btn>
                 <v-btn size="x-small" variant="text" icon @click="deleteListing(item)" color="red-darken-2">
                   <v-icon size="16">mdi-delete-outline</v-icon>
@@ -686,6 +707,70 @@
 
         <v-alert v-if="!loadingFavorites && favoriteItems.length === 0" type="info" variant="tonal" class="mt-3">
           No favorites yet. Click the <v-icon size="16">mdi-heart-outline</v-icon> icon on any listing to save it here.
+        </v-alert>
+      </v-window-item>
+
+      <!-- ═══════════════════════════════════════ -->
+      <!-- WATCHED -->
+      <!-- ═══════════════════════════════════════ -->
+      <v-window-item value="watched">
+        <v-progress-linear v-if="loadingWatched" indeterminate color="cyan" class="mb-2" />
+
+        <v-row v-if="watchedItems.length > 0">
+          <v-col
+            v-for="item in watchedItems"
+            :key="item.hash"
+            cols="12"
+            sm="6"
+            md="4"
+            lg="3"
+          >
+            <v-card variant="outlined" class="h-100 d-flex flex-column">
+              <v-img
+                v-if="item.image_url"
+                :src="item.image_url"
+                height="140"
+                cover
+                class="bg-grey-darken-3"
+              />
+              <v-card-text class="flex-grow-1">
+                <div class="d-flex align-center mb-1">
+                  <div class="text-subtitle-1 font-weight-bold text-truncate flex-grow-1">{{ item.name }}</div>
+                  <v-btn
+                    icon variant="text" size="x-small" color="cyan"
+                    @click="toggleWatched(item)"
+                  >
+                    <v-icon>mdi-binoculars</v-icon>
+                  </v-btn>
+                </div>
+                <div class="mb-1">
+                  <v-chip size="x-small" color="green" variant="tonal" class="mr-1" v-if="item.price">
+                    ${{ fmtNum(item.price) }}
+                  </v-chip>
+                  <v-chip size="x-small" color="brown" variant="tonal" v-if="item.acreage">
+                    {{ item.acreage }} ac
+                  </v-chip>
+                </div>
+                <div class="text-caption text-medium-emphasis">
+                  <span v-if="item.county">{{ item.county }} County, </span>{{ item.state }}
+                </div>
+                <div class="text-caption text-medium-emphasis mt-1" v-if="item.down_payment || item.monthly_payment">
+                  <span v-if="item.down_payment">${{ fmtNum(item.down_payment) }} down</span>
+                  <span v-if="item.down_payment && item.monthly_payment"> · </span>
+                  <span v-if="item.monthly_payment">${{ fmtNum(item.monthly_payment) }}/mo</span>
+                </div>
+              </v-card-text>
+              <v-card-actions>
+                <v-chip size="x-small" :color="sourceColor(item.source)" variant="tonal">{{ item.source_name }}</v-chip>
+                <v-spacer />
+                <v-btn size="small" variant="text" :href="item.url" target="_blank" append-icon="mdi-open-in-new">Visit</v-btn>
+              </v-card-actions>
+            </v-card>
+          </v-col>
+        </v-row>
+
+        <v-alert v-if="!loadingWatched && watchedItems.length === 0" type="info" variant="tonal" class="mt-3">
+          No watched items yet. Click the <v-icon size="16">mdi-eye-outline</v-icon> icon on any listing to track it here.
         </v-alert>
       </v-window-item>
 
@@ -1492,7 +1577,7 @@ export default {
       perPage: 50,
       viewMode: localStorage.getItem('re_view') || 'cards',
       lastClickedHash: null,
-      hiddenHashes: (() => { try { const arr = JSON.parse(localStorage.getItem('re_hidden') || '[]'); const obj = {}; arr.forEach(h => obj[h] = true); return obj } catch { return {} } })(),
+      hiddenCount: 0,
       seenHashes: (() => { try { const arr = JSON.parse(localStorage.getItem('re_seen') || '[]'); const obj = {}; arr.forEach(h => obj[h] = true); return obj } catch { return {} } })(),
       showHidden: localStorage.getItem('re_showHidden') === 'true',
       filterSource: (() => { try { return JSON.parse(localStorage.getItem('re_filterSource')) } catch { return null } })(),
@@ -1519,8 +1604,6 @@ export default {
       ],
       sourceOptions: [
         { title: 'All Sources', value: null },
-        { title: 'LandCentral', value: 'landcentral' },
-        { title: 'Classic Country Land', value: 'classiccountryland' },
       ],
       stateOptions: [
         'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado',
@@ -1538,6 +1621,10 @@ export default {
       // Favorites tab
       favoriteItems: [],
       loadingFavorites: false,
+
+      // Watched tab
+      watchedItems: [],
+      loadingWatched: false,
 
       // Sources tab
       sources: [],
@@ -1633,6 +1720,7 @@ export default {
     },
     showHidden(v) {
       localStorage.setItem('re_showHidden', String(v))
+      this.loadListings()
     },
   },
 
@@ -1642,7 +1730,11 @@ export default {
     this.loadScrapeStatus()
     this.loadZoningOptions()
     this.loadFilterPresets()
+    this.loadHiddenCount()
+    await this.loadSourceOptions()
     this.loadTabData(this.activeTab)
+    // Migrate localStorage hidden hashes to server-side
+    this._migrateHiddenHashes()
     // Check if scrape is already running (e.g. page refresh during scrape)
     try {
       const { data } = await api.get(`${API}/scrape/progress`)
@@ -1659,11 +1751,7 @@ export default {
 
   computed: {
     visibleListings() {
-      if (this.showHidden) return this.listings
-      return this.listings.filter(i => !this.hiddenHashes[i.hash])
-    },
-    hiddenCount() {
-      return Object.keys(this.hiddenHashes).length
+      return this.listings
     },
     totalPages() {
       return Math.max(1, Math.ceil(this.listingsTotal / this.perPage))
@@ -1690,15 +1778,21 @@ export default {
         this.zoningOptions = data.values || []
       } catch {}
     },
-    toggleHidden(item) {
-      if (this.hiddenHashes[item.hash]) {
-        delete this.hiddenHashes[item.hash]
-      } else {
-        this.hiddenHashes[item.hash] = true
+    async toggleHidden(item) {
+      try {
+        const { data } = await api.patch(`${API}/listings/${item.hash}/hidden`)
+        item.is_hidden = data.is_hidden
+        if (data.is_hidden && !this.showHidden) {
+          // Remove from current view when hiding and not showing hidden
+          this.listings = this.listings.filter(l => l.hash !== item.hash)
+          this.listingsTotal = Math.max(0, this.listingsTotal - 1)
+        } else if (!data.is_hidden && this.showHidden) {
+          // Unhiding while viewing hidden — just update the flag
+        }
+        this.loadHiddenCount()
+      } catch (e) {
+        this.notify('Failed to update hidden status', 'error')
       }
-      // trigger reactivity
-      this.hiddenHashes = { ...this.hiddenHashes }
-      localStorage.setItem('re_hidden', JSON.stringify(Object.keys(this.hiddenHashes)))
     },
     markSeen(item) {
       if (!item?.hash || this.seenHashes[item.hash]) return
@@ -1730,11 +1824,15 @@ export default {
       return Number(n).toLocaleString('en-US', { maximumFractionDigits: 0 })
     },
     sourceColor(src) {
-      const colors = {
-        landcentral: 'blue',
-        classiccountryland: 'green',
-      }
-      return colors[src] || 'grey'
+      const palette = [
+        'blue', 'green', 'orange', 'purple', 'teal', 'red', 'indigo',
+        'cyan', 'pink', 'amber', 'deep-purple', 'light-blue', 'lime',
+        'brown', 'blue-grey', 'deep-orange', 'light-green', 'yellow',
+        'grey', 'grey-darken-1',
+      ]
+      const ids = this.sources.map(s => s.source_id)
+      const idx = ids.indexOf(src)
+      return idx >= 0 ? palette[idx % palette.length] : 'grey'
     },
     notify(text, color = 'success') {
       this.snackText = text
@@ -1747,6 +1845,7 @@ export default {
       switch (tab) {
         case 'listings': this.loadListings(); break
         case 'favorites': this.loadFavorites(); break
+        case 'watched': this.loadWatched(); break
         case 'sources': this.loadSources(); break
         case 'settings': this.loadScrapeStatus(); break
       }
@@ -1816,15 +1915,7 @@ export default {
       this.scraping = true
       this.scrapeProgress = null
       try {
-        // Build query params
         const params = new URLSearchParams({ mode })
-        // For 'full' mode, pass hidden hashes so detail phase skips them
-        if (mode === 'full') {
-          const hidden = Object.keys(this.hiddenHashes)
-          if (hidden.length > 0) {
-            params.set('hidden_hashes', hidden.join(','))
-          }
-        }
         const { data } = await api.post(`${API}/scrape-all?${params.toString()}`)
         if (data.ok) {
           this.notify(data.message || 'Scraping started...')
@@ -1875,6 +1966,19 @@ export default {
         this._pollTimer = null
       }
     },
+    async _migrateHiddenHashes() {
+      // One-time migration: move localStorage hidden hashes to server-side is_hidden
+      try {
+        const raw = localStorage.getItem('re_hidden')
+        if (!raw) return
+        const hashes = JSON.parse(raw)
+        if (!Array.isArray(hashes) || hashes.length === 0) return
+        await api.post(`${API}/listings/bulk-hide`, { hashes })
+        localStorage.removeItem('re_hidden')
+        this.loadHiddenCount()
+        this.loadListings()
+      } catch {}
+    },
     async _pollProgress() {
       try {
         const { data } = await api.get(`${API}/scrape/progress`)
@@ -1907,6 +2011,7 @@ export default {
           sort_dir: this.sortDir,
           limit: this.perPage,
           offset: (this.currentPage - 1) * this.perPage,
+          exclude_hidden: !this.showHidden,
         }
         if (this.filterSource) params.source = this.filterSource
         if (this.filterState && this.filterState.length) params.state = this.filterState.join(',')
@@ -1923,6 +2028,12 @@ export default {
       } catch {} finally {
         this.loadingListings = false
       }
+    },
+    async loadHiddenCount() {
+      try {
+        const { data } = await api.get(`${API}/hidden-count`)
+        this.hiddenCount = data.count || 0
+      } catch {}
     },
     goToPage(page) {
       this.currentPage = page
@@ -1958,6 +2069,32 @@ export default {
       }
     },
 
+    // ---- Watched ----
+    async loadWatched() {
+      this.loadingWatched = true
+      try {
+        const { data } = await api.get(`${API}/listings`, { params: { watched_only: true, limit: 200 } })
+        this.watchedItems = data.items || []
+      } catch {} finally {
+        this.loadingWatched = false
+      }
+    },
+    async toggleWatched(item) {
+      try {
+        if (item.is_watched) {
+          await api.delete(`${API}/watched/${item.hash}`)
+          item.is_watched = false
+          this.watchedItems = this.watchedItems.filter(w => w.hash !== item.hash)
+        } else {
+          await api.post(`${API}/watched/${item.hash}`)
+          item.is_watched = true
+        }
+        this.loadStats()
+      } catch (e) {
+        this.notify('Failed to update watched status', 'error')
+      }
+    },
+
     // ---- Detail scrape ----
     async scrapeDetail(item) {
       item._loadingDetail = true
@@ -1985,10 +2122,24 @@ export default {
     },
 
     // ---- Sources ----
+    async loadSourceOptions() {
+      try {
+        const { data } = await api.get(`${API}/sources`)
+        this.sources = data.items || []
+        this.sourceOptions = [
+          { title: 'All Sources', value: null },
+          ...this.sources.map(s => ({ title: s.name, value: s.source_id })),
+        ]
+      } catch {}
+    },
     async loadSources() {
       try {
         const { data } = await api.get(`${API}/sources`)
         this.sources = data.items || []
+        this.sourceOptions = [
+          { title: 'All Sources', value: null },
+          ...this.sources.map(s => ({ title: s.name, value: s.source_id })),
+        ]
       } catch {}
     },
     async toggleSource(src, enabled) {

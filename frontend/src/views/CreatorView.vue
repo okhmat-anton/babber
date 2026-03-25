@@ -777,9 +777,10 @@ function addSubGoalInDialog() {
   goalForm.value.children.push({ id: uid(), title: '', description: '', target_date: null, priority: 1, scale: 'medium', children: [] })
 }
 
-function saveGoalDialog() {
+async function saveGoalDialog() {
   const data = JSON.parse(JSON.stringify(goalForm.value))
-  if (goalDialogIndex.value !== null) {
+  const isEdit = goalDialogIndex.value !== null
+  if (isEdit) {
     // Preserve completed / in_context state from original
     const orig = form.value.goals[goalDialogIndex.value]
     data.completed = orig.completed
@@ -791,6 +792,16 @@ function saveGoalDialog() {
     form.value.goals.push(data)
   }
   goalDialog.value = false
+  // Auto-save immediately after adding/editing a goal
+  saving.value = true
+  try {
+    await api.put('/creator', form.value)
+    showSnack(isEdit ? 'Goal updated' : 'Goal added')
+  } catch (e) {
+    showSnack('Failed to save: ' + (e.response?.data?.detail || e.message), 'error')
+  } finally {
+    saving.value = false
+  }
 }
 
 function addGoal() {

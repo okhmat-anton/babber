@@ -37,6 +37,7 @@ router = APIRouter(
 
 COL_LISTINGS = "re_listings"
 COL_FAVORITES = "re_favorites"
+COL_WATCHED = "re_watched"
 COL_SOURCES = "re_sources"
 COL_META = "re_meta"
 COL_FILTER_PRESETS = "re_filter_presets"
@@ -3121,20 +3122,31 @@ LANDANDFARM_MAX_PAGES = 10  # 20 listings per page
 
 
 async def _scrape_landandfarm(db, client: httpx.AsyncClient, states_filter: list) -> int:
-    """Scrape LandAndFarm.com — major marketplace, server-rendered pages."""
+    """Scrape LandAndFarm.com — major marketplace, server-rendered pages.
+
+    Uses curl_cffi with Safari impersonation to bypass bot protection.
+    The httpx client parameter is unused (kept for interface compatibility).
+    """
     col = db[COL_LISTINGS]
     count = 0
 
     _scrape_progress["states_total"] = LANDANDFARM_MAX_PAGES
     _scrape_progress["states_done"] = 0
 
-    for page in range(1, LANDANDFARM_MAX_PAGES + 1):
+    async with CffiSession(impersonate="safari17_2_ios") as session:
+      for page in range(1, LANDANDFARM_MAX_PAGES + 1):
+        if _scrape_stop_requested:
+            break
         url = f"https://www.landandfarm.com/search/cheap-land-for-sale/page-{page}/" if page > 1 else "https://www.landandfarm.com/search/cheap-land-for-sale/"
         try:
-            resp = await _fetch_with_retry(client, url)
-            if not resp:
+            resp = await session.get(url, timeout=30)
+            if resp.status_code != 200:
+                logger.warning(f"LandAndFarm HTTP {resp.status_code} for {url}")
                 _scrape_progress["states_done"] = page
                 continue
+            if len(resp.text) < 2000:
+                _scrape_progress["states_done"] = page
+                break
 
             soup = BeautifulSoup(resp.text, "html.parser")
 
@@ -3239,16 +3251,20 @@ async def _scrape_landandfarm(db, client: httpx.AsyncClient, states_filter: list
 
 
 async def _scrape_detail_landandfarm(db, client: httpx.AsyncClient, listing: dict) -> dict:
-    """Scrape LandAndFarm property detail page."""
+    """Scrape LandAndFarm property detail page.
+
+    Uses curl_cffi to bypass bot protection.
+    """
     url = listing.get("url")
     if not url:
         return listing
     try:
-        resp = await client.get(url, headers=HTTP_HEADERS, timeout=HTTP_TIMEOUT, follow_redirects=True)
-        if resp.status_code != 200:
-            return listing
-        soup = BeautifulSoup(resp.text, "html.parser")
-        text = soup.get_text(" ", strip=True)
+        async with CffiSession(impersonate="safari17_2_ios") as session:
+            resp = await session.get(url, timeout=30)
+            if resp.status_code != 200:
+                return listing
+            soup = BeautifulSoup(resp.text, "html.parser")
+            text = soup.get_text(" ", strip=True)
 
         # Description
         desc = soup.find("div", class_=re.compile(r"description|detail|listing-content", re.I))
@@ -3298,7 +3314,11 @@ LANDSEARCH_MAX_PAGES = 10  # pages per state
 
 
 async def _scrape_landsearch(db, client: httpx.AsyncClient, states_filter: list) -> int:
-    """Scrape LandSearch.com — large listing aggregator with state-based pages."""
+    """Scrape LandSearch.com — large listing aggregator with state-based pages.
+
+    Uses curl_cffi with Safari impersonation to bypass Cloudflare protection.
+    The httpx client parameter is unused (kept for interface compatibility).
+    """
     col = db[COL_LISTINGS]
     count = 0
 
@@ -3309,15 +3329,21 @@ async def _scrape_landsearch(db, client: httpx.AsyncClient, states_filter: list)
     _scrape_progress["states_total"] = len(states)
     _scrape_progress["states_done"] = 0
 
-    for si, state_slug in enumerate(states):
+    async with CffiSession(impersonate="safari17_2_ios") as session:
+      for si, state_slug in enumerate(states):
         for page in range(1, LANDSEARCH_MAX_PAGES + 1):
+            if _scrape_stop_requested:
+                break
             if page == 1:
                 url = f"https://www.landsearch.com/properties/{state_slug}"
             else:
                 url = f"https://www.landsearch.com/properties/{state_slug}/p{page}"
             try:
-                resp = await _fetch_with_retry(client, url)
-                if not resp:
+                resp = await session.get(url, timeout=30)
+                if resp.status_code != 200:
+                    logger.warning(f"LandSearch HTTP {resp.status_code} for {url}")
+                    break
+                if len(resp.text) < 2000:
                     break
 
                 soup = BeautifulSoup(resp.text, "html.parser")
@@ -3337,8 +3363,15 @@ async def _scrape_landsearch(db, client: httpx.AsyncClient, states_filter: list)
 
                     full_url = f"https://www.landsearch.com{href}" if href.startswith("/") else href
 
+                    # Name from link text; fallback to URL slug (links may be image-only)
                     name = link.get_text(strip=True)
                     if not name or len(name) < 5:
+                        slug_m = re.search(r"/properties/([^/]+)/\d+", href)
+                        if slug_m:
+                            name = _slug_to_state(slug_m.group(1))  # converts dashes to title case
+                        else:
+                            name = href.split("/")[-2] if "/" in href else href
+                    if not name:
                         continue
 
                     # Walk up to find card container
@@ -3411,15 +3444,19 @@ async def _scrape_landsearch(db, client: httpx.AsyncClient, states_filter: list)
 
 
 async def _scrape_detail_landsearch(db, client: httpx.AsyncClient, listing: dict) -> dict:
-    """Scrape LandSearch.com property detail page."""
+    """Scrape LandSearch.com property detail page.
+
+    Uses curl_cffi to bypass Cloudflare protection.
+    """
     url = listing.get("url")
     if not url:
         return listing
     try:
-        resp = await client.get(url, headers=HTTP_HEADERS, timeout=HTTP_TIMEOUT, follow_redirects=True)
-        if resp.status_code != 200:
-            return listing
-        soup = BeautifulSoup(resp.text, "html.parser")
+        async with CffiSession(impersonate="safari17_2_ios") as session:
+            resp = await session.get(url, timeout=30)
+            if resp.status_code != 200:
+                return listing
+            soup = BeautifulSoup(resp.text, "html.parser")
         text = soup.get_text(" ", strip=True)
 
         # Description
@@ -3484,7 +3521,11 @@ LANDWATCH_MAX_PAGES = 5  # pages per state
 
 
 async def _scrape_landwatch(db, client: httpx.AsyncClient, states_filter: list) -> int:
-    """Scrape LandWatch.com — major land marketplace with thousands of listings."""
+    """Scrape LandWatch.com — major land marketplace with thousands of listings.
+
+    Uses curl_cffi with Safari impersonation to bypass bot protection.
+    The httpx client parameter is unused (kept for interface compatibility).
+    """
     col = db[COL_LISTINGS]
     count = 0
 
@@ -3495,16 +3536,22 @@ async def _scrape_landwatch(db, client: httpx.AsyncClient, states_filter: list) 
     _scrape_progress["states_total"] = len(states)
     _scrape_progress["states_done"] = 0
 
-    for si, state_slug in enumerate(states):
+    async with CffiSession(impersonate="safari17_2_ios") as session:
+      for si, state_slug in enumerate(states):
         for page in range(1, LANDWATCH_MAX_PAGES + 1):
+            if _scrape_stop_requested:
+                break
             # LandWatch URL: /washington-land-for-sale, page param
             if page == 1:
                 url = f"https://www.landwatch.com/{state_slug}-land-for-sale"
             else:
                 url = f"https://www.landwatch.com/{state_slug}-land-for-sale?page={page}"
             try:
-                resp = await _fetch_with_retry(client, url)
-                if not resp:
+                resp = await session.get(url, timeout=30)
+                if resp.status_code != 200:
+                    logger.warning(f"LandWatch HTTP {resp.status_code} for {url}")
+                    break
+                if len(resp.text) < 2000:
                     break
 
                 soup = BeautifulSoup(resp.text, "html.parser")
@@ -3606,16 +3653,20 @@ async def _scrape_landwatch(db, client: httpx.AsyncClient, states_filter: list) 
 
 
 async def _scrape_detail_landwatch(db, client: httpx.AsyncClient, listing: dict) -> dict:
-    """Scrape LandWatch.com property detail page."""
+    """Scrape LandWatch.com property detail page.
+
+    Uses curl_cffi to bypass bot protection.
+    """
     url = listing.get("url")
     if not url:
         return listing
     try:
-        resp = await client.get(url, headers=HTTP_HEADERS, timeout=HTTP_TIMEOUT, follow_redirects=True)
-        if resp.status_code != 200:
-            return listing
-        soup = BeautifulSoup(resp.text, "html.parser")
-        text = soup.get_text(" ", strip=True)
+        async with CffiSession(impersonate="safari17_2_ios") as session:
+            resp = await session.get(url, timeout=30)
+            if resp.status_code != 200:
+                return listing
+            soup = BeautifulSoup(resp.text, "html.parser")
+            text = soup.get_text(" ", strip=True)
 
         # Description
         desc = soup.find("div", class_=re.compile(r"description|listing-detail|detail-content", re.I))
@@ -3922,7 +3973,7 @@ async def _scrape_homescom(db, client: httpx.AsyncClient, states_filter: list) -
     _scrape_progress["states_total"] = len(states)
     _scrape_progress["states_done"] = 0
 
-    async with CffiSession(impersonate="safari") as session:
+    async with CffiSession(impersonate="safari17_2_ios") as session:
         for si, state_slug in enumerate(states):
             if _scrape_stop_requested:
                 break
@@ -4063,7 +4114,7 @@ async def _scrape_detail_homescom(db, client: httpx.AsyncClient, listing: dict) 
     if not url:
         return listing
     try:
-        async with CffiSession(impersonate="safari") as session:
+        async with CffiSession(impersonate="safari17_2_ios") as session:
             resp = await session.get(url, timeout=30)
             if resp.status_code != 200:
                 return listing
@@ -4169,7 +4220,7 @@ async def _scrape_landcom(db, client: httpx.AsyncClient, states_filter: list) ->
     _scrape_progress["states_total"] = len(states)
     _scrape_progress["states_done"] = 0
 
-    async with CffiSession(impersonate="safari15_5") as session:
+    async with CffiSession(impersonate="safari17_2_ios") as session:
         for si, state_name in enumerate(states):
             if _scrape_stop_requested:
                 break
@@ -4322,7 +4373,7 @@ async def _scrape_detail_landcom(db, client: httpx.AsyncClient, listing: dict) -
     if not url:
         return listing
     try:
-        async with CffiSession(impersonate="safari15_5") as session:
+        async with CffiSession(impersonate="safari17_2_ios") as session:
             resp = await session.get(url, timeout=30)
             if resp.status_code != 200:
                 return listing
@@ -4433,6 +4484,8 @@ async def list_listings(
     has_comment: Optional[bool] = Query(None, description="Filter only listings with a user comment"),
     search_comment: Optional[str] = Query(None, description="Search within user comments"),
     favorites_only: bool = Query(False),
+    watched_only: bool = Query(False),
+    exclude_hidden: bool = Query(True, description="Exclude dismissed/hidden listings"),
     sort_by: str = Query("price", description="price, acreage, scraped_at, state"),
     sort_dir: str = Query("asc", description="asc or desc"),
     limit: int = Query(100, ge=1, le=500),
@@ -4441,6 +4494,8 @@ async def list_listings(
 ):
     """List scraped land listings with optional filters."""
     query = {"deleted": {"$ne": True}}
+    if exclude_hidden:
+        query["is_hidden"] = {"$ne": True}
 
     if source:
         query["source"] = source
@@ -4497,6 +4552,19 @@ async def list_listings(
         else:
             return {"items": [], "total": 0}
 
+    if watched_only:
+        watch_hashes = set()
+        async for doc in db[COL_WATCHED].find({}, {"listing_hash": 1}):
+            watch_hashes.add(doc["listing_hash"])
+        if watch_hashes:
+            query.setdefault("hash", {})
+            if isinstance(query.get("hash"), dict) and "$in" in query["hash"]:
+                query["hash"]["$in"] = list(set(query["hash"]["$in"]) & watch_hashes)
+            else:
+                query["hash"] = {"$in": list(watch_hashes)}
+        else:
+            return {"items": [], "total": 0}
+
     sort_field = {
         "price": "price",
         "acreage": "acreage",
@@ -4511,15 +4579,19 @@ async def list_listings(
     total = await col.count_documents(query)
     cursor = col.find(query).sort(sort_field, sort_direction).skip(offset).limit(limit)
 
-    # Get favorites for marking
+    # Get favorites and watched for marking
     fav_set = set()
     async for doc in db[COL_FAVORITES].find({}, {"listing_hash": 1}):
         fav_set.add(doc["listing_hash"])
+    watch_set = set()
+    async for doc in db[COL_WATCHED].find({}, {"listing_hash": 1}):
+        watch_set.add(doc["listing_hash"])
 
     items = []
     async for doc in cursor:
         doc["_id"] = str(doc["_id"])
         doc["is_favorite"] = doc.get("hash", "") in fav_set
+        doc["is_watched"] = doc.get("hash", "") in watch_set
         items.append(doc)
 
     return {"items": items, "total": total}
@@ -4564,6 +4636,42 @@ async def restore_listing(listing_hash: str, db=Depends(get_mongodb)):
     if result.matched_count == 0:
         raise HTTPException(404, "Listing not found")
     return {"ok": True}
+
+
+@router.patch("/listings/{listing_hash}/hidden")
+async def toggle_listing_hidden(listing_hash: str, db=Depends(get_mongodb)):
+    """Toggle the dismissed/hidden status of a listing."""
+    doc = await db[COL_LISTINGS].find_one({"hash": listing_hash}, {"is_hidden": 1})
+    if not doc:
+        raise HTTPException(404, "Listing not found")
+    new_val = not doc.get("is_hidden", False)
+    await db[COL_LISTINGS].update_one(
+        {"hash": listing_hash},
+        {"$set": {"is_hidden": new_val}},
+    )
+    return {"ok": True, "is_hidden": new_val}
+
+
+@router.post("/listings/bulk-hide")
+async def bulk_hide_listings(
+    hashes: List[str] = Body(..., embed=True),
+    db=Depends(get_mongodb),
+):
+    """Migrate client-side hidden hashes to server-side is_hidden flag."""
+    if not hashes:
+        return {"migrated": 0}
+    result = await db[COL_LISTINGS].update_many(
+        {"hash": {"$in": hashes}},
+        {"$set": {"is_hidden": True}},
+    )
+    return {"migrated": result.modified_count}
+
+
+@router.get("/hidden-count")
+async def get_hidden_count(db=Depends(get_mongodb)):
+    """Get count of hidden/dismissed listings."""
+    count = await db[COL_LISTINGS].count_documents({"is_hidden": True, "deleted": {"$ne": True}})
+    return {"count": count}
 
 
 @router.patch("/listings/{listing_hash}/comment")
@@ -4678,6 +4786,38 @@ async def remove_favorite(listing_hash: str, db=Depends(get_mongodb)):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# API ROUTES — Watched
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@router.post("/watched/{listing_hash}")
+async def add_watched(listing_hash: str, db=Depends(get_mongodb)):
+    """Mark a listing as watched/tracked."""
+    listing = await db[COL_LISTINGS].find_one({"hash": listing_hash})
+    if not listing:
+        raise HTTPException(404, "Listing not found")
+
+    await db[COL_WATCHED].update_one(
+        {"listing_hash": listing_hash},
+        {
+            "$set": {
+                "listing_hash": listing_hash,
+                "added_at": datetime.now(timezone.utc).isoformat(),
+            }
+        },
+        upsert=True,
+    )
+    return {"ok": True}
+
+
+@router.delete("/watched/{listing_hash}")
+async def remove_watched(listing_hash: str, db=Depends(get_mongodb)):
+    """Remove a listing from watched."""
+    await db[COL_WATCHED].delete_one({"listing_hash": listing_hash})
+    return {"ok": True}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # API ROUTES — Sources
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -4765,12 +4905,11 @@ async def delete_source(source_id: str, db=Depends(get_mongodb)):
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-async def _run_scrape_background(source_ids: list, mode: str = "full",
-                                  exclude_hashes: set = None):
+async def _run_scrape_background(source_ids: list, mode: str = "full"):
     """Background scrape worker — runs outside the HTTP request lifecycle.
 
     Modes:
-      - full: scrape listings + update existing + detail scrape new (skip excluded hashes)
+      - full: scrape listings + update existing + detail scrape new (skip hidden)
       - new_only: scrape listings but only INSERT new (skip existing) + detail scrape new
       - favorites: skip listing scrape, only detail-scrape favorited listings
     """
@@ -4794,9 +4933,6 @@ async def _run_scrape_background(source_ids: list, mode: str = "full",
     _scrape_progress["sources_total"] = len(source_ids)
     _scrape_progress["error_msg"] = None
     _scrape_progress["mode"] = mode
-
-    if exclude_hashes is None:
-        exclude_hashes = set()
 
     filters = await _get_filter_settings(db)
     results = {}
@@ -4904,10 +5040,8 @@ async def _run_scrape_background(source_ids: list, mode: str = "full",
                 )
             detail_query = {"hash": {"$in": fav_hashes}} if fav_hashes else {"_never_match_": True}
         else:
-            # Detail-scrape listings not yet scraped, excluding hidden hashes
-            detail_query = {"detail_scraped": {"$ne": True}}
-            if exclude_hashes:
-                detail_query["hash"] = {"$nin": list(exclude_hashes)}
+            # Detail-scrape listings not yet scraped, excluding hidden listings
+            detail_query = {"detail_scraped": {"$ne": True}, "is_hidden": {"$ne": True}}
 
         no_detail = await col.find(
             detail_query,
@@ -5053,12 +5187,11 @@ async def scrape_source(source_id: str, db=Depends(get_mongodb)):
 async def scrape_all(
     db=Depends(get_mongodb),
     mode: str = Query("full", regex="^(full|new_only|favorites)$"),
-    hidden_hashes: str = Query("", description="Comma-separated hidden listing hashes"),
 ):
     """Start scraping all enabled sources in background.
 
     Modes:
-      - full: update all listings + find new + detail-scrape (skip hidden in detail phase)
+      - full: update all listings + find new + detail-scrape (skip hidden)
       - new_only: only insert brand-new listings, skip existing
       - favorites: only re-scrape detail pages for favorited listings
     """
@@ -5068,10 +5201,6 @@ async def scrape_all(
             "message": f"Scrape already running ({_scrape_progress['source']})",
             "progress": dict(_scrape_progress),
         }
-
-    exclude = set()
-    if hidden_hashes:
-        exclude = set(h.strip() for h in hidden_hashes.split(",") if h.strip())
 
     sources = []
     async for doc in db[COL_SOURCES].find({"enabled": True}):
@@ -5091,7 +5220,7 @@ async def scrape_all(
     }
     label = mode_labels.get(mode, mode)
 
-    asyncio.create_task(_run_scrape_background(source_ids, mode=mode, exclude_hashes=exclude))
+    asyncio.create_task(_run_scrape_background(source_ids, mode=mode))
     return {"ok": True, "message": f"{label}: {len(source_ids)} sources"}
 
 
@@ -5105,6 +5234,7 @@ async def get_stats(db=Depends(get_mongodb)):
     """Get overall statistics."""
     listings_total = await db[COL_LISTINGS].count_documents({})
     favorites_total = await db[COL_FAVORITES].count_documents({})
+    watched_total = await db[COL_WATCHED].count_documents({})
     sources_total = await db[COL_SOURCES].count_documents({})
 
     # Per-source counts
@@ -5152,6 +5282,7 @@ async def get_stats(db=Depends(get_mongodb)):
     return {
         "listings": listings_total,
         "favorites": favorites_total,
+        "watched": watched_total,
         "sources": sources_total,
         "by_source": source_counts,
         "by_state": state_counts,
