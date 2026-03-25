@@ -39,6 +39,7 @@ const tabs = [
   { value: 'terminal', label: 'Terminal', icon: 'mdi-console', path: '/settings/terminal' },
   { value: 'system', label: 'System', icon: 'mdi-monitor-dashboard', path: '/settings/system' },
   { value: 'system-logs', label: 'System Logs', icon: 'mdi-text-box-search', path: '/settings/system-logs' },
+  { value: 'cloud-sync', label: 'Cloud & Sync', icon: 'mdi-cloud-sync', path: '/settings/cloud-sync' },
   { value: 'addons', label: 'Addons', icon: 'mdi-puzzle', path: '/settings/addons' },
 ]
 
@@ -52,6 +53,7 @@ const componentMap = {
   'terminal': defineAsyncComponent(() => import('./TerminalView.vue')),
   'system': defineAsyncComponent(() => import('./SystemView.vue')),
   'system-logs': defineAsyncComponent(() => import('./SystemLogsView.vue')),
+  'cloud-sync': defineAsyncComponent(() => import('./CloudSyncSettingsTab.vue')),
   'addons': defineAsyncComponent(() => import('./AddonsSettingsTab.vue')),
 }
 

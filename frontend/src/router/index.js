@@ -44,6 +44,7 @@ const routes = [
       { path: 'settings/system', name: 'SettingsSystem', component: () => import('../views/SettingsView.vue') },
       { path: 'settings/system-logs', name: 'SettingsSystemLogs', component: () => import('../views/SettingsView.vue') },
       { path: 'settings/addons', name: 'SettingsAddons', component: () => import('../views/SettingsView.vue') },
+      { path: 'settings/cloud-sync', name: 'SettingsCloudSync', component: () => import('../views/SettingsView.vue') },
       { path: 'settings/models', redirect: '/models' },
       { path: 'settings/api-keys', name: 'ApiKeys', component: () => import('../views/ApiKeysView.vue') },
 

@@ -523,6 +523,15 @@ _DEFAULT_SETTINGS = {
     # AKM Advisor CRM
     "akm_advisor_api_key": {"value": "", "description": "AKM Advisor Agent API key (X-Agent-Key) for CRM access"},
     "akm_advisor_url": {"value": "", "description": "AKM Advisor Agent API URL (e.g. https://app.akm-advisor.com/api/v1/agent/PROJECT_ID)"},
+    # Cloud & Sync
+    "cloud_mongodb_url": {"value": "", "description": "Remote MongoDB connection URL for cloud sync (e.g. mongodb+srv://user:pass@cluster.mongodb.net/ai_agents)"},
+    "cloud_mongodb_enabled": {"value": "false", "description": "Enable cloud MongoDB synchronization"},
+    "s3_endpoint_url": {"value": "", "description": "S3-compatible endpoint URL (leave empty for AWS S3, or use MinIO/DigitalOcean Spaces URL)"},
+    "s3_access_key": {"value": "", "description": "S3 access key ID"},
+    "s3_secret_key": {"value": "", "description": "S3 secret access key"},
+    "s3_bucket_name": {"value": "", "description": "S3 bucket name for file storage"},
+    "s3_region": {"value": "us-east-1", "description": "S3 region (e.g. us-east-1, eu-west-1)"},
+    "s3_storage_enabled": {"value": "false", "description": "Enable S3 file storage for uploaded files"},
 }
 
 
