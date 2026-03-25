@@ -413,9 +413,9 @@
               :key="city.id || idx"
               variant="outlined"
               class="city-row-card"
-              style="min-width: 320px; max-width: 520px; flex: 1 1 auto;"
+              style="min-width: 420px; max-width: 720px; flex: 1 1 auto;"
             >
-              <v-card-text class="d-flex align-center ga-2 py-2 px-3">
+              <v-card-text class="d-flex align-center ga-2 py-2 px-3 flex-wrap">
                 <v-icon size="20" :color="cityTypeColor(city.type)">
                   {{ cityTypeIcon(city.type) }}
                 </v-icon>
@@ -426,7 +426,16 @@
                   density="compact"
                   hide-details
                   placeholder="Berlin, New York..."
-                  style="max-width: 140px;"
+                  style="min-width: 100px; max-width: 140px; flex: 1;"
+                />
+                <v-text-field
+                  v-model="city.state"
+                  label="State"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                  placeholder="Texas, CA..."
+                  style="min-width: 80px; max-width: 110px; flex: 1;"
                 />
                 <v-text-field
                   v-model="city.country"
@@ -435,7 +444,16 @@
                   density="compact"
                   hide-details
                   placeholder="Germany, US..."
-                  style="max-width: 120px;"
+                  style="min-width: 80px; max-width: 110px; flex: 1;"
+                />
+                <v-text-field
+                  v-model="city.zip_code"
+                  label="ZIP"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                  placeholder="10001"
+                  style="min-width: 60px; max-width: 90px; flex: 0;"
                 />
                 <v-select
                   v-model="city.type"
@@ -446,7 +464,7 @@
                   variant="outlined"
                   density="compact"
                   hide-details
-                  style="max-width: 130px;"
+                  style="min-width: 100px; max-width: 130px;"
                 />
                 <v-checkbox
                   v-model="city.in_context"
@@ -727,7 +745,7 @@ function cityTypeIcon(type) {
 }
 
 function addCity() {
-  form.value.cities.push({ id: Date.now().toString(), name: '', country: '', type: 'interest', in_context: true })
+  form.value.cities.push({ id: Date.now().toString(), name: '', state: '', country: '', zip_code: '', type: 'interest', in_context: true })
 }
 
 const tabPaths = {

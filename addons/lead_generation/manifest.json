@@ -1,0 +1,62 @@
+{
+  "id": "lead_generation",
+  "name": "Lead Generation",
+  "description": "Find potential clients, job opportunities, and professional connections — search across platforms, build a connections map, and push leads to AKM-Advisor CRM",
+  "icon": "mdi-account-search",
+  "version": "1.0.0",
+  "author": "system",
+  "menu_mode": "direct",
+  "route": {
+    "path": "/addons/lead-generation",
+    "name": "LeadGeneration",
+    "title": "Lead Generation"
+  },
+  "settings": [
+    {
+      "key": "leadgen_akm_api_key",
+      "label": "AKM-Advisor API Key",
+      "type": "text",
+      "default": ""
+    },
+    {
+      "key": "leadgen_akm_base_url",
+      "label": "AKM-Advisor Base URL",
+      "type": "text",
+      "default": "https://app.akm-advisor.com/api/v1"
+    },
+    {
+      "key": "leadgen_akm_lead_board_id",
+      "label": "AKM Lead Board (Pipeline) ID",
+      "type": "text",
+      "default": ""
+    },
+    {
+      "key": "leadgen_akm_deal_board_id",
+      "label": "AKM Deal Board (Pipeline) ID",
+      "type": "text",
+      "default": ""
+    },
+    {
+      "key": "leadgen_akm_push_mode",
+      "label": "Push Mode",
+      "type": "select",
+      "default": "manual",
+      "options": ["manual", "auto_leads", "auto_deals", "auto_both"]
+    },
+    {
+      "key": "leadgen_default_search_platforms",
+      "label": "Default Search Platforms (comma-separated)",
+      "type": "text",
+      "default": "linkedin,google,crunchbase"
+    },
+    {
+      "key": "leadgen_search_limit",
+      "label": "Max Results per Search",
+      "type": "select",
+      "default": "50",
+      "options": ["25", "50", "100", "200"]
+    }
+  ],
+  "protocols": [],
+  "skills": ["leadgen_search", "leadgen_contacts"]
+}

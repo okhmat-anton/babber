@@ -1,0 +1,40 @@
+{
+  "name": "leadgen_contacts",
+  "display_name": "Lead Generation Contacts",
+  "description": "Retrieve existing contacts, clients, jobs, and connections from the lead generation database",
+  "description_for_agent": "Use this skill to retrieve existing contacts from the lead generation database. You can filter by type (clients, jobs, connections), status, industry, relationship, and search by keywords. Use this to check what contacts already exist before searching for new ones.",
+  "category": "lead_generation",
+  "version": "1.0.0",
+  "entry_point": "main.py",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "contact_type": {
+        "type": "string",
+        "description": "Type of contacts to retrieve: clients, jobs, connections, or all",
+        "enum": ["clients", "jobs", "connections", "all"]
+      },
+      "search": {
+        "type": "string",
+        "description": "Optional search query to filter results"
+      },
+      "status": {
+        "type": "string",
+        "description": "Filter by status (e.g., new, contacted, qualified, converted for clients)"
+      },
+      "industry": {
+        "type": "string",
+        "description": "Filter by industry (clients only)"
+      },
+      "relationship": {
+        "type": "string",
+        "description": "Filter by relationship type (connections only)"
+      },
+      "limit": {
+        "type": "integer",
+        "description": "Max number of results to return (default: 50)"
+      }
+    },
+    "required": ["contact_type"]
+  }
+}

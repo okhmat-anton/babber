@@ -1,0 +1,46 @@
+{
+  "name": "leadgen_search",
+  "display_name": "Lead Generation Search",
+  "description": "Search for potential clients, job opportunities, and professional connections across multiple platforms",
+  "description_for_agent": "Use this skill to search for potential clients, job listings, or professional connections. Specify the search type (clients, jobs, connections), query terms, and optional filters. Results are saved to the lead generation database automatically.",
+  "category": "lead_generation",
+  "version": "1.0.0",
+  "entry_point": "main.py",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "search_type": {
+        "type": "string",
+        "description": "Type of search: clients, jobs, or connections",
+        "enum": ["clients", "jobs", "connections"]
+      },
+      "query": {
+        "type": "string",
+        "description": "Search query — keywords, company names, job titles, industries, etc."
+      },
+      "industry": {
+        "type": "string",
+        "description": "Filter by industry (for clients search)"
+      },
+      "location": {
+        "type": "string",
+        "description": "Filter by location"
+      },
+      "job_type": {
+        "type": "string",
+        "description": "Job type filter: full-time, part-time, contract, freelance",
+        "enum": ["full-time", "part-time", "contract", "freelance"]
+      },
+      "remote": {
+        "type": "string",
+        "description": "Remote work filter: any, remote, hybrid, onsite",
+        "enum": ["any", "remote", "hybrid", "onsite"]
+      },
+      "save_results": {
+        "type": "boolean",
+        "description": "Whether to save search results to the database (default: true)"
+      }
+    },
+    "required": ["search_type", "query"]
+  }
+}

@@ -11,8 +11,9 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.database import get_mongodb
 from app.core.dependencies import get_current_user
-from app.mongodb.services import CreatorProfileService
+from app.mongodb.services import CreatorProfileService, NoteService
 from app.mongodb.models.creator_profile import GoalItem, DreamItem, IdeaItem, NoteItem, CityItem
+from app.mongodb.models.note import MongoNote
 
 router = APIRouter(prefix="/api/creator", tags=["creator"])
 
@@ -86,6 +87,8 @@ class AppendItemRequest(BaseModel):
     priority: int = 1          # 0=high, 1=medium, 2=low (not used for notes)
     # City-specific fields
     country: str = ""          # country for cities
+    state: str = ""            # state / region for cities
+    zip_code: str = ""         # zip / postal code for cities
     city_type: str = "interest"  # home, frequent, interest
 
 
@@ -100,28 +103,46 @@ async def append_creator_item(
     Creates the profile if it does not exist yet.
     Returns the newly created item.
     """
+    # Notes go to the dedicated 'notes' collection (not embedded in creator_profile)
+    if body.target == "notes":
+        note_svc = NoteService(db)
+        note = MongoNote(
+            title=body.title.strip(),
+            content=body.content.strip() if body.content else "",
+        )
+        created = await note_svc.create(note)
+        return {"ok": True, "item": {
+            "id": created.id,
+            "title": created.title,
+            "content": created.content,
+            "created_at": created.created_at.isoformat() if isinstance(created.created_at, datetime) else str(created.created_at),
+        }}
+
     svc = CreatorProfileService(db)
     profile = await svc.get_profile()
 
     item_id = str(uuid.uuid4())
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    if body.target == "notes":
-        new_item = NoteItem(id=item_id, title=body.title, content=body.content, created_at=now_iso)
-    elif body.target == "goals":
+    if body.target == "goals":
         new_item = GoalItem(id=item_id, title=body.title, description=body.content, priority=body.priority)
     elif body.target == "dreams":
         new_item = DreamItem(id=item_id, title=body.title, description=body.content, priority=body.priority)
     elif body.target == "ideas":
         new_item = IdeaItem(id=item_id, title=body.title, description=body.content, priority=body.priority)
     elif body.target == "cities":
-        new_item = CityItem(id=item_id, name=body.title, country=body.country, type=body.city_type)
+        new_item = CityItem(id=item_id, name=body.title, country=body.country, state=body.state, zip_code=body.zip_code, type=body.city_type)
     else:
         raise HTTPException(status_code=400, detail=f"Unknown target: {body.target}")
 
-    # Use $push to append atomically
+    # Use $push to append atomically — first ensure the field is an array (may be null)
     col = db["creator_profile"]
     if profile:
+        # If the target field is null in the document, initialise it as empty array first
+        await col.update_one(
+            {"_id": profile.id, body.target: {"$eq": None}},
+            {"$set": {body.target: []}},
+        )
         await col.update_one(
             {"_id": profile.id},
             {"$push": {body.target: new_item.model_dump()}},

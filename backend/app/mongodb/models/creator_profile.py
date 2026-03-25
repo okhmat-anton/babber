@@ -43,6 +43,8 @@ class CityItem(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str = ""           # city name (e.g. "Berlin")
     country: str = ""        # country name or code (e.g. "Germany" or "DE")
+    state: str = ""          # state / region (e.g. "Texas", "Bavaria")
+    zip_code: str = ""       # zip / postal code
     type: str = "interest"   # home, frequent, interest
     in_context: bool = True
 

@@ -111,16 +111,15 @@
                         <v-icon start size="12">mdi-brain-off</v-icon>
                         Hidden from context
                       </v-chip>
+                      <span class="text-caption text-grey ml-auto">{{ formatDate(note.created_at) }}</span>
                       <span v-if="!expandedNotes.has(note.id) && note.content" class="text-caption text-medium-emphasis text-truncate" style="max-width: 300px;">{{ note.content.substring(0, 80) }}</span>
                     </div>
                     <div v-if="expandedNotes.has(note.id)">
                       <div v-if="note.content" class="text-body-2 text-medium-emphasis note-content mt-1">{{ note.content }}</div>
-                      <div class="d-flex align-center ga-2 mt-2">
+                      <div v-if="note.tags && note.tags.length" class="d-flex align-center ga-2 mt-2">
                         <v-chip v-for="tag in note.tags" :key="tag" size="x-small" variant="tonal" color="blue-grey">
                           {{ tag }}
                         </v-chip>
-                        <v-spacer />
-                        <span class="text-caption text-grey">{{ formatDate(note.created_at) }}</span>
                       </div>
                     </div>
                   </div>
@@ -187,16 +186,15 @@
                     <v-icon start size="12">mdi-brain-off</v-icon>
                     Hidden from context
                   </v-chip>
+                  <span class="text-caption text-grey ml-auto">{{ formatDate(note.created_at) }}</span>
                   <span v-if="!expandedNotes.has(note.id) && note.content" class="text-caption text-medium-emphasis text-truncate" style="max-width: 300px;">{{ note.content.substring(0, 80) }}</span>
                 </div>
                 <div v-if="expandedNotes.has(note.id)">
                   <div v-if="note.content" class="text-body-2 text-medium-emphasis note-content mt-1">{{ note.content }}</div>
-                  <div class="d-flex align-center ga-2 mt-2">
+                  <div v-if="note.tags && note.tags.length" class="d-flex align-center ga-2 mt-2">
                     <v-chip v-for="tag in note.tags" :key="tag" size="x-small" variant="tonal" color="blue-grey">
                       {{ tag }}
                     </v-chip>
-                    <v-spacer />
-                    <span class="text-caption text-grey">{{ formatDate(note.created_at) }}</span>
                   </div>
                 </div>
               </div>
