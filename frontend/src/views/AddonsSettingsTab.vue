@@ -85,27 +85,41 @@
 
           <v-divider />
 
-          <v-card-actions>
-            <v-switch
-              :model-value="addon.enabled"
-              color="primary"
+          <v-card-actions class="flex-column align-stretch pa-3">
+            <div class="d-flex align-center mb-2">
+              <v-switch
+                :model-value="addon.enabled"
+                color="primary"
+                density="compact"
+                hide-details
+                :label="addon.enabled ? 'Enabled' : 'Disabled'"
+                :loading="toggling === addon.id"
+                @update:model-value="toggleAddon(addon)"
+              />
+              <v-spacer />
+              <v-btn
+                v-if="addon.enabled && addon.route"
+                :to="addon.route.path"
+                size="small"
+                variant="tonal"
+                color="primary"
+              >
+                Open
+                <v-icon end size="16">mdi-arrow-right</v-icon>
+              </v-btn>
+            </div>
+            <v-select
+              v-if="addon.enabled"
+              :model-value="addon.menu_mode || 'direct'"
+              :items="menuModeOptions"
+              item-title="title"
+              item-value="value"
+              label="Menu Position"
               density="compact"
+              variant="outlined"
               hide-details
-              :label="addon.enabled ? 'Enabled' : 'Disabled'"
-              :loading="toggling === addon.id"
-              @update:model-value="toggleAddon(addon)"
+              @update:model-value="v => saveMenuMode(addon, v)"
             />
-            <v-spacer />
-            <v-btn
-              v-if="addon.enabled && addon.route"
-              :to="addon.route.path"
-              size="small"
-              variant="tonal"
-              color="primary"
-            >
-              Open
-              <v-icon end size="16">mdi-arrow-right</v-icon>
-            </v-btn>
           </v-card-actions>
         </v-card>
       </v-col>
@@ -138,6 +152,24 @@ const snackText = ref('')
 const snackColor = ref('success')
 
 const enabledCount = computed(() => addons.value.filter(a => a.enabled).length)
+
+const menuModeOptions = [
+  { title: 'Primary Menu (Direct)', value: 'direct' },
+  { title: 'Secondary Menu (Grouped)', value: 'secondary' }
+]
+
+async function saveMenuMode(addon, value) {
+  try {
+    await settingsStore.updateSystemSetting(`addon_${addon.id}_menu_mode`, value)
+    addon.menu_mode = value
+    snackText.value = `${addon.name} menu position updated`
+    snackColor.value = 'success'
+    snack.value = true
+  } catch (e) {
+    errorMsg.value = `Failed to update menu position for ${addon.name}`
+    console.error(e)
+  }
+}
 
 async function fetchAddons() {
   loading.value = true

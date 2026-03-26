@@ -25,6 +25,9 @@ async def list_addons():
         addon_id = m.get("id", "unknown")
         enabled_key = f"addon_{addon_id}_enabled"
         m["enabled"] = settings_map.get(enabled_key, "true") == "true"
+        menu_mode_key = f"addon_{addon_id}_menu_mode"
+        if menu_mode_key in settings_map:
+            m["menu_mode"] = settings_map[menu_mode_key]
     # Hidden addons are only visible when enabled (can only be enabled via API/DB)
     manifests = [m for m in manifests if not m.get("hidden", False) or m.get("enabled", False)]
     return manifests
