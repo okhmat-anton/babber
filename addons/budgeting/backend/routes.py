@@ -31,6 +31,7 @@ ACCOUNTS_COL = "budget_accounts"
 LOANS_COL = "budget_loans"
 CATEGORIES_COL = "budget_categories"
 ASSETS_COL = "budget_assets"
+COPIES_COL = "budget_copies"
 
 
 # ── Pydantic Models ─────────────────────────────────────────────────
@@ -39,6 +40,7 @@ class BudgetEntryCreate(BaseModel):
     type: str = Field(..., description="income or expense")
     name: str
     amount: float
+    amount_max: Optional[float] = Field(None, description="Upper bound for range income")
     category: str = ""
     is_recurring: bool = True
     is_paid: bool = False
@@ -52,6 +54,7 @@ class BudgetEntryCreate(BaseModel):
 class BudgetEntryUpdate(BaseModel):
     name: Optional[str] = None
     amount: Optional[float] = None
+    amount_max: Optional[float] = None
     category: Optional[str] = None
     is_recurring: Optional[bool] = None
     is_paid: Optional[bool] = None
@@ -251,6 +254,7 @@ async def create_entry(
         "type": body.type,
         "name": body.name,
         "amount": body.amount,
+        "amount_max": body.amount_max,
         "category": body.category,
         "is_recurring": body.is_recurring,
         "is_paid": body.is_paid,
@@ -424,6 +428,18 @@ async def list_months(
     return months
 
 
+@router.delete("/months/{month_key}")
+async def delete_month(
+    month_key: str,
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Delete all budget entries for a given month."""
+    result = await db[ENTRIES_COL].delete_many({"month_key": month_key})
+    if result.deleted_count == 0:
+        raise HTTPException(404, f"No entries found for {month_key}")
+    return {"ok": True, "deleted": result.deleted_count}
+
+
 # ── Summary ─────────────────────────────────────────────────────────
 
 @router.get("/summary")
@@ -446,11 +462,13 @@ async def get_summary(
     days_in_month = cal_mod.monthrange(year, month)[1]
 
     total_income = 0.0
+    total_income_max = 0.0
     total_expense = 0.0
     income_paid = 0.0
     expense_paid = 0.0
     income_by_cat: dict[str, float] = {}
     expense_by_cat: dict[str, float] = {}
+    has_income_range = False
     # Forward-looking unpaid: only future obligations
     unpaid_expense_forward = 0.0
 
@@ -463,18 +481,25 @@ async def get_summary(
 
     for e in entries:
         base_amt = e.get("amount", 0)
+        base_amt_max = e.get("amount_max") or base_amt
         freq = e.get("frequency", "once")
         if freq == "daily":
             amt = base_amt * days_in_month
+            amt_max = base_amt_max * days_in_month
         elif freq == "weekly":
             start_day = e.get("day_of_month") or 1
             occurrences = len(range(start_day, days_in_month + 1, 7))
             amt = base_amt * occurrences
+            amt_max = base_amt_max * occurrences
         else:
             amt = base_amt
+            amt_max = base_amt_max
         cat = e.get("category", "Other") or "Other"
         if e.get("type") == "income":
             total_income += amt
+            total_income_max += amt_max
+            if e.get("amount_max") is not None:
+                has_income_range = True
             if e.get("is_paid"):
                 income_paid += amt
             income_by_cat[cat] = income_by_cat.get(cat, 0) + amt
@@ -496,6 +521,7 @@ async def get_summary(
             expense_by_cat[cat] = expense_by_cat.get(cat, 0) + amt
 
     balance = total_income - total_expense
+    balance_max = total_income_max - total_expense
 
     # Loan payments for this month
     loans = await db[LOANS_COL].find({}, {"_id": 0}).to_list(100)
@@ -510,6 +536,7 @@ async def get_summary(
     total_expense_with_loans = total_expense + total_loan_payments
     expense_paid_with_loans = expense_paid + loan_paid
     balance_with_loans = total_income - total_expense_with_loans
+    balance_with_loans_max = total_income_max - total_expense_with_loans
 
     # Asset income/cost integration
     active_items = await db[ASSETS_COL].find({"is_active": True}, {"_id": 0}).to_list(500)
@@ -517,6 +544,7 @@ async def get_summary(
     asset_cost_total = sum(a.get("monthly_cost", 0) for a in active_items if a.get("kind") == "not_profitable")
 
     total_income += asset_income_total
+    total_income_max += asset_income_total
     if asset_income_total > 0:
         income_by_cat["Profitable Assets"] = round(asset_income_total, 2)
 
@@ -525,6 +553,7 @@ async def get_summary(
         expense_by_cat["Non-Profitable Assets"] = round(asset_cost_total, 2)
 
     balance_with_loans = total_income - total_expense_with_loans
+    balance_with_loans_max = total_income_max - total_expense_with_loans
 
     # Expense total without daily items (only once + weekly + loans)
     expense_no_daily = 0.0
@@ -549,6 +578,7 @@ async def get_summary(
     unpaid_forward_with_loans = unpaid_expense_forward + (total_loan_payments - loan_paid)
     still_needed = max(unpaid_forward_with_loans - available_cash, 0)
     min_daily = still_needed / remaining_days if remaining_days > 0 else 0
+    min_daily_max = (max(unpaid_forward_with_loans - available_cash, 0) / remaining_days) if remaining_days > 0 else 0
 
     # Unpaid forward-looking without daily items
     unpaid_no_daily = 0.0
@@ -573,8 +603,10 @@ async def get_summary(
     return {
         "month_key": mk,
         "total_income": round(total_income, 2),
+        "total_income_max": round(total_income_max, 2) if has_income_range else None,
         "total_expense": round(total_expense_with_loans, 2),
         "balance": round(balance_with_loans, 2),
+        "balance_max": round(balance_with_loans_max, 2) if has_income_range else None,
         "income_paid": round(income_paid, 2),
         "expense_paid": round(expense_paid_with_loans, 2),
         "unpaid_expense": round(unpaid_forward_with_loans, 2),
@@ -685,6 +717,13 @@ async def delete_loan(
     result = await db[LOANS_COL].delete_one({"id": loan_id})
     if result.deleted_count == 0:
         raise HTTPException(404, "Loan not found")
+
+    # Remove loan payment entries from all copies
+    await db[COPIES_COL].update_many(
+        {},
+        {"$pull": {"entries": {"source": "loan", "loan_id": loan_id}}},
+    )
+
     return {"ok": True}
 
 
@@ -914,6 +953,312 @@ async def get_calendar(
         "starting_balance": round(starting_balance, 2),
         "days": calendar_days,
         "unscheduled": unscheduled,
+    }
+
+
+# ── Budget Copies (Forecasting) ──────────────────────────────────────
+
+
+class CopyEntryUpdate(BaseModel):
+    name: Optional[str] = None
+    amount: Optional[float] = None
+    amount_max: Optional[float] = None
+    category: Optional[str] = None
+    is_paid: Optional[bool] = None
+    is_credit_card: Optional[bool] = None
+    frequency: Optional[str] = None
+    day_of_month: Optional[int] = Field(None, ge=1, le=31)
+    notes: Optional[str] = None
+
+
+@router.post("/copies")
+async def create_budget_copy(
+    month_key: Optional[str] = Query(None, description="YYYY-MM to copy from"),
+    name: Optional[str] = Query(None, description="Name for the copy"),
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Create a copy of the budget for forecasting/editing."""
+    mk = month_key or _current_month_key()
+
+    # Load entries for the month
+    entries_list = await db[ENTRIES_COL].find(
+        {"month_key": mk}, {"_id": 0}
+    ).to_list(1000)
+
+    # Load loans
+    loans_list = await db[LOANS_COL].find({}, {"_id": 0}).to_list(100)
+
+    # Load accounts for starting balance
+    accounts_list = await db[ACCOUNTS_COL].find({}, {"_id": 0}).to_list(100)
+
+    # Load active assets
+    assets_list = await db[ASSETS_COL].find({"is_active": True}, {"_id": 0}).to_list(500)
+
+    # Assign new IDs to entries within the copy
+    copy_entries = []
+    for e in entries_list:
+        ce = {**e, "id": _make_id(), "is_paid": False}
+        ce.pop("_id", None)
+        copy_entries.append(ce)
+
+    # Add loan payments as entries in the copy
+    for loan in loans_list:
+        paid_months = loan.get("paid_months", [])
+        copy_entries.append({
+            "id": _make_id(),
+            "type": "expense",
+            "name": f"Loan: {loan.get('bank', '')}",
+            "amount": loan.get("monthly_payment", 0),
+            "category": "Loan Payment",
+            "is_recurring": True,
+            "is_paid": False,
+            "is_credit_card": False,
+            "frequency": "once",
+            "month_key": mk,
+            "day_of_month": loan.get("payment_date"),
+            "notes": loan.get("purpose", ""),
+            "source": "loan",
+            "loan_id": loan.get("id"),
+        })
+
+    # Add asset income/cost as entries
+    for asset in assets_list:
+        if asset.get("kind") == "profitable" and asset.get("monthly_income", 0) > 0:
+            copy_entries.append({
+                "id": _make_id(),
+                "type": "income",
+                "name": f"Asset: {asset.get('name', '')}",
+                "amount": asset.get("monthly_income", 0),
+                "category": "Profitable Assets",
+                "is_recurring": True,
+                "is_paid": False,
+                "is_credit_card": False,
+                "frequency": "once",
+                "month_key": mk,
+                "day_of_month": None,
+                "notes": "",
+                "source": "asset",
+            })
+        elif asset.get("kind") == "not_profitable" and asset.get("monthly_cost", 0) > 0:
+            copy_entries.append({
+                "id": _make_id(),
+                "type": "expense",
+                "name": f"Asset: {asset.get('name', '')}",
+                "amount": asset.get("monthly_cost", 0),
+                "category": "Non-Profitable Assets",
+                "is_recurring": True,
+                "is_paid": False,
+                "is_credit_card": False,
+                "frequency": "once",
+                "month_key": mk,
+                "day_of_month": None,
+                "notes": "",
+                "source": "asset",
+            })
+
+    starting_balance = sum(a.get("balance", 0) for a in accounts_list)
+
+    copy_doc = {
+        "id": _make_id(),
+        "name": name or f"Copy of {mk}",
+        "source_month": mk,
+        "entries": copy_entries,
+        "starting_balance": starting_balance,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    await db[COPIES_COL].insert_one(copy_doc)
+    copy_doc.pop("_id", None)
+    return copy_doc
+
+
+@router.get("/copies")
+async def list_budget_copies(
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """List all budget copies."""
+    items = await db[COPIES_COL].find(
+        {}, {"_id": 0, "entries": 0}
+    ).sort("created_at", -1).to_list(50)
+    return {"items": items}
+
+
+@router.get("/copies/{copy_id}")
+async def get_budget_copy(
+    copy_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Get a specific budget copy with all entries."""
+    doc = await db[COPIES_COL].find_one({"id": copy_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Budget copy not found")
+    return doc
+
+
+@router.delete("/copies/{copy_id}")
+async def delete_budget_copy(
+    copy_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    result = await db[COPIES_COL].delete_one({"id": copy_id})
+    if result.deleted_count == 0:
+        raise HTTPException(404, "Budget copy not found")
+    return {"ok": True}
+
+
+@router.patch("/copies/{copy_id}/entries/{entry_id}")
+async def update_copy_entry(
+    copy_id: str,
+    entry_id: str,
+    body: CopyEntryUpdate,
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Update a single entry within a budget copy."""
+    updates = body.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(400, "No fields to update")
+
+    doc = await db[COPIES_COL].find_one({"id": copy_id})
+    if not doc:
+        raise HTTPException(404, "Budget copy not found")
+
+    found = False
+    for e in doc.get("entries", []):
+        if e.get("id") == entry_id:
+            for k, v in updates.items():
+                e[k] = v
+            found = True
+            break
+    if not found:
+        raise HTTPException(404, "Entry not found in copy")
+
+    await db[COPIES_COL].update_one(
+        {"id": copy_id},
+        {"$set": {"entries": doc["entries"], "updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    return {"ok": True}
+
+
+@router.post("/copies/{copy_id}/entries")
+async def add_copy_entry(
+    copy_id: str,
+    body: BudgetEntryCreate,
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Add a new entry to a budget copy."""
+    doc = await db[COPIES_COL].find_one({"id": copy_id})
+    if not doc:
+        raise HTTPException(404, "Budget copy not found")
+
+    new_entry = {
+        "id": _make_id(),
+        "type": body.type,
+        "name": body.name,
+        "amount": body.amount,
+        "category": body.category,
+        "is_recurring": body.is_recurring,
+        "is_paid": body.is_paid,
+        "is_credit_card": body.is_credit_card,
+        "amount_max": body.amount_max,
+        "frequency": body.frequency,
+        "month_key": doc.get("source_month", _current_month_key()),
+        "day_of_month": body.day_of_month if body.frequency != "daily" else None,
+        "notes": body.notes,
+    }
+
+    await db[COPIES_COL].update_one(
+        {"id": copy_id},
+        {
+            "$push": {"entries": new_entry},
+            "$set": {"updated_at": datetime.now(timezone.utc).isoformat()},
+        },
+    )
+    return new_entry
+
+
+@router.delete("/copies/{copy_id}/entries/{entry_id}")
+async def delete_copy_entry(
+    copy_id: str,
+    entry_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Remove an entry from a budget copy."""
+    result = await db[COPIES_COL].update_one(
+        {"id": copy_id},
+        {
+            "$pull": {"entries": {"id": entry_id}},
+            "$set": {"updated_at": datetime.now(timezone.utc).isoformat()},
+        },
+    )
+    if result.matched_count == 0:
+        raise HTTPException(404, "Budget copy not found")
+    return {"ok": True}
+
+
+@router.get("/copies/{copy_id}/summary")
+async def get_copy_summary(
+    copy_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_mongodb),
+):
+    """Get summary for a budget copy."""
+    doc = await db[COPIES_COL].find_one({"id": copy_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Budget copy not found")
+
+    import calendar as cal_mod
+    mk = doc.get("source_month", _current_month_key())
+    year, month = map(int, mk.split("-"))
+    days_in_month = cal_mod.monthrange(year, month)[1]
+
+    total_income = 0.0
+    total_income_max = 0.0
+    total_expense = 0.0
+    income_by_cat: dict[str, float] = {}
+    expense_by_cat: dict[str, float] = {}
+    has_income_range = False
+
+    for e in doc.get("entries", []):
+        base_amt = e.get("amount", 0)
+        base_amt_max = e.get("amount_max") or base_amt
+        freq = e.get("frequency", "once")
+        if freq == "daily":
+            amt = base_amt * days_in_month
+            amt_max = base_amt_max * days_in_month
+        elif freq == "weekly":
+            start_day = e.get("day_of_month") or 1
+            occurrences = len(range(start_day, days_in_month + 1, 7))
+            amt = base_amt * occurrences
+            amt_max = base_amt_max * occurrences
+        else:
+            amt = base_amt
+            amt_max = base_amt_max
+        cat = e.get("category", "Other") or "Other"
+        if e.get("type") == "income":
+            total_income += amt
+            total_income_max += amt_max
+            if e.get("amount_max") is not None:
+                has_income_range = True
+            income_by_cat[cat] = income_by_cat.get(cat, 0) + amt
+        else:
+            total_expense += amt
+            expense_by_cat[cat] = expense_by_cat.get(cat, 0) + amt
+
+    balance = total_income - total_expense
+    balance_max = total_income_max - total_expense
+    starting = doc.get("starting_balance", 0)
+
+    return {
+        "month_key": mk,
+        "total_income": round(total_income, 2),
+        "total_income_max": round(total_income_max, 2) if has_income_range else None,
+        "total_expense": round(total_expense, 2),
+        "balance": round(balance, 2),
+        "balance_max": round(balance_max, 2) if has_income_range else None,
+        "income_by_category": {k: round(v, 2) for k, v in sorted(income_by_cat.items())},
+        "expense_by_category": {k: round(v, 2) for k, v in sorted(expense_by_cat.items())},
+        "starting_balance": starting,
+        "projected_balance": round(starting + balance, 2),
+        "projected_balance_max": round(starting + balance_max, 2) if has_income_range else None,
     }
 
 

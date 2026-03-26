@@ -6,79 +6,30 @@
       <div class="text-h4 font-weight-bold">Budgeting</div>
       <v-spacer />
 
-      <!-- Month selector -->
-      <v-btn icon="mdi-chevron-left" variant="text" size="small" @click="prevMonth" />
-      <v-chip variant="tonal" color="teal" class="mx-1" style="min-width: 120px; justify-content: center">
-        {{ formatMonthLabel(currentMonth) }}
-      </v-chip>
-      <v-btn icon="mdi-chevron-right" variant="text" size="small" @click="nextMonth" :disabled="currentMonth >= todayMonth" />
-      <v-btn v-if="currentMonth !== todayMonth" variant="text" size="small" class="ml-1" @click="currentMonth = todayMonth">
-        Today
-      </v-btn>
-
-      <v-btn color="teal" variant="tonal" prepend-icon="mdi-refresh" class="ml-4" @click="refreshAll" :loading="loading">
+      <v-btn color="teal" variant="tonal" prepend-icon="mdi-refresh" @click="refreshAll" :loading="loading">
         Refresh
       </v-btn>
-    </div>
-
-    <!-- Summary chips -->
-    <div class="d-flex flex-wrap ga-2 mb-4" v-if="summary">
-      <v-chip variant="tonal" color="green" size="large">
-        <v-icon start size="16">mdi-arrow-down</v-icon>
-        Income: ${{ fmt(summary.total_income) }}
-      </v-chip>
-      <v-chip variant="tonal" color="red" size="large">
-        <v-icon start size="16">mdi-arrow-up</v-icon>
-        Expenses: ${{ fmt(summary.total_expense) }}
-      </v-chip>
-      <v-chip variant="tonal" :color="summary.balance >= 0 ? 'green' : 'red'" size="large">
-        <v-icon start size="16">mdi-scale-balance</v-icon>
-        Balance: ${{ fmt(summary.balance) }}
-      </v-chip>
-      <v-chip variant="tonal" color="orange" size="large" v-if="summary.min_daily_earnings > 0">
-        <v-icon start size="16">mdi-calendar-clock</v-icon>
-        Min ${{ fmt(summary.min_daily_earnings) }}/day ({{ summary.remaining_days }}d left)
-      </v-chip>
-      <v-chip variant="tonal" color="cyan" size="large" v-if="availableCash > 0">
-        <v-icon start size="16">mdi-cash</v-icon>
-        Cash: ${{ fmt(availableCash) }}
-      </v-chip>
-      <v-chip variant="tonal" color="purple" size="large" v-if="summary.total_loan_payments > 0">
-        <v-icon start size="16">mdi-bank</v-icon>
-        Loan Payments: ${{ fmt(summary.total_loan_payments) }}/mo
-      </v-chip>
-      <v-chip variant="tonal" color="blue-grey" size="large" v-if="summary.entries_expense_no_daily > 0">
-        <v-icon start size="16">mdi-cash-minus</v-icon>
-        Expenses (no daily): ${{ fmt(summary.entries_expense_no_daily) }}
-      </v-chip>
-      <v-chip variant="tonal" color="amber" size="large" v-if="summary.asset_income > 0">
-        <v-icon start size="16">mdi-chart-line</v-icon>
-        Profitable Income: +${{ fmt(summary.asset_income) }}/mo
-      </v-chip>
-      <v-chip variant="tonal" color="deep-orange" size="large" v-if="summary.asset_cost > 0">
-        <v-icon start size="16">mdi-trending-down</v-icon>
-        Non-Profitable Cost: -${{ fmt(summary.asset_cost) }}/mo
-      </v-chip>
-      <v-chip variant="tonal" :color="(assetsSummary.net_worth || 0) >= 0 ? 'amber' : 'deep-orange'" size="large"
-        v-if="assetsSummary.profitable_count || assetsSummary.not_profitable_count">
-        <v-icon start size="16">mdi-home-city</v-icon>
-        Net Worth: ${{ fmt(assetsSummary.net_worth) }}
-      </v-chip>
+      <v-btn color="blue-grey" variant="tonal" prepend-icon="mdi-content-copy" class="ml-2" @click="createBudgetCopyDirect" :loading="copyCreating">
+        Copy Budget
+      </v-btn>
+      <v-btn color="amber" variant="tonal" prepend-icon="mdi-calendar-arrow-right" class="ml-2" @click="openNextMonthDialog">
+        Next Month
+      </v-btn>
+      <v-btn :color="showCalendar ? 'teal' : 'blue-grey'" variant="tonal" :prepend-icon="showCalendar ? 'mdi-calendar-check' : 'mdi-calendar-month'" class="ml-2" @click="showCalendar = !showCalendar">
+        Calendar
+      </v-btn>
     </div>
 
     <!-- Tabs -->
     <v-tabs v-model="activeTab" color="teal-accent-3" class="mb-4">
       <v-tab value="budget">
         <v-icon start>mdi-cash-register</v-icon>
-        Budget
+        Budget · {{ formatMonthLabel(currentMonth) }}
       </v-tab>
-      <v-tab value="calendar">
-        <v-icon start>mdi-calendar-month</v-icon>
-        Calendar
-      </v-tab>
-      <v-tab value="assets">
-        <v-icon start>mdi-home-city</v-icon>
-        Assets
+      <v-tab v-for="c in savedCopies" :key="c.id" :value="'copy-' + c.id" @click="switchCopy(c.id)">
+        <v-icon start>mdi-crystal-ball</v-icon>
+        {{ c.name }}
+        <v-btn icon="mdi-close" size="x-small" variant="text" density="compact" class="ml-1" @click.stop="confirmDeleteCopy(c)" />
       </v-tab>
       <v-tab value="settings">
         <v-icon start>mdi-cog</v-icon>
@@ -89,6 +40,51 @@
     <!-- ═══════ BUDGET TAB ═══════ -->
     <v-window v-model="activeTab">
       <v-window-item value="budget">
+        <!-- Budget summary chips -->
+        <div class="d-flex flex-wrap ga-2 mb-4" v-if="summary">
+          <v-chip variant="tonal" color="green" size="large">
+            <v-icon start size="16">mdi-arrow-down</v-icon>
+            Income: ${{ fmt(summary.total_income) }}<template v-if="summary.total_income_max"> — ${{ fmt(summary.total_income_max) }}</template>
+          </v-chip>
+          <v-chip variant="tonal" color="red" size="large">
+            <v-icon start size="16">mdi-arrow-up</v-icon>
+            Expenses: ${{ fmt(summary.total_expense) }}
+          </v-chip>
+          <v-chip variant="tonal" :color="summary.balance >= 0 ? 'green' : 'red'" size="large">
+            <v-icon start size="16">mdi-scale-balance</v-icon>
+            Balance: ${{ fmt(summary.balance) }}<template v-if="summary.balance_max"> — ${{ fmt(summary.balance_max) }}</template>
+          </v-chip>
+          <v-chip variant="tonal" color="orange" size="large" v-if="summary.min_daily_earnings > 0">
+            <v-icon start size="16">mdi-calendar-clock</v-icon>
+            Min ${{ fmt(summary.min_daily_earnings) }}/day ({{ summary.remaining_days }}d left)
+          </v-chip>
+          <v-chip variant="tonal" color="cyan" size="large" v-if="availableCash > 0">
+            <v-icon start size="16">mdi-cash</v-icon>
+            Cash: ${{ fmt(availableCash) }}
+          </v-chip>
+          <v-chip variant="tonal" color="purple" size="large" v-if="summary.total_loan_payments > 0">
+            <v-icon start size="16">mdi-bank</v-icon>
+            Loan Payments: ${{ fmt(summary.total_loan_payments) }}/mo
+          </v-chip>
+          <v-chip variant="tonal" color="blue-grey" size="large" v-if="summary.entries_expense_no_daily > 0">
+            <v-icon start size="16">mdi-cash-minus</v-icon>
+            Expenses (no daily): ${{ fmt(summary.entries_expense_no_daily) }}
+          </v-chip>
+          <v-chip variant="tonal" color="amber" size="large" v-if="summary.asset_income > 0">
+            <v-icon start size="16">mdi-chart-line</v-icon>
+            Profitable Income: +${{ fmt(summary.asset_income) }}/mo
+          </v-chip>
+          <v-chip variant="tonal" color="deep-orange" size="large" v-if="summary.asset_cost > 0">
+            <v-icon start size="16">mdi-trending-down</v-icon>
+            Non-Profitable Cost: -${{ fmt(summary.asset_cost) }}/mo
+          </v-chip>
+          <v-chip variant="tonal" :color="(assetsSummary.net_worth || 0) >= 0 ? 'amber' : 'deep-orange'" size="large"
+            v-if="assetsSummary.profitable_count || assetsSummary.not_profitable_count">
+            <v-icon start size="16">mdi-home-city</v-icon>
+            Net Worth: ${{ fmt(assetsSummary.net_worth) }}
+          </v-chip>
+        </div>
+
         <v-row>
           <!-- LEFT: Income -->
           <v-col cols="12" md="4">
@@ -97,7 +93,9 @@
                 <v-icon color="green" class="mr-2">mdi-arrow-down-bold</v-icon>
                 <span class="text-h6">Income</span>
                 <v-spacer />
-                <span class="text-h6 text-green">${{ fmt(totalIncome) }}</span>
+                <span class="text-h6 text-green">
+                  ${{ fmt(totalIncome) }}<template v-if="totalIncomeMax"> — ${{ fmt(totalIncomeMax) }}</template>
+                </span>
               </div>
 
               <div v-if="incomeEntries.length === 0" class="text-center text-medium-emphasis py-4">
@@ -131,11 +129,20 @@
                   </v-list-item-subtitle>
                   <template #append>
                     <span class="text-green font-weight-bold mr-2">
-                      ${{ fmt(item.amount) }}
+                      <template v-if="item.amount_max">
+                        ${{ fmt(item.amount) }} — ${{ fmt(item.amount_max) }}
+                      </template>
+                      <template v-else>
+                        ${{ fmt(item.amount) }}
+                      </template>
                       <span v-if="item.frequency === 'daily'" class="text-caption text-blue">/day</span>
                       <span v-else-if="item.frequency === 'weekly'" class="text-caption text-indigo">/wk</span>
-                      <div v-if="item.frequency === 'daily'" class="text-caption text-medium-emphasis" style="font-size: 10px; line-height: 1;">${{ fmt(item.amount * 30) }}/mo</div>
-                      <div v-else-if="item.frequency === 'weekly'" class="text-caption text-medium-emphasis" style="font-size: 10px; line-height: 1;">${{ fmt(Math.round(item.amount * 4.33 * 100) / 100) }}/mo</div>
+                      <div v-if="item.frequency === 'daily'" class="text-caption text-medium-emphasis" style="font-size: 10px; line-height: 1;">
+                        ${{ fmt(item.amount * 30) }}<template v-if="item.amount_max"> — ${{ fmt(item.amount_max * 30) }}</template>/mo
+                      </div>
+                      <div v-else-if="item.frequency === 'weekly'" class="text-caption text-medium-emphasis" style="font-size: 10px; line-height: 1;">
+                        ${{ fmt(Math.round(item.amount * 4.33 * 100) / 100) }}<template v-if="item.amount_max"> — ${{ fmt(Math.round(item.amount_max * 4.33 * 100) / 100) }}</template>/mo
+                      </div>
                     </span>
                     <v-btn icon="mdi-pencil" size="x-small" variant="text" @click="openEditEntry(item)" />
                     <v-btn icon="mdi-delete" size="x-small" variant="text" color="red" @click="confirmDeleteEntry(item)" />
@@ -449,6 +456,9 @@
                 <span class="text-subtitle-1 text-red mr-3">
                   ${{ fmt(totalDebt) }}
                 </span>
+                <v-chip v-if="totalToPayOff > 0" size="small" color="orange" variant="tonal" class="mr-2">
+                  Pay off: ${{ fmt(totalToPayOff) }}
+                </v-chip>
                 <v-btn color="teal" variant="tonal" prepend-icon="mdi-plus" size="x-small" @click="openAddLoan">
                   Add
                 </v-btn>
@@ -470,7 +480,17 @@
                   <tr v-for="loan in sortedLoans" :key="loan.id">
                     <td class="font-weight-bold">{{ loan.bank }}</td>
                     <td class="text-medium-emphasis">{{ loan.purpose || '—' }}</td>
-                    <td class="text-red font-weight-bold">${{ fmt(loan.remaining_debt) }}</td>
+                    <td class="text-red font-weight-bold" style="white-space: nowrap">
+                      <v-checkbox-btn
+                        :model-value="loansToPayOff.has(loan.id)"
+                        color="orange"
+                        density="compact"
+                        class="d-inline-flex mr-n1"
+                        style="vertical-align: middle"
+                        @update:model-value="v => { const s = new Set(loansToPayOff); v ? s.add(loan.id) : s.delete(loan.id); loansToPayOff = s }"
+                      />
+                      ${{ fmt(loan.remaining_debt) }}
+                    </td>
                     <td>{{ loan.credit_limit ? '$' + fmt(loan.credit_limit) : '—' }}</td>
                     <td class="text-orange font-weight-bold">${{ fmt(loan.monthly_payment) }}</td>
                     <td>
@@ -493,146 +513,8 @@
             </v-card>
           </v-col>
         </v-row>
-      </v-window-item>
 
-      <!-- ═══════ CALENDAR TAB ═══════ -->
-      <v-window-item value="calendar">
-        <v-card variant="outlined" class="pa-4">
-          <div class="d-flex align-center mb-3">
-            <v-icon color="teal" class="mr-2">mdi-calendar-month</v-icon>
-            <span class="text-h6">{{ formatMonthLabel(currentMonth) }} Calendar</span>
-            <v-spacer />
-            <v-chip variant="tonal" color="blue" size="small" class="mr-2">
-              Starting Balance: ${{ fmt(calendarData?.starting_balance || 0) }}
-            </v-chip>
-            <v-btn icon="mdi-minus" size="x-small" variant="tonal" class="mr-1" @click="calendarZoom = Math.max(0.6, calendarZoom - 0.15)" />
-            <span class="text-caption mx-1">{{ Math.round(calendarZoom * 100) }}%</span>
-            <v-btn icon="mdi-plus" size="x-small" variant="tonal" class="mr-3" @click="calendarZoom = Math.min(2, calendarZoom + 0.15)" />
-            <v-btn variant="tonal" color="teal" size="small" prepend-icon="mdi-refresh" @click="loadCalendar" :loading="calendarLoading">
-              Refresh
-            </v-btn>
-          </div>
-
-          <!-- Weekday header -->
-          <div class="calendar-grid mb-1">
-            <div v-for="wd in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']" :key="wd"
-              class="text-center text-caption font-weight-bold text-medium-emphasis pa-1">
-              {{ wd }}
-            </div>
-          </div>
-
-          <!-- Calendar grid -->
-          <div class="calendar-grid" v-if="calendarData" :style="{ '--cal-zoom': calendarZoom }">
-            <!-- Empty cells for offset -->
-            <div v-for="n in calendarData.first_weekday" :key="'empty-' + n" class="calendar-cell empty"></div>
-
-            <!-- Day cells -->
-            <div
-              v-for="dayInfo in calendarData.days"
-              :key="dayInfo.day"
-              class="calendar-cell"
-              :class="{
-                'today-cell': isToday(dayInfo.day),
-                'has-items': dayInfo.items.length > 0,
-              }"
-            >
-              <div class="d-flex justify-space-between align-center mb-1">
-                <span class="text-caption font-weight-bold" :class="isToday(dayInfo.day) ? 'text-teal' : ''">
-                  {{ dayInfo.day }}
-                </span>
-                <v-chip
-                  v-if="dayInfo.income > 0 || dayInfo.expense > 0"
-                  size="x-small"
-                  :color="dayInfo.balance >= 0 ? 'green' : 'red'"
-                  variant="tonal"
-                  class="px-1"
-                  style="height: calc(16px * var(--cal-zoom)); font-size: calc(9px * var(--cal-zoom));"
-                >
-                  ${{ fmtShort(dayInfo.balance) }}
-                </v-chip>
-              </div>
-
-              <!-- Items in this day -->
-              <div
-                v-for="(item, idx) in dayInfo.items"
-                :key="item.id + '-' + idx"
-                class="calendar-item mb-0"
-                :class="{
-                  'calendar-item-paid': item.is_paid,
-                  'calendar-item-daily': item.frequency === 'daily',
-                  'calendar-item-weekly': item.frequency === 'weekly',
-                }"
-              >
-                <div class="d-flex align-center" :style="{ fontSize: (10 * calendarZoom) + 'px', lineHeight: '1.2' }">
-                  <v-icon
-                    v-if="item.is_paid"
-                    :size="Math.round(10 * calendarZoom)"
-                    color="grey"
-                    class="mr-1 flex-shrink-0"
-                  >
-                    mdi-check
-                  </v-icon>
-                  <v-icon
-                    v-else
-                    :size="Math.round(10 * calendarZoom)"
-                    :color="item.type === 'income' ? 'green' : (item.source === 'loan' ? 'purple' : 'red')"
-                    class="mr-1 flex-shrink-0"
-                  >
-                    {{ item.type === 'income' ? 'mdi-arrow-down' : (item.source === 'loan' ? 'mdi-bank-outline' : 'mdi-arrow-up') }}
-                  </v-icon>
-                  <span class="text-truncate" :class="item.is_paid ? 'text-decoration-line-through text-medium-emphasis' : ''" :style="{ maxWidth: (80 * calendarZoom) + 'px' }">{{ item.name }}</span>
-                  <v-spacer />
-                  <span
-                    class="font-weight-bold flex-shrink-0"
-                    :class="item.is_paid ? 'text-medium-emphasis text-decoration-line-through' : (item.type === 'income' ? 'text-green' : 'text-red')"
-                    :style="{ fontSize: (9 * calendarZoom) + 'px' }"
-                  >
-                    ${{ fmtShort(item.amount) }}
-                  </span>
-                </div>
-              </div>
-
-              <!-- Day totals -->
-              <div v-if="dayInfo.income > 0 || dayInfo.expense > 0" class="mt-1 pt-1" :style="{ borderTop: '1px solid rgba(255,255,255,0.05)', fontSize: (9 * calendarZoom) + 'px' }">
-                <span v-if="dayInfo.income > 0" class="text-green mr-1">+${{ fmtShort(dayInfo.income) }}</span>
-                <span v-if="dayInfo.expense > 0" class="text-red">-${{ fmtShort(dayInfo.expense) }}</span>
-              </div>
-            </div>
-          </div>
-
-          <div v-else class="text-center text-medium-emphasis py-8">
-            <v-progress-circular v-if="calendarLoading" indeterminate color="teal" />
-            <span v-else>No calendar data. Click Refresh to load.</span>
-          </div>
-
-          <!-- Unscheduled items -->
-          <div v-if="calendarData?.unscheduled?.length" class="mt-4">
-            <v-divider class="mb-3" />
-            <div class="text-subtitle-2 mb-2">
-              <v-icon size="16" class="mr-1">mdi-calendar-question</v-icon>
-              Unscheduled Items (no day set)
-            </div>
-            <v-row>
-              <v-col v-for="item in calendarData.unscheduled" :key="item.id" cols="12" sm="6" md="4" lg="3">
-                <v-chip
-                  :color="item.type === 'income' ? 'green' : (item.source === 'loan' ? 'purple' : 'red')"
-                  variant="tonal"
-                  size="small"
-                  class="mr-1 mb-1"
-                >
-                  <v-icon start size="14">
-                    {{ item.type === 'income' ? 'mdi-arrow-down' : 'mdi-arrow-up' }}
-                  </v-icon>
-                  {{ item.name }}: ${{ fmt(item.amount) }}
-                </v-chip>
-              </v-col>
-            </v-row>
-          </div>
-        </v-card>
-      </v-window-item>
-
-      <!-- ═══════ ASSETS TAB (Kiyosaki) ═══════ -->
-      <v-window-item value="assets">
+        <!-- ── Assets (Kiyosaki) ── -->
         <v-row class="mb-4">
           <v-col cols="6" sm="3">
             <v-card variant="tonal" color="amber" class="pa-3 text-center">
@@ -769,7 +651,667 @@
           <strong>Kiyosaki Principle:</strong> Every item you own is an asset. If it puts money in your pocket — it's profitable.
           If it takes money out — it's not profitable. Focus on acquiring profitable assets.
         </v-alert>
+
+        <!-- ── Calendar ── -->
+        <v-expand-transition>
+          <div v-show="showCalendar" class="mt-4">
+        <v-card variant="outlined" class="pa-4">
+          <div class="d-flex align-center mb-3">
+            <v-icon color="teal" class="mr-2">mdi-calendar-month</v-icon>
+            <span class="text-h6">{{ formatMonthLabel(currentMonth) }} Calendar</span>
+            <v-spacer />
+            <v-chip variant="tonal" color="blue" size="small" class="mr-2">
+              Starting Balance: ${{ fmt(calendarData?.starting_balance || 0) }}
+            </v-chip>
+            <v-btn icon="mdi-minus" size="x-small" variant="tonal" class="mr-1" @click="calendarZoom = Math.max(0.6, calendarZoom - 0.15)" />
+            <span class="text-caption mx-1">{{ Math.round(calendarZoom * 100) }}%</span>
+            <v-btn icon="mdi-plus" size="x-small" variant="tonal" class="mr-3" @click="calendarZoom = Math.min(2, calendarZoom + 0.15)" />
+            <v-btn variant="tonal" color="teal" size="small" prepend-icon="mdi-refresh" @click="loadCalendar" :loading="calendarLoading">
+              Refresh
+            </v-btn>
+          </div>
+
+          <!-- Weekday header -->
+          <div class="calendar-grid mb-1">
+            <div v-for="wd in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']" :key="wd"
+              class="text-center text-caption font-weight-bold text-medium-emphasis pa-1">
+              {{ wd }}
+            </div>
+          </div>
+
+          <!-- Calendar grid -->
+          <div class="calendar-grid" v-if="calendarData" :style="{ '--cal-zoom': calendarZoom }">
+            <!-- Empty cells for offset -->
+            <div v-for="n in calendarData.first_weekday" :key="'empty-' + n" class="calendar-cell empty"></div>
+
+            <!-- Day cells -->
+            <div
+              v-for="dayInfo in calendarData.days"
+              :key="dayInfo.day"
+              class="calendar-cell"
+              :class="{
+                'today-cell': isToday(dayInfo.day),
+                'has-items': dayInfo.items.length > 0,
+              }"
+            >
+              <div class="d-flex justify-space-between align-center mb-1">
+                <span class="text-caption font-weight-bold" :class="isToday(dayInfo.day) ? 'text-teal' : ''">
+                  {{ dayInfo.day }}
+                </span>
+                <v-chip
+                  v-if="dayInfo.income > 0 || dayInfo.expense > 0"
+                  size="x-small"
+                  :color="dayInfo.balance >= 0 ? 'green' : 'red'"
+                  variant="tonal"
+                  class="px-1"
+                  style="height: calc(16px * var(--cal-zoom)); font-size: calc(9px * var(--cal-zoom));"
+                >
+                  ${{ fmtShort(dayInfo.balance) }}
+                </v-chip>
+              </div>
+
+              <!-- Items in this day -->
+              <div
+                v-for="(item, idx) in dayInfo.items"
+                :key="item.id + '-' + idx"
+                class="calendar-item mb-0"
+                :class="{
+                  'calendar-item-paid': item.is_paid,
+                  'calendar-item-daily': item.frequency === 'daily',
+                  'calendar-item-weekly': item.frequency === 'weekly',
+                }"
+              >
+                <div class="d-flex align-center" :style="{ fontSize: (10 * calendarZoom) + 'px', lineHeight: '1.2' }">
+                  <v-icon
+                    v-if="item.is_paid"
+                    :size="Math.round(10 * calendarZoom)"
+                    color="grey"
+                    class="mr-1 flex-shrink-0"
+                  >
+                    mdi-check
+                  </v-icon>
+                  <v-icon
+                    v-else
+                    :size="Math.round(10 * calendarZoom)"
+                    :color="item.type === 'income' ? 'green' : (item.source === 'loan' ? 'purple' : 'red')"
+                    class="mr-1 flex-shrink-0"
+                  >
+                    {{ item.type === 'income' ? 'mdi-arrow-down' : (item.source === 'loan' ? 'mdi-bank-outline' : 'mdi-arrow-up') }}
+                  </v-icon>
+                  <span class="text-truncate" :class="item.is_paid ? 'text-decoration-line-through text-medium-emphasis' : ''" :style="{ maxWidth: (80 * calendarZoom) + 'px' }">{{ item.name }}</span>
+                  <v-spacer />
+                  <span
+                    class="font-weight-bold flex-shrink-0"
+                    :class="item.is_paid ? 'text-medium-emphasis text-decoration-line-through' : (item.type === 'income' ? 'text-green' : 'text-red')"
+                    :style="{ fontSize: (9 * calendarZoom) + 'px' }"
+                  >
+                    ${{ fmtShort(item.amount) }}
+                  </span>
+                </div>
+              </div>
+
+              <!-- Day totals -->
+              <div v-if="dayInfo.income > 0 || dayInfo.expense > 0" class="mt-1 pt-1" :style="{ borderTop: '1px solid rgba(255,255,255,0.05)', fontSize: (9 * calendarZoom) + 'px' }">
+                <span v-if="dayInfo.income > 0" class="text-green mr-1">+${{ fmtShort(dayInfo.income) }}</span>
+                <span v-if="dayInfo.expense > 0" class="text-red">-${{ fmtShort(dayInfo.expense) }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div v-else class="text-center text-medium-emphasis py-8">
+            <v-progress-circular v-if="calendarLoading" indeterminate color="teal" />
+            <span v-else>No calendar data. Click Refresh to load.</span>
+          </div>
+
+          <!-- Unscheduled items -->
+          <div v-if="calendarData?.unscheduled?.length" class="mt-4">
+            <v-divider class="mb-3" />
+            <div class="text-subtitle-2 mb-2">
+              <v-icon size="16" class="mr-1">mdi-calendar-question</v-icon>
+              Unscheduled Items (no day set)
+            </div>
+            <v-row>
+              <v-col v-for="item in calendarData.unscheduled" :key="item.id" cols="12" sm="6" md="4" lg="3">
+                <v-chip
+                  :color="item.type === 'income' ? 'green' : (item.source === 'loan' ? 'purple' : 'red')"
+                  variant="tonal"
+                  size="small"
+                  class="mr-1 mb-1"
+                >
+                  <v-icon start size="14">
+                    {{ item.type === 'income' ? 'mdi-arrow-down' : 'mdi-arrow-up' }}
+                  </v-icon>
+                  {{ item.name }}: ${{ fmt(item.amount) }}
+                </v-chip>
+              </v-col>
+            </v-row>
+          </div>
+        </v-card>
+          </div>
+        </v-expand-transition>
+
       </v-window-item>
+
+      <!-- ═══════ BUDGET COPY TAB ═══════ -->
+      <v-window-item v-if="activeCopy" :value="'copy-' + activeCopy.id">
+        <!-- Copy header -->
+        <div class="d-flex align-center mb-3">
+          <v-icon color="amber" class="mr-2">mdi-crystal-ball</v-icon>
+          <span class="text-h6">{{ activeCopy.name }}</span>
+          <v-chip variant="tonal" color="blue-grey" size="small" class="ml-2">
+            Based on: {{ formatMonthLabel(activeCopy.source_month) }}
+          </v-chip>
+          <v-spacer />
+          <v-btn variant="tonal" color="amber" size="small" prepend-icon="mdi-refresh" @click="loadCopySummary" :loading="copySummaryLoading">
+            Recalculate
+          </v-btn>
+        </div>
+
+        <!-- Copy summary chips -->
+        <div class="d-flex flex-wrap ga-2 mb-4" v-if="copySummary">
+          <v-chip variant="tonal" color="green" size="large">
+            <v-icon start size="16">mdi-arrow-down</v-icon>
+            Income: ${{ fmt(copySummary.total_income) }}<template v-if="copySummary.total_income_max"> — ${{ fmt(copySummary.total_income_max) }}</template>
+          </v-chip>
+          <v-chip variant="tonal" color="red" size="large">
+            <v-icon start size="16">mdi-arrow-up</v-icon>
+            Expenses: ${{ fmt(copySummary.total_expense) }}
+          </v-chip>
+          <v-chip variant="tonal" :color="copySummary.balance >= 0 ? 'green' : 'red'" size="large">
+            <v-icon start size="16">mdi-scale-balance</v-icon>
+            Balance: ${{ fmt(copySummary.balance) }}<template v-if="copySummary.balance_max"> — ${{ fmt(copySummary.balance_max) }}</template>
+          </v-chip>
+          <v-chip variant="tonal" color="cyan" size="large" v-if="copySummary.starting_balance">
+            <v-icon start size="16">mdi-bank</v-icon>
+            Starting: ${{ fmt(copySummary.starting_balance) }}
+          </v-chip>
+          <v-chip variant="tonal" :color="copySummary.projected_balance >= 0 ? 'green' : 'red'" size="large">
+            <v-icon start size="16">mdi-crystal-ball</v-icon>
+            Projected: ${{ fmt(copySummary.projected_balance) }}<template v-if="copySummary.projected_balance_max"> — ${{ fmt(copySummary.projected_balance_max) }}</template>
+          </v-chip>
+        </div>
+
+        <v-row>
+          <!-- LEFT: Copy Income -->
+          <v-col cols="12" md="4">
+            <v-card variant="outlined" class="pa-3">
+              <div class="d-flex align-center mb-3">
+                <v-icon color="green" class="mr-2">mdi-arrow-down-bold</v-icon>
+                <span class="text-h6">Income</span>
+                <v-spacer />
+                <span class="text-h6 text-green">
+                  ${{ fmt(copyTotalIncome) }}<template v-if="copyTotalIncomeMax"> — ${{ fmt(copyTotalIncomeMax) }}</template>
+                </span>
+              </div>
+
+              <div v-if="copyIncomeEntries.length === 0" class="text-center text-medium-emphasis py-4">
+                No income entries
+              </div>
+
+              <v-list density="compact" class="bg-transparent">
+                <v-list-item
+                  v-for="item in copyIncomeEntries"
+                  :key="'ci-' + item.id"
+                  class="px-0 rounded mb-1"
+                  :class="item.is_paid ? 'bg-green-darken-4' : (item.source ? 'bg-amber-darken-4' : '')"
+                >
+                  <template #prepend>
+                    <v-checkbox-btn
+                      :model-value="item.is_paid"
+                      color="green"
+                      density="compact"
+                      @update:model-value="toggleCopyPaid(item)"
+                    />
+                  </template>
+                  <v-list-item-title :class="item.is_paid ? 'text-decoration-line-through text-medium-emphasis' : ''">
+                    {{ item.name }}
+                    <v-chip v-if="item.day_of_month" size="x-small" color="teal" variant="tonal" class="ml-1">{{ item.day_of_month }}th</v-chip>
+                    <v-chip v-if="item.frequency === 'daily'" size="x-small" color="blue" variant="tonal" class="ml-1">Daily</v-chip>
+                    <v-chip v-else-if="item.frequency === 'weekly'" size="x-small" color="indigo" variant="tonal" class="ml-1">Weekly</v-chip>
+                    <v-chip v-if="item.source" size="x-small" color="amber" variant="tonal" class="ml-1">{{ item.source }}</v-chip>
+                  </v-list-item-title>
+                  <v-list-item-subtitle>
+                    <v-chip size="x-small" variant="text" class="px-0">{{ item.category || 'No category' }}</v-chip>
+                  </v-list-item-subtitle>
+                  <template #append>
+                    <span class="text-green font-weight-bold mr-2">
+                      <template v-if="item.amount_max">
+                        ${{ fmt(item.amount) }} — ${{ fmt(item.amount_max) }}
+                      </template>
+                      <template v-else>
+                        ${{ fmt(item.amount) }}
+                      </template>
+                      <span v-if="item.frequency === 'daily'" class="text-caption text-blue">/day</span>
+                      <span v-else-if="item.frequency === 'weekly'" class="text-caption text-indigo">/wk</span>
+                      <div v-if="item.frequency === 'daily'" class="text-caption text-medium-emphasis" style="font-size: 10px; line-height: 1;">
+                        ${{ fmt(item.amount * 30) }}<template v-if="item.amount_max"> — ${{ fmt(item.amount_max * 30) }}</template>/mo
+                      </div>
+                      <div v-else-if="item.frequency === 'weekly'" class="text-caption text-medium-emphasis" style="font-size: 10px; line-height: 1;">
+                        ${{ fmt(Math.round(item.amount * 4.33 * 100) / 100) }}<template v-if="item.amount_max"> — ${{ fmt(Math.round(item.amount_max * 4.33 * 100) / 100) }}</template>/mo
+                      </div>
+                    </span>
+                    <v-btn icon="mdi-pencil" size="x-small" variant="text" @click="openEditCopyEntry(item)" />
+                    <v-btn icon="mdi-delete" size="x-small" variant="text" color="red" @click="deleteCopyEntry(item)" />
+                  </template>
+                </v-list-item>
+              </v-list>
+
+              <v-btn block variant="tonal" color="green" class="mt-2" prepend-icon="mdi-plus" @click="openAddCopyEntry('income')">
+                Add Income
+              </v-btn>
+            </v-card>
+          </v-col>
+
+          <!-- CENTER: Copy Expenses -->
+          <v-col cols="12" md="4">
+            <v-card variant="outlined" class="pa-3">
+              <div class="d-flex align-center mb-3">
+                <v-icon color="red" class="mr-2">mdi-arrow-up-bold</v-icon>
+                <span class="text-h6">Expenses</span>
+                <v-spacer />
+                <span class="text-h6 text-red">${{ fmt(copyTotalExpense) }}</span>
+              </div>
+
+              <div v-if="copyExpenseEntries.length === 0" class="text-center text-medium-emphasis py-4">
+                No expense entries
+              </div>
+
+              <v-list density="compact" class="bg-transparent">
+                <v-list-item
+                  v-for="item in copyExpenseEntries"
+                  :key="'ce-' + item.id"
+                  class="px-0 rounded mb-1"
+                  :class="item.is_paid ? 'bg-red-darken-4' : (item.source === 'loan' ? 'bg-purple-darken-4' : (item.source === 'asset' ? 'bg-deep-orange-darken-4' : ''))"
+                >
+                  <template #prepend>
+                    <v-checkbox-btn
+                      :model-value="item.is_paid"
+                      color="red"
+                      density="compact"
+                      @update:model-value="toggleCopyPaid(item)"
+                    />
+                  </template>
+                  <v-list-item-title :class="item.is_paid ? 'text-decoration-line-through text-medium-emphasis' : ''">
+                    {{ item.name }}
+                    <v-chip v-if="item.day_of_month" size="x-small" color="teal" variant="tonal" class="ml-1">{{ item.day_of_month }}th</v-chip>
+                    <v-chip v-if="item.frequency === 'daily'" size="x-small" color="blue" variant="tonal" class="ml-1">Daily</v-chip>
+                    <v-chip v-else-if="item.frequency === 'weekly'" size="x-small" color="indigo" variant="tonal" class="ml-1">Weekly</v-chip>
+                    <v-chip v-if="item.source" size="x-small" :color="item.source === 'loan' ? 'purple' : 'deep-orange'" variant="tonal" class="ml-1">{{ item.source }}</v-chip>
+                  </v-list-item-title>
+                  <v-list-item-subtitle>
+                    <v-chip size="x-small" variant="text" class="px-0">{{ item.category || 'No category' }}</v-chip>
+                  </v-list-item-subtitle>
+                  <template #append>
+                    <span class="text-red font-weight-bold mr-2">
+                      ${{ fmt(item.amount) }}
+                      <span v-if="item.frequency === 'daily'" class="text-caption text-blue">/day</span>
+                      <span v-else-if="item.frequency === 'weekly'" class="text-caption text-indigo">/wk</span>
+                    </span>
+                    <v-btn icon="mdi-pencil" size="x-small" variant="text" @click="openEditCopyEntry(item)" />
+                    <v-btn icon="mdi-delete" size="x-small" variant="text" color="red" @click="deleteCopyEntry(item)" />
+                  </template>
+                </v-list-item>
+              </v-list>
+
+              <v-btn block variant="tonal" color="red" class="mt-2" prepend-icon="mdi-plus" @click="openAddCopyEntry('expense')">
+                Add Expense
+              </v-btn>
+            </v-card>
+          </v-col>
+
+          <!-- RIGHT: Copy Summary -->
+          <v-col cols="12" md="4">
+            <v-card variant="outlined" class="pa-3 mb-4">
+              <div class="d-flex align-center mb-3">
+                <v-icon color="amber" class="mr-2">mdi-chart-pie</v-icon>
+                <span class="text-h6">Summary</span>
+              </div>
+
+              <!-- Expense categories -->
+              <div class="text-subtitle-2 text-medium-emphasis mb-1">Expenses by Category</div>
+              <div v-if="copySummary && Object.keys(copySummary.expense_by_category).length">
+                <div v-for="(amt, cat) in copySummary.expense_by_category" :key="'cec-' + cat" class="d-flex justify-space-between mb-1">
+                  <span class="text-body-2">{{ cat }}</span>
+                  <span class="text-body-2 font-weight-bold text-red">${{ fmt(amt) }}</span>
+                </div>
+                <v-divider class="my-2" />
+                <div class="d-flex justify-space-between">
+                  <span class="font-weight-bold">Total Expenses</span>
+                  <span class="font-weight-bold text-red">${{ fmt(copySummary.total_expense) }}</span>
+                </div>
+              </div>
+              <div v-else class="text-medium-emphasis text-body-2">No expenses</div>
+
+              <v-divider class="my-3" />
+
+              <!-- Income categories -->
+              <div class="text-subtitle-2 text-medium-emphasis mb-1">Income by Category</div>
+              <div v-if="copySummary && Object.keys(copySummary.income_by_category).length">
+                <div v-for="(amt, cat) in copySummary.income_by_category" :key="'cic-' + cat" class="d-flex justify-space-between mb-1">
+                  <span class="text-body-2">{{ cat }}</span>
+                  <span class="text-body-2 font-weight-bold text-green">${{ fmt(amt) }}</span>
+                </div>
+                <v-divider class="my-2" />
+                <div class="d-flex justify-space-between">
+                  <span class="font-weight-bold">Total Income</span>
+                  <span class="font-weight-bold text-green">${{ fmt(copySummary.total_income) }}</span>
+                </div>
+              </div>
+              <div v-else class="text-medium-emphasis text-body-2">No income</div>
+
+              <v-divider class="my-3" />
+
+              <!-- Projected balance -->
+              <div class="d-flex justify-space-between mb-2">
+                <span class="text-subtitle-1">Monthly Balance</span>
+                <span class="text-subtitle-1" :class="copySummary && copySummary.balance >= 0 ? 'text-green' : 'text-red'">
+                  ${{ copySummary ? fmt(copySummary.balance) : '0.00' }}<template v-if="copySummary && copySummary.balance_max"> — ${{ fmt(copySummary.balance_max) }}</template>
+                </span>
+              </div>
+              <div class="d-flex justify-space-between mb-2" v-if="copySummary">
+                <span class="text-subtitle-1">Starting Balance</span>
+                <span class="text-subtitle-1 text-cyan">${{ fmt(copySummary.starting_balance) }}</span>
+              </div>
+              <v-divider class="my-2" />
+              <div class="d-flex justify-space-between">
+                <span class="text-h6">Projected End Balance</span>
+                <span class="text-h6" :class="copySummary && copySummary.projected_balance >= 0 ? 'text-green' : 'text-red'">
+                  ${{ copySummary ? fmt(copySummary.projected_balance) : '0.00' }}<template v-if="copySummary && copySummary.projected_balance_max"> — ${{ fmt(copySummary.projected_balance_max) }}</template>
+                </span>
+              </div>
+            </v-card>
+
+            <v-alert type="info" variant="tonal" density="compact">
+              <strong>Edit Mode:</strong> Edit amounts, add/remove entries to simulate budget scenarios.
+              Changes only affect this copy, not the real budget.
+            </v-alert>
+          </v-col>
+        </v-row>
+
+        <!-- ── Accounts & Loans (copy tab, read-only) ── -->
+        <v-row class="mt-4">
+          <v-col cols="12" md="6">
+            <v-card variant="outlined">
+              <v-card-title class="d-flex align-center">
+                <v-icon class="mr-2">mdi-bank</v-icon>
+                Accounts
+                <v-chip size="x-small" variant="tonal" color="blue-grey" class="ml-2">read-only</v-chip>
+                <v-spacer />
+                <span class="text-subtitle-1" :class="totalAccountBalance >= 0 ? 'text-green' : 'text-red'">
+                  ${{ fmt(totalAccountBalance) }}
+                </span>
+              </v-card-title>
+              <v-table density="compact" v-if="accounts.length">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Purpose</th>
+                    <th>Balance</th>
+                    <th>Pay Day</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="acc in accounts" :key="'copy-acc-' + acc.id">
+                    <td class="font-weight-bold">{{ acc.name }}</td>
+                    <td class="text-medium-emphasis">{{ acc.purpose || '—' }}</td>
+                    <td :class="acc.balance >= 0 ? 'text-green' : 'text-red'" class="font-weight-bold">
+                      ${{ fmt(acc.balance) }}
+                    </td>
+                    <td>{{ acc.payment_date ? acc.payment_date : '—' }}</td>
+                  </tr>
+                </tbody>
+              </v-table>
+              <v-card-text v-else class="text-center text-medium-emphasis py-3 text-body-2">
+                No accounts yet
+              </v-card-text>
+            </v-card>
+          </v-col>
+
+          <v-col cols="12" md="6">
+            <v-card variant="outlined">
+              <v-card-title class="d-flex align-center">
+                <v-icon class="mr-2">mdi-credit-card-clock</v-icon>
+                Loans & Credits
+                <v-chip size="x-small" variant="tonal" color="blue-grey" class="ml-2">read-only</v-chip>
+                <v-spacer />
+                <span class="text-subtitle-1 text-red">
+                  ${{ fmt(totalDebt) }}
+                </span>
+              </v-card-title>
+              <v-table density="compact" v-if="loans.length">
+                <thead>
+                  <tr>
+                    <th>Bank / Lender</th>
+                    <th>Purpose</th>
+                    <th>Debt</th>
+                    <th>Limit</th>
+                    <th>Monthly</th>
+                    <th>Remaining</th>
+                    <th>Pay Day</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="loan in sortedLoans" :key="'copy-loan-' + loan.id">
+                    <td class="font-weight-bold">{{ loan.bank }}</td>
+                    <td class="text-medium-emphasis">{{ loan.purpose || '—' }}</td>
+                    <td class="text-red font-weight-bold">${{ fmt(loan.remaining_debt) }}</td>
+                    <td>{{ loan.credit_limit ? '$' + fmt(loan.credit_limit) : '—' }}</td>
+                    <td class="text-orange font-weight-bold">${{ fmt(loan.monthly_payment) }}</td>
+                    <td>
+                      <v-chip v-if="loan.monthly_payment > 0" size="x-small" color="teal" variant="tonal">
+                        {{ Math.ceil(loan.remaining_debt / loan.monthly_payment) }} mo
+                      </v-chip>
+                      <span v-else>—</span>
+                    </td>
+                    <td>{{ loan.payment_date ? loan.payment_date : '—' }}</td>
+                  </tr>
+                </tbody>
+              </v-table>
+              <v-card-text v-else class="text-center text-medium-emphasis py-3 text-body-2">
+                No loans yet
+              </v-card-text>
+            </v-card>
+          </v-col>
+        </v-row>
+
+        <!-- ── Assets (copy tab, read-only) ── -->
+        <v-row class="mb-4 mt-4">
+          <v-col cols="6" sm="3">
+            <v-card variant="tonal" color="amber" class="pa-3 text-center">
+              <div class="text-caption">Profitable Value</div>
+              <div class="text-h6">${{ fmt(assetsSummary.total_profitable_value) }}</div>
+            </v-card>
+          </v-col>
+          <v-col cols="6" sm="3">
+            <v-card variant="tonal" color="deep-orange" class="pa-3 text-center">
+              <div class="text-caption">Non-Profitable Value</div>
+              <div class="text-h6">${{ fmt(assetsSummary.total_nonprof_value) }}</div>
+            </v-card>
+          </v-col>
+          <v-col cols="6" sm="3">
+            <v-card variant="tonal" :color="(assetsSummary.net_worth || 0) >= 0 ? 'green' : 'red'" class="pa-3 text-center">
+              <div class="text-caption">Net Worth</div>
+              <div class="text-h6">${{ fmt(assetsSummary.net_worth) }}</div>
+            </v-card>
+          </v-col>
+          <v-col cols="6" sm="3">
+            <v-card variant="tonal" :color="(assetsSummary.net_cash_flow || 0) >= 0 ? 'green' : 'red'" class="pa-3 text-center">
+              <div class="text-caption">Net Cash Flow</div>
+              <div class="text-h6">${{ fmt(assetsSummary.net_cash_flow) }}/mo</div>
+            </v-card>
+          </v-col>
+        </v-row>
+
+        <v-row>
+          <v-col cols="12" md="6">
+            <v-card variant="outlined" class="pa-3">
+              <div class="d-flex align-center mb-3">
+                <v-icon color="amber" class="mr-2">mdi-chart-line</v-icon>
+                <span class="text-h6">Profitable</span>
+                <v-chip size="x-small" variant="tonal" color="blue-grey" class="ml-2">read-only</v-chip>
+              </div>
+              <div class="text-caption text-medium-emphasis mb-2">
+                Monthly income: ${{ fmt(assetsSummary.total_profitable_income) }}/mo
+              </div>
+              <div v-if="assetItems.length === 0" class="text-center text-medium-emphasis py-4">
+                No profitable assets yet.
+              </div>
+              <v-table density="compact" v-if="assetItems.length">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Category</th>
+                    <th>Value</th>
+                    <th>Income/mo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="a in assetItems" :key="'copy-pa-' + a.id">
+                    <td class="font-weight-bold">
+                      <v-icon size="14" :color="a.is_active ? 'amber' : 'grey'" class="mr-1">mdi-chart-line</v-icon>
+                      {{ a.name }}
+                      <v-chip v-if="!a.is_active" size="x-small" color="grey" variant="tonal" class="ml-1">inactive</v-chip>
+                    </td>
+                    <td class="text-medium-emphasis">{{ formatCategory(a.category) }}</td>
+                    <td class="text-amber font-weight-bold">${{ fmt(a.current_value) }}</td>
+                    <td class="text-green font-weight-bold">
+                      {{ a.monthly_income > 0 ? '+$' + fmt(a.monthly_income) : '—' }}
+                    </td>
+                  </tr>
+                </tbody>
+              </v-table>
+            </v-card>
+          </v-col>
+
+          <v-col cols="12" md="6">
+            <v-card variant="outlined" class="pa-3">
+              <div class="d-flex align-center mb-3">
+                <v-icon color="deep-orange" class="mr-2">mdi-trending-down</v-icon>
+                <span class="text-h6">Not Profitable</span>
+                <v-chip size="x-small" variant="tonal" color="blue-grey" class="ml-2">read-only</v-chip>
+              </div>
+              <div class="text-caption text-medium-emphasis mb-2">
+                Monthly cost: ${{ fmt(assetsSummary.total_nonprof_cost) }}/mo
+              </div>
+              <div v-if="liabilityItems.length === 0" class="text-center text-medium-emphasis py-4">
+                No non-profitable assets yet.
+              </div>
+              <v-table density="compact" v-if="liabilityItems.length">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Category</th>
+                    <th>Value</th>
+                    <th>Cost/mo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="a in liabilityItems" :key="'copy-npa-' + a.id">
+                    <td class="font-weight-bold">
+                      <v-icon size="14" :color="a.is_active ? 'deep-orange' : 'grey'" class="mr-1">mdi-trending-down</v-icon>
+                      {{ a.name }}
+                      <v-chip v-if="!a.is_active" size="x-small" color="grey" variant="tonal" class="ml-1">inactive</v-chip>
+                    </td>
+                    <td class="text-medium-emphasis">{{ formatCategory(a.category) }}</td>
+                    <td class="text-deep-orange font-weight-bold">${{ fmt(a.current_value) }}</td>
+                    <td class="text-red font-weight-bold">
+                      {{ a.monthly_cost > 0 ? '-$' + fmt(a.monthly_cost) : '—' }}
+                    </td>
+                  </tr>
+                </tbody>
+              </v-table>
+            </v-card>
+          </v-col>
+        </v-row>
+
+        <v-alert type="info" variant="tonal" density="compact" class="mt-4">
+          <strong>Kiyosaki Principle:</strong> Every item you own is an asset. If it puts money in your pocket — it's profitable.
+          If it takes money out — it's not profitable. Focus on acquiring profitable assets.
+        </v-alert>
+
+        <!-- ── Calendar (copy tab) ── -->
+        <v-expand-transition>
+          <div v-show="showCalendar" class="mt-4">
+            <v-card variant="outlined" class="pa-4">
+              <div class="d-flex align-center mb-3">
+                <v-icon color="teal" class="mr-2">mdi-calendar-month</v-icon>
+                <span class="text-h6">{{ formatMonthLabel(currentMonth) }} Calendar</span>
+                <v-spacer />
+                <v-chip variant="tonal" color="blue" size="small" class="mr-2">
+                  Starting Balance: ${{ fmt(calendarData?.starting_balance || 0) }}
+                </v-chip>
+                <v-btn icon="mdi-minus" size="x-small" variant="tonal" class="mr-1" @click="calendarZoom = Math.max(0.6, calendarZoom - 0.15)" />
+                <span class="text-caption mx-1">{{ Math.round(calendarZoom * 100) }}%</span>
+                <v-btn icon="mdi-plus" size="x-small" variant="tonal" class="mr-3" @click="calendarZoom = Math.min(2, calendarZoom + 0.15)" />
+                <v-btn variant="tonal" color="teal" size="small" prepend-icon="mdi-refresh" @click="loadCalendar" :loading="calendarLoading">
+                  Refresh
+                </v-btn>
+              </div>
+
+              <div class="calendar-grid mb-1">
+                <div v-for="wd in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']" :key="'copy-wd-' + wd"
+                  class="text-center text-caption font-weight-bold text-medium-emphasis pa-1">
+                  {{ wd }}
+                </div>
+              </div>
+
+              <div class="calendar-grid" v-if="calendarData" :style="{ '--cal-zoom': calendarZoom }">
+                <div v-for="n in calendarData.first_weekday" :key="'copy-empty-' + n" class="calendar-cell empty"></div>
+                <div
+                  v-for="dayInfo in calendarData.days"
+                  :key="'copy-day-' + dayInfo.day"
+                  class="calendar-cell"
+                  :class="{ 'today-cell': isToday(dayInfo.day), 'has-items': dayInfo.items.length > 0 }"
+                >
+                  <div class="d-flex justify-space-between align-center mb-1">
+                    <span class="text-caption font-weight-bold" :class="isToday(dayInfo.day) ? 'text-teal' : ''">{{ dayInfo.day }}</span>
+                    <v-chip v-if="dayInfo.income > 0 || dayInfo.expense > 0" size="x-small" :color="dayInfo.balance >= 0 ? 'green' : 'red'" variant="tonal" class="px-1" style="height: calc(16px * var(--cal-zoom)); font-size: calc(9px * var(--cal-zoom));">
+                      ${{ fmtShort(dayInfo.balance) }}
+                    </v-chip>
+                  </div>
+                  <div v-for="(item, idx) in dayInfo.items" :key="'copy-ci-' + item.id + '-' + idx" class="calendar-item mb-0" :class="{ 'calendar-item-paid': item.is_paid, 'calendar-item-daily': item.frequency === 'daily', 'calendar-item-weekly': item.frequency === 'weekly' }">
+                    <div class="d-flex align-center" :style="{ fontSize: (10 * calendarZoom) + 'px', lineHeight: '1.2' }">
+                      <v-icon v-if="item.is_paid" :size="Math.round(10 * calendarZoom)" color="grey" class="mr-1 flex-shrink-0">mdi-check</v-icon>
+                      <v-icon v-else :size="Math.round(10 * calendarZoom)" :color="item.type === 'income' ? 'green' : (item.source === 'loan' ? 'purple' : 'red')" class="mr-1 flex-shrink-0">{{ item.type === 'income' ? 'mdi-arrow-down' : (item.source === 'loan' ? 'mdi-bank-outline' : 'mdi-arrow-up') }}</v-icon>
+                      <span class="text-truncate" :class="item.is_paid ? 'text-decoration-line-through text-medium-emphasis' : ''" :style="{ maxWidth: (80 * calendarZoom) + 'px' }">{{ item.name }}</span>
+                      <v-spacer />
+                      <span class="font-weight-bold flex-shrink-0" :class="item.is_paid ? 'text-medium-emphasis text-decoration-line-through' : (item.type === 'income' ? 'text-green' : 'text-red')" :style="{ fontSize: (9 * calendarZoom) + 'px' }">${{ fmtShort(item.amount) }}</span>
+                    </div>
+                  </div>
+                  <div v-if="dayInfo.income > 0 || dayInfo.expense > 0" class="mt-1 pt-1" :style="{ borderTop: '1px solid rgba(255,255,255,0.05)', fontSize: (9 * calendarZoom) + 'px' }">
+                    <span v-if="dayInfo.income > 0" class="text-green mr-1">+${{ fmtShort(dayInfo.income) }}</span>
+                    <span v-if="dayInfo.expense > 0" class="text-red">-${{ fmtShort(dayInfo.expense) }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div v-else class="text-center text-medium-emphasis py-8">
+                <v-progress-circular v-if="calendarLoading" indeterminate color="teal" />
+                <span v-else>No calendar data. Click Refresh to load.</span>
+              </div>
+
+              <div v-if="calendarData?.unscheduled?.length" class="mt-4">
+                <v-divider class="mb-3" />
+                <div class="text-subtitle-2 mb-2">
+                  <v-icon size="16" class="mr-1">mdi-calendar-question</v-icon>
+                  Unscheduled Items (no day set)
+                </div>
+                <v-row>
+                  <v-col v-for="item in calendarData.unscheduled" :key="'copy-unsched-' + item.id" cols="12" sm="6" md="4" lg="3">
+                    <v-chip :color="item.type === 'income' ? 'green' : (item.source === 'loan' ? 'purple' : 'red')" variant="tonal" size="small" class="mr-1 mb-1">
+                      <v-icon start size="14">{{ item.type === 'income' ? 'mdi-arrow-down' : 'mdi-arrow-up' }}</v-icon>
+                      {{ item.name }}: ${{ fmt(item.amount) }}
+                    </v-chip>
+                  </v-col>
+                </v-row>
+              </div>
+            </v-card>
+          </div>
+        </v-expand-transition>
+
+      </v-window-item>
+
+
 
       <!-- ═══════ SETTINGS TAB ═══════ -->
       <v-window-item value="settings">
@@ -799,7 +1341,16 @@
         <v-card-title>{{ editingEntry ? 'Edit Entry' : (entryForm.type === 'income' ? 'Add Income' : 'Add Expense') }}</v-card-title>
         <v-card-text>
           <v-text-field v-model="entryForm.name" label="Name" variant="outlined" density="compact" class="mb-2" />
-          <v-text-field v-model.number="entryForm.amount" label="Amount" type="number" prefix="$" variant="outlined" density="compact" class="mb-2" />
+          <v-switch v-if="entryForm.type === 'income'" :model-value="entryForm.amount_max != null" @update:model-value="v => entryForm.amount_max = v ? Math.max(entryForm.amount || 0, 1) : null" label="Range (min — max)" color="cyan" density="compact" class="mb-2" />
+          <v-row v-if="entryForm.type === 'income' && entryForm.amount_max != null" dense class="mb-2">
+            <v-col cols="6">
+              <v-text-field v-model.number="entryForm.amount" label="Min" type="number" prefix="$" variant="outlined" density="compact" />
+            </v-col>
+            <v-col cols="6">
+              <v-text-field v-model.number="entryForm.amount_max" label="Max" type="number" prefix="$" variant="outlined" density="compact" />
+            </v-col>
+          </v-row>
+          <v-text-field v-else v-model.number="entryForm.amount" label="Amount" type="number" prefix="$" variant="outlined" density="compact" class="mb-2" />
           <v-combobox
             v-model="entryForm.category"
             :items="entryForm.type === 'income' ? incomeCategoryOptions : expenseCategoryOptions"
@@ -968,6 +1519,98 @@
       </v-card>
     </v-dialog>
 
+    <!-- ═══════ NEXT MONTH DIALOG ═══════ -->
+    <v-dialog v-model="nextMonthDialog" max-width="400" persistent>
+      <v-card>
+        <v-card-title>
+          <v-icon color="amber" class="mr-2">mdi-calendar-arrow-right</v-icon>
+          Create Month
+        </v-card-title>
+        <v-card-text>
+          <div class="text-body-2 text-medium-emphasis mb-3">
+            Create a budget for a future month based on the current month's data.
+            You can edit entries and simulate different scenarios.
+          </div>
+          <div class="text-subtitle-2 mb-2">Target Month</div>
+          <div class="d-flex align-center ga-2 mb-4">
+            <v-btn icon="mdi-chevron-left" variant="text" size="small" @click="prevTargetMonth" />
+            <v-chip variant="tonal" color="amber" size="large" style="min-width: 140px; justify-content: center">
+              {{ formatMonthLabel(targetMonth) }}
+            </v-chip>
+            <v-btn icon="mdi-chevron-right" variant="text" size="small" @click="nextTargetMonth" />
+          </div>
+          <div class="text-caption text-medium-emphasis">
+            Source: <strong>{{ formatMonthLabel(currentMonth) }}</strong> — all recurring entries, loans, and assets will be copied.
+          </div>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="nextMonthDialog = false">Cancel</v-btn>
+          <v-btn color="amber" variant="flat" @click="createBudgetCopy" :loading="copyCreating" prepend-icon="mdi-crystal-ball">
+            Create
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- ═══════ EDIT COPY ENTRY DIALOG ═══════ -->
+    <v-dialog v-model="copyEntryDialog" max-width="500" persistent>
+      <v-card>
+        <v-card-title>{{ editingCopyEntry ? 'Edit Copy Entry' : (copyEntryForm.type === 'income' ? 'Add Income (Copy)' : 'Add Expense (Copy)') }}</v-card-title>
+        <v-card-text>
+          <v-text-field v-model="copyEntryForm.name" label="Name" variant="outlined" density="compact" class="mb-2" />
+          <v-switch v-if="copyEntryForm.type === 'income'" :model-value="copyEntryForm.amount_max != null" @update:model-value="v => copyEntryForm.amount_max = v ? Math.max(copyEntryForm.amount || 0, 1) : null" label="Range (min — max)" color="cyan" density="compact" class="mb-2" />
+          <v-row v-if="copyEntryForm.type === 'income' && copyEntryForm.amount_max != null" dense class="mb-2">
+            <v-col cols="6">
+              <v-text-field v-model.number="copyEntryForm.amount" label="Min" type="number" prefix="$" variant="outlined" density="compact" />
+            </v-col>
+            <v-col cols="6">
+              <v-text-field v-model.number="copyEntryForm.amount_max" label="Max" type="number" prefix="$" variant="outlined" density="compact" />
+            </v-col>
+          </v-row>
+          <v-text-field v-else v-model.number="copyEntryForm.amount" label="Amount" type="number" prefix="$" variant="outlined" density="compact" class="mb-2" />
+          <v-combobox
+            v-model="copyEntryForm.category"
+            :items="copyEntryForm.type === 'income' ? incomeCategoryOptions : expenseCategoryOptions"
+            label="Category"
+            variant="outlined"
+            density="compact"
+            class="mb-2"
+            clearable
+            prepend-inner-icon="mdi-tag-outline"
+          />
+          <div class="mb-3">
+            <div class="text-caption text-medium-emphasis mb-1">Frequency</div>
+            <v-btn-toggle v-model="copyEntryForm.frequency" mandatory color="teal" density="compact" class="w-100">
+              <v-btn value="once" size="small" class="flex-grow-1">One-time / Monthly</v-btn>
+              <v-btn value="daily" size="small" class="flex-grow-1">Daily</v-btn>
+              <v-btn value="weekly" size="small" class="flex-grow-1">Weekly</v-btn>
+            </v-btn-toggle>
+          </div>
+          <v-text-field
+            v-if="copyEntryForm.frequency !== 'daily'"
+            v-model.number="copyEntryForm.day_of_month"
+            label="Day of month (1-31, optional)"
+            type="number"
+            :min="1"
+            :max="31"
+            variant="outlined"
+            density="compact"
+            class="mb-2"
+            clearable
+          />
+          <v-textarea v-model="copyEntryForm.notes" label="Notes" variant="outlined" density="compact" rows="2" />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="copyEntryDialog = false">Cancel</v-btn>
+          <v-btn color="amber" variant="flat" @click="saveCopyEntry" :loading="copyEntrySaving">
+            {{ editingCopyEntry ? 'Save' : 'Add' }}
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- ═══════ DELETE CONFIRM ═══════ -->
     <v-dialog v-model="deleteDialog" max-width="400">
       <v-card>
@@ -1011,20 +1654,23 @@ const settingsStore = useSettingsStore()
 // ── State ───────────────────────────────────────────────────────────
 
 const loading = ref(false)
-const activeTab = ref('budget')
+const activeTab = ref(localStorage.getItem('budget_active_tab') || 'budget')
+watch(activeTab, (v) => localStorage.setItem('budget_active_tab', v || 'budget'))
 
 // Month
 const todayMonth = (() => {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 })()
-const currentMonth = ref(todayMonth)
+const currentMonth = ref(localStorage.getItem('budget_current_month') || todayMonth)
+watch(currentMonth, (v) => localStorage.setItem('budget_current_month', v))
 
 // Data
 const entries = ref([])
 const summary = ref(null)
 const accounts = ref([])
 const loans = ref([])
+const loansToPayOff = ref(new Set())
 // Sort helper: by frequency, day_of_month ascending, recurring items grouped
 function sortByDay(a, b) {
   const freqOrder = { once: 0, weekly: 1, daily: 2 }
@@ -1055,6 +1701,26 @@ function effectiveAmount(e) {
   return e.amount || 0
 }
 
+// Effective amount using amount_max (for range upper bound)
+function effectiveAmountMax(e) {
+  const amt = e.amount_max || e.amount || 0
+  const freq = e.frequency || 'once'
+  if (freq === 'daily') {
+    const [y, m] = currentMonth.value.split('-').map(Number)
+    const days = new Date(y, m, 0).getDate()
+    return amt * days
+  }
+  if (freq === 'weekly') {
+    const [y, m] = currentMonth.value.split('-').map(Number)
+    const days = new Date(y, m, 0).getDate()
+    const start = e.day_of_month || 1
+    let count = 0
+    for (let d = start; d <= days; d += 7) count++
+    return amt * count
+  }
+  return amt
+}
+
 // Entry background class based on paid status and frequency
 function entryBgClass(item, paidColor) {
   if (item.is_paid) return `bg-${paidColor}-darken-4`
@@ -1069,9 +1735,15 @@ const incomeEntries = computed(() => entries.value.filter(e => e.type === 'incom
 const expenseEntries = computed(() => entries.value.filter(e => e.type === 'expense').sort(sortByDay))
 const sortedLoans = computed(() => [...loans.value].sort((a, b) => (a.payment_date || 999) - (b.payment_date || 999)))
 const totalIncome = computed(() => incomeEntries.value.reduce((s, e) => s + effectiveAmount(e), 0))
+const totalIncomeMax = computed(() => {
+  const hasRange = incomeEntries.value.some(e => e.amount_max)
+  if (!hasRange) return null
+  return incomeEntries.value.reduce((s, e) => s + (e.amount_max ? effectiveAmountMax(e) : effectiveAmount(e)), 0)
+})
 const totalExpense = computed(() => expenseEntries.value.reduce((s, e) => s + effectiveAmount(e), 0))
 const totalAccountBalance = computed(() => accounts.value.reduce((s, a) => s + (a.balance || 0), 0))
 const totalDebt = computed(() => loans.value.reduce((s, l) => s + (l.remaining_debt || 0), 0))
+const totalToPayOff = computed(() => loans.value.filter(l => loansToPayOff.value.has(l.id)).reduce((s, l) => s + (l.remaining_debt || 0), 0))
 const totalLoanPayments = computed(() => loans.value.reduce((s, l) => s + (l.monthly_payment || 0), 0))
 const totalExpenseWithLoans = computed(() => totalExpense.value + totalLoanPayments.value)
 const hasEntriesForMonth = computed(() => entries.value.length > 0)
@@ -1089,7 +1761,7 @@ const incomeCategoryOptions = computed(() => {
 const entryDialog = ref(false)
 const editingEntry = ref(null)
 const entrySaving = ref(false)
-const entryForm = ref({ type: 'expense', name: '', amount: 0, category: '', is_recurring: true, is_paid: false, is_credit_card: false, frequency: 'once', day_of_month: null, notes: '' })
+const entryForm = ref({ type: 'expense', name: '', amount: 0, amount_max: null, category: '', is_recurring: true, is_paid: false, is_credit_card: false, frequency: 'once', day_of_month: null, notes: '' })
 
 // Account dialog
 const accountDialog = ref(false)
@@ -1134,7 +1806,7 @@ function formatCategory(cat) {
 // Delete dialog
 const deleteDialog = ref(false)
 const deleteTarget = ref(null)
-const deleteType = ref('')  // 'entry', 'account', 'loan', 'asset'
+const deleteType = ref('')  // 'entry', 'account', 'loan', 'asset', 'copy', 'month'
 const deleteConfirmText = ref('')
 const deleteLoading = ref(false)
 
@@ -1152,7 +1824,70 @@ watch(availableCash, (v) => localStorage.setItem('budget_available_cash', String
 // Calendar
 const calendarData = ref(null)
 const calendarLoading = ref(false)
-const calendarZoom = ref(1.0)
+const calendarZoom = ref(parseFloat(localStorage.getItem('budget_calendar_zoom')) || 1.0)
+watch(calendarZoom, (v) => localStorage.setItem('budget_calendar_zoom', String(v)))
+const showCalendar = ref(localStorage.getItem('budget_show_calendar') === 'true')
+watch(showCalendar, (v) => localStorage.setItem('budget_show_calendar', String(v)))
+
+// ── Budget Copy state ────────────────────────────────────────────
+const nextMonthDialog = ref(false)
+const targetMonth = ref('')
+const copyCreating = ref(false)
+const activeCopy = ref(null)
+const copySummary = ref(null)
+const copySummaryLoading = ref(false)
+const savedCopies = ref([])
+
+// Copy entry dialog
+const copyEntryDialog = ref(false)
+const editingCopyEntry = ref(null)
+const copyEntrySaving = ref(false)
+const copyEntryForm = ref({ type: 'expense', name: '', amount: 0, amount_max: null, category: '', frequency: 'once', day_of_month: null, notes: '' })
+
+// Computed: copy entries
+const copyIncomeEntries = computed(() =>
+  (activeCopy.value?.entries || []).filter(e => e.type === 'income').sort(sortByDay)
+)
+const copyExpenseEntries = computed(() =>
+  (activeCopy.value?.entries || []).filter(e => e.type === 'expense').sort(sortByDay)
+)
+
+function effectiveAmountForCopy(e) {
+  if (!activeCopy.value) return e.amount || 0
+  const freq = e.frequency || 'once'
+  const mk = activeCopy.value.source_month || currentMonth.value
+  const [y, m] = mk.split('-').map(Number)
+  const days = new Date(y, m, 0).getDate()
+  if (freq === 'daily') return (e.amount || 0) * days
+  if (freq === 'weekly') {
+    const start = e.day_of_month || 1
+    let count = 0
+    for (let d = start; d <= days; d += 7) count++
+    return (e.amount || 0) * count
+  }
+  return e.amount || 0
+}
+
+const copyTotalIncome = computed(() =>
+  copyIncomeEntries.value.reduce((s, e) => s + effectiveAmountForCopy(e), 0)
+)
+const copyTotalIncomeMax = computed(() => {
+  const hasRange = copyIncomeEntries.value.some(e => e.amount_max)
+  if (!hasRange) return null
+  return copyIncomeEntries.value.reduce((s, e) => {
+    if (e.amount_max) {
+      const orig = e.amount
+      e.amount = e.amount_max
+      const v = effectiveAmountForCopy(e)
+      e.amount = orig
+      return s + v
+    }
+    return s + effectiveAmountForCopy(e)
+  }, 0)
+})
+const copyTotalExpense = computed(() =>
+  copyExpenseEntries.value.reduce((s, e) => s + effectiveAmountForCopy(e), 0)
+)
 
 // Snackbar
 const snack = ref(false)
@@ -1187,18 +1922,6 @@ function formatMonthLabel(mk) {
   const [y, m] = mk.split('-')
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
   return `${months[parseInt(m) - 1]} ${y}`
-}
-
-function prevMonth() {
-  const [y, m] = currentMonth.value.split('-').map(Number)
-  if (m === 1) currentMonth.value = `${y - 1}-12`
-  else currentMonth.value = `${y}-${String(m - 1).padStart(2, '0')}`
-}
-
-function nextMonth() {
-  const [y, m] = currentMonth.value.split('-').map(Number)
-  if (m === 12) currentMonth.value = `${y + 1}-01`
-  else currentMonth.value = `${y}-${String(m + 1).padStart(2, '0')}`
 }
 
 // ── API calls ───────────────────────────────────────────────────────
@@ -1275,7 +1998,7 @@ watch(currentMonth, () => {
 
 function openAddEntry(type) {
   editingEntry.value = null
-  entryForm.value = { type, name: '', amount: 0, category: '', is_recurring: true, is_paid: false, is_credit_card: false, frequency: 'once', day_of_month: null, notes: '' }
+  entryForm.value = { type, name: '', amount: 0, amount_max: null, category: '', is_recurring: true, is_paid: false, is_credit_card: false, frequency: 'once', day_of_month: null, notes: '' }
   entryDialog.value = true
 }
 
@@ -1292,6 +2015,7 @@ async function saveEntry() {
       await api.patch(`/addons/budgeting/entries/${editingEntry.value.id}`, {
         name: entryForm.value.name,
         amount: entryForm.value.amount,
+        amount_max: entryForm.value.amount_max != null ? entryForm.value.amount_max : null,
         category: entryForm.value.category,
         is_recurring: entryForm.value.is_recurring,
         is_paid: entryForm.value.is_paid,
@@ -1499,10 +2223,20 @@ async function executeDelete() {
       await loadAccounts()
     } else if (deleteType.value === 'loan') {
       await api.delete(`/addons/budgeting/loans/${id}`)
-      await loadLoans()
+      await Promise.all([loadLoans(), loadSummary(), loadCalendar()])
     } else if (deleteType.value === 'asset') {
       await api.delete(`/addons/budgeting/assets/${id}`)
       await Promise.all([loadAssets(), loadAssetsSummary(), loadSummary()])
+    } else if (deleteType.value === 'copy') {
+      await api.delete(`/addons/budgeting/copies/${id}`)
+      await loadSavedCopies()
+      if (activeCopy.value?.id === id) {
+        closeCopy()
+      }
+    } else if (deleteType.value === 'month') {
+      const mk = deleteTarget.value?.month_key
+      await api.delete(`/addons/budgeting/months/${mk}`)
+      await Promise.all([loadEntries(), loadSummary(), loadCalendar()])
     }
     deleteDialog.value = false
     showSnack('Deleted successfully')
@@ -1530,10 +2264,217 @@ async function transitionMonth() {
   }
 }
 
+// ── Budget Copy CRUD ────────────────────────────────────────────────
+
+function openNextMonthDialog() {
+  // Default to next month from current
+  const [y, m] = currentMonth.value.split('-').map(Number)
+  if (m === 12) targetMonth.value = `${y + 1}-01`
+  else targetMonth.value = `${y}-${String(m + 1).padStart(2, '0')}`
+  nextMonthDialog.value = true
+}
+
+function prevTargetMonth() {
+  const [y, m] = targetMonth.value.split('-').map(Number)
+  if (m === 1) targetMonth.value = `${y - 1}-12`
+  else targetMonth.value = `${y}-${String(m - 1).padStart(2, '0')}`
+}
+
+function nextTargetMonth() {
+  const [y, m] = targetMonth.value.split('-').map(Number)
+  if (m === 12) targetMonth.value = `${y + 1}-01`
+  else targetMonth.value = `${y}-${String(m + 1).padStart(2, '0')}`
+}
+
+async function createBudgetCopy() {
+  copyCreating.value = true
+  try {
+    const name = `${formatMonthLabel(targetMonth.value)}`
+    const { data } = await api.post('/addons/budgeting/copies', null, {
+      params: { month_key: currentMonth.value, name },
+    })
+    activeCopy.value = data
+    localStorage.setItem('budget_active_copy_id', data.id)
+    nextMonthDialog.value = false
+    await loadCopySummary()
+    await loadSavedCopies()
+    activeTab.value = 'copy-' + data.id
+    showSnack(`${formatMonthLabel(targetMonth.value)} created`)
+  } catch (e) {
+    showSnack(e.response?.data?.detail || 'Failed to create month', 'error')
+  } finally {
+    copyCreating.value = false
+  }
+}
+
+async function createBudgetCopyDirect() {
+  copyCreating.value = true
+  try {
+    const { data } = await api.post('/addons/budgeting/copies', null, {
+      params: { month_key: currentMonth.value },
+    })
+    activeCopy.value = data
+    localStorage.setItem('budget_active_copy_id', data.id)
+    await loadCopySummary()
+    await loadSavedCopies()
+    activeTab.value = 'copy-' + data.id
+    showSnack('Budget copy created')
+  } catch (e) {
+    showSnack(e.response?.data?.detail || 'Failed to create copy', 'error')
+  } finally {
+    copyCreating.value = false
+  }
+}
+
+async function loadSavedCopies() {
+  try {
+    const { data } = await api.get('/addons/budgeting/copies')
+    savedCopies.value = data.items || []
+  } catch {
+    savedCopies.value = []
+  }
+}
+
+async function loadCopy(copyId) {
+  try {
+    const { data } = await api.get(`/addons/budgeting/copies/${copyId}`)
+    activeCopy.value = data
+    localStorage.setItem('budget_active_copy_id', copyId)
+    await loadCopySummary()
+    activeTab.value = 'copy-' + copyId
+  } catch (e) {
+    localStorage.removeItem('budget_active_copy_id')
+    showSnack('Failed to load copy', 'error')
+  }
+}
+
+async function loadCopySummary() {
+  if (!activeCopy.value) return
+  copySummaryLoading.value = true
+  try {
+    const { data } = await api.get(`/addons/budgeting/copies/${activeCopy.value.id}/summary`)
+    copySummary.value = data
+  } catch {
+    copySummary.value = null
+  } finally {
+    copySummaryLoading.value = false
+  }
+}
+
+function closeCopy() {
+  activeCopy.value = null
+  copySummary.value = null
+  localStorage.removeItem('budget_active_copy_id')
+  activeTab.value = 'budget'
+}
+
+function switchCopy(copyId) {
+  if (activeCopy.value && activeCopy.value.id === copyId) return
+  loadCopy(copyId)
+}
+
+function confirmDeleteCopy(copy) {
+  deleteTarget.value = copy
+  deleteType.value = 'copy'
+  deleteConfirmText.value = ''
+  deleteDialog.value = true
+}
+
+function confirmDeleteMonth() {
+  deleteTarget.value = { name: formatMonthLabel(currentMonth.value), month_key: currentMonth.value }
+  deleteType.value = 'month'
+  deleteConfirmText.value = ''
+  deleteDialog.value = true
+}
+
+async function toggleCopyPaid(item) {
+  if (!activeCopy.value) return
+  try {
+    await api.patch(`/addons/budgeting/copies/${activeCopy.value.id}/entries/${item.id}`, {
+      is_paid: !item.is_paid,
+    })
+    // Update local state
+    item.is_paid = !item.is_paid
+    await loadCopySummary()
+  } catch (e) {
+    showSnack('Failed to update', 'error')
+  }
+}
+
+function openAddCopyEntry(type) {
+  editingCopyEntry.value = null
+  copyEntryForm.value = { type, name: '', amount: 0, amount_max: null, category: '', frequency: 'once', day_of_month: null, notes: '' }
+  copyEntryDialog.value = true
+}
+
+function openEditCopyEntry(item) {
+  editingCopyEntry.value = item
+  copyEntryForm.value = { ...item }
+  copyEntryDialog.value = true
+}
+
+async function saveCopyEntry() {
+  if (!activeCopy.value) return
+  copyEntrySaving.value = true
+  try {
+    if (editingCopyEntry.value) {
+      await api.patch(`/addons/budgeting/copies/${activeCopy.value.id}/entries/${editingCopyEntry.value.id}`, {
+        name: copyEntryForm.value.name,
+        amount: copyEntryForm.value.amount,
+        amount_max: copyEntryForm.value.amount_max != null ? copyEntryForm.value.amount_max : null,
+        category: copyEntryForm.value.category,
+        frequency: copyEntryForm.value.frequency || 'once',
+        day_of_month: copyEntryForm.value.day_of_month || null,
+        notes: copyEntryForm.value.notes,
+      })
+      showSnack('Entry updated')
+    } else {
+      await api.post(`/addons/budgeting/copies/${activeCopy.value.id}/entries`, {
+        ...copyEntryForm.value,
+        is_recurring: false,
+        is_paid: false,
+        is_credit_card: false,
+        month_key: activeCopy.value.source_month,
+      })
+      showSnack('Entry added to copy')
+    }
+    copyEntryDialog.value = false
+    // Reload copy
+    await loadCopy(activeCopy.value.id)
+  } catch (e) {
+    showSnack(e.response?.data?.detail || 'Failed to save entry', 'error')
+  } finally {
+    copyEntrySaving.value = false
+  }
+}
+
+async function deleteCopyEntry(item) {
+  if (!activeCopy.value) return
+  try {
+    await api.delete(`/addons/budgeting/copies/${activeCopy.value.id}/entries/${item.id}`)
+    // Remove from local state
+    activeCopy.value.entries = activeCopy.value.entries.filter(e => e.id !== item.id)
+    await loadCopySummary()
+    showSnack('Entry removed from copy')
+  } catch (e) {
+    showSnack('Failed to remove entry', 'error')
+  }
+}
+
 // ── Init ────────────────────────────────────────────────────────────
 
-onMounted(() => {
+onMounted(async () => {
   refreshAll()
+  await loadSavedCopies()
+  // Restore active copy from localStorage
+  const savedCopyId = localStorage.getItem('budget_active_copy_id')
+  if (savedCopyId) {
+    try {
+      await loadCopy(savedCopyId)
+    } catch {
+      localStorage.removeItem('budget_active_copy_id')
+    }
+  }
 })
 </script>
 
