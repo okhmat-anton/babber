@@ -182,6 +182,21 @@
                 hide-details
               />
             </v-col>
+            <v-col cols="12" sm="6" md="3" lg="2">
+              <v-select
+                v-model="filterExcludeSource"
+                :items="excludeSourceOptions"
+                label="Exclude Sources"
+                variant="solo-filled"
+                density="compact"
+                flat
+                clearable
+                multiple
+                chips
+                closable-chips
+                hide-details
+              />
+            </v-col>
             <v-col cols="12" sm="6" md="4" lg="3">
               <v-select
                 v-model="filterState"
@@ -1581,6 +1596,7 @@ export default {
       seenHashes: (() => { try { const arr = JSON.parse(localStorage.getItem('re_seen') || '[]'); const obj = {}; arr.forEach(h => obj[h] = true); return obj } catch { return {} } })(),
       showHidden: localStorage.getItem('re_showHidden') === 'true',
       filterSource: (() => { try { return JSON.parse(localStorage.getItem('re_filterSource')) } catch { return null } })(),
+      filterExcludeSource: (() => { try { const v = JSON.parse(localStorage.getItem('re_filterExcludeSource')); return Array.isArray(v) ? v : [] } catch { return [] } })(),
       filterState: (() => { try { const v = JSON.parse(localStorage.getItem('re_filterState')); return Array.isArray(v) ? v : [] } catch { return [] } })(),
       filterMaxPrice: (() => { try { return JSON.parse(localStorage.getItem('re_filterMaxPrice')) } catch { return null } })(),
       filterMinAcreage: (() => { try { return JSON.parse(localStorage.getItem('re_filterMinAcreage')) } catch { return null } })(),
@@ -1697,6 +1713,9 @@ export default {
     filterSource(v) {
       localStorage.setItem('re_filterSource', JSON.stringify(v))
     },
+    filterExcludeSource(v) {
+      localStorage.setItem('re_filterExcludeSource', JSON.stringify(v || []))
+    },
     filterState(v) {
       localStorage.setItem('re_filterState', JSON.stringify(v || []))
     },
@@ -1756,11 +1775,15 @@ export default {
     totalPages() {
       return Math.max(1, Math.ceil(this.listingsTotal / this.perPage))
     },
+    excludeSourceOptions() {
+      return this.sources.map(s => ({ title: s.name, value: s.source_id }))
+    },
   },
 
   methods: {
     clearFilters() {
       this.filterSource = null
+      this.filterExcludeSource = []
       this.filterState = []
       this.filterMaxPrice = null
       this.filterMinAcreage = null
@@ -2014,6 +2037,7 @@ export default {
           exclude_hidden: !this.showHidden,
         }
         if (this.filterSource) params.source = this.filterSource
+        if (this.filterExcludeSource && this.filterExcludeSource.length) params.exclude_source = this.filterExcludeSource.join(',')
         if (this.filterState && this.filterState.length) params.state = this.filterState.join(',')
         if (this.filterMaxPrice) params.max_price = this.filterMaxPrice
         if (this.filterMinAcreage) params.min_acreage = this.filterMinAcreage
@@ -2201,6 +2225,7 @@ export default {
       try {
         const filters = {
           source: this.filterSource,
+          excludeSource: this.filterExcludeSource,
           state: this.filterState,
           maxPrice: this.filterMaxPrice,
           minAcreage: this.filterMinAcreage,
@@ -2220,6 +2245,7 @@ export default {
     applyPreset(preset) {
       const f = preset.filters || {}
       this.filterSource = f.source || null
+      this.filterExcludeSource = Array.isArray(f.excludeSource) ? f.excludeSource : []
       this.filterState = Array.isArray(f.state) ? f.state : []
       this.filterMaxPrice = f.maxPrice || null
       this.filterMinAcreage = f.minAcreage || null

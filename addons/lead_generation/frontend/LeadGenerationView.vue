@@ -289,6 +289,9 @@
               <v-col cols="6" sm="2">
                 <v-select v-model="parsedSourceFilter" :items="sourceNames" label="Source" variant="outlined" density="compact" clearable hide-details />
               </v-col>
+              <v-col cols="6" sm="3">
+                <v-select v-model="parsedExcludeSourceFilter" :items="sourceNames" label="Exclude Sources" variant="outlined" density="compact" clearable hide-details multiple chips closable-chips />
+              </v-col>
               <v-col cols="6" sm="2">
                 <v-select v-model="parsedStatusFilter" :items="parsedStatuses" label="Status" variant="outlined" density="compact" clearable hide-details />
               </v-col>
@@ -891,6 +894,7 @@ const parsedTotal = ref(0)
 const loadingParsed = ref(false)
 const parsedSearch = ref('')
 const parsedSourceFilter = ref(null)
+const parsedExcludeSourceFilter = ref([])
 const parsedStatusFilter = ref(null)
 
 // Job Sources
@@ -1343,6 +1347,7 @@ async function loadParsedJobs() {
     const params = { limit: 100, offset: 0 }
     if (parsedSearch.value) params.search = parsedSearch.value
     if (parsedSourceFilter.value) params.source = parsedSourceFilter.value
+    if (parsedExcludeSourceFilter.value && parsedExcludeSourceFilter.value.length) params.exclude_source = parsedExcludeSourceFilter.value.join(',')
     if (parsedStatusFilter.value) params.status = parsedStatusFilter.value
     const { data } = await api.get(`${API}/parsed-jobs`, { params })
     parsedJobs.value = data.items || []
@@ -1356,6 +1361,7 @@ async function loadMoreParsed() {
     const params = { limit: 100, offset: parsedJobs.value.length }
     if (parsedSearch.value) params.search = parsedSearch.value
     if (parsedSourceFilter.value) params.source = parsedSourceFilter.value
+    if (parsedExcludeSourceFilter.value && parsedExcludeSourceFilter.value.length) params.exclude_source = parsedExcludeSourceFilter.value.join(',')
     if (parsedStatusFilter.value) params.status = parsedStatusFilter.value
     const { data } = await api.get(`${API}/parsed-jobs`, { params })
     parsedJobs.value.push(...(data.items || []))

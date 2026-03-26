@@ -504,6 +504,7 @@ async def save_job_criterias(body: JobCriteriaCreate):
 async def list_parsed_jobs(
     search: Optional[str] = Query(None),
     source: Optional[str] = Query(None),
+    exclude_source: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
@@ -515,6 +516,10 @@ async def list_parsed_jobs(
         q["$or"] = [{"title": regex}, {"company": regex}, {"description": regex}]
     if source:
         q["source"] = source
+    if exclude_source:
+        excluded = [s.strip() for s in exclude_source.split(",") if s.strip()]
+        if excluded:
+            q["source"] = {"$nin": excluded}
     if status:
         q["status"] = status
 

@@ -3174,12 +3174,16 @@ async def _scrape_landandfarm(db, client: httpx.AsyncClient, states_filter: list
                     continue
 
                 card = link
-                for _ in range(6):
+                for _ in range(5):
                     if card.parent:
                         card = card.parent
                     else:
                         break
                 card_text = card.get_text(" ", strip=True)
+
+                # Skip homes/houses — only land
+                if re.search(r"\b(\d+\s*beds?|\d+\s*baths?|\d[\d,]*\s*sqft|\d[\d,]*\s*sq\s*ft|\bbedroom|\bbathroom)\b", card_text, re.I):
+                    continue
 
                 # Price and acreage: "$6,944 2 Acres"
                 price = None
@@ -3374,14 +3378,18 @@ async def _scrape_landsearch(db, client: httpx.AsyncClient, states_filter: list)
                     if not name:
                         continue
 
-                    # Walk up to find card container
+                    # Walk up to find card container (L4 = <article> individual card)
                     card = link
-                    for _ in range(6):
+                    for _ in range(4):
                         if card.parent:
                             card = card.parent
                         else:
                             break
                     card_text = card.get_text(" ", strip=True)
+
+                    # Skip homes/houses — only land
+                    if re.search(r"\b(\d+\s*beds?|\d+\s*baths?|\d[\d,]*\s*sqft|\d[\d,]*\s*sq\s*ft|\bbedroom|\bbathroom|\bhouse\b|\bhome\b)\b", card_text, re.I):
+                        continue
 
                     # Extract price: $174,999
                     price = None
@@ -3578,14 +3586,18 @@ async def _scrape_landwatch(db, client: httpx.AsyncClient, states_filter: list) 
                     if name.lower() in ("listing details page", "contact", "map", "video", "videomap"):
                         continue
 
-                    # Walk up to find card container
+                    # Walk up to find card container (L5 = individual card)
                     card = link
-                    for _ in range(8):
+                    for _ in range(5):
                         if card.parent:
                             card = card.parent
                         else:
                             break
                     card_text = card.get_text(" ", strip=True)
+
+                    # Skip homes/houses — only land
+                    if re.search(r"\b(\d+\s*beds?|\d+\s*baths?|\d[\d,]*\s*sqft|\d[\d,]*\s*sq\s*ft|\bbedroom|\bbathroom)\b", card_text, re.I):
+                        continue
 
                     # Price: "$3,335,000" or "$49,950"
                     price = None
@@ -4474,6 +4486,7 @@ async def get_zoning_values(db=Depends(get_mongodb)):
 @router.get("/listings")
 async def list_listings(
     source: Optional[str] = Query(None, description="Filter by source id"),
+    exclude_source: Optional[str] = Query(None, description="Exclude sources (comma-separated source ids)"),
     state: Optional[str] = Query(None, description="Filter by state name"),
     min_price: Optional[float] = Query(None),
     max_price: Optional[float] = Query(None),
@@ -4499,6 +4512,12 @@ async def list_listings(
 
     if source:
         query["source"] = source
+    if exclude_source:
+        excluded = [s.strip() for s in exclude_source.split(",") if s.strip()]
+        if excluded:
+            if "source" not in query:
+                query["source"] = {"$nin": excluded}
+            # If both source and exclude_source provided, source takes priority
     if state:
         # Support comma-separated list of states
         states = [s.strip() for s in state.split(",") if s.strip()]
